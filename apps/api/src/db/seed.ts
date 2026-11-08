@@ -1,6 +1,6 @@
 /**
  * Demo data: `pnpm db:seed`
- * Creates a nutrition clinic with services, customers and ~5 months of appointments/payments.
+ * Creates a nutrition clinic with services, customers and ~14 months of appointments/payments and two team members.
  * Login: demo@agenda.mx / demo1234
  */
 import { eq } from 'drizzle-orm';
@@ -45,13 +45,14 @@ async function main() {
     .returning();
   const tenantId = tenant!.id;
 
-  await db.insert(users).values({
-    tenantId,
-    email: 'demo@agenda.mx',
-    name: 'Dra. Ana López',
-    role: 'owner',
-    passwordHash: await hashPassword('demo1234'),
-  });
+  const team = await db
+    .insert(users)
+    .values([
+      { tenantId, email: 'demo@agenda.mx', name: 'Dra. Ana López', role: 'owner', passwordHash: await hashPassword('demo1234') },
+      { tenantId, email: 'pedro@agenda.mx', name: 'Nut. Pedro Salas', role: 'staff', passwordHash: await hashPassword('demo1234') },
+    ])
+    .returning();
+  const staffIds = team.map((u) => u.id);
 
   const svc = await db
     .insert(services)
@@ -67,6 +68,8 @@ async function main() {
     'Diego Morales', 'Valeria Cruz', 'Miguel Ángel Ruiz', 'Fernanda Ortiz', 'Andrés Flores',
     'Daniela Reyes', 'Jorge Castillo', 'Paola Jiménez', 'Ricardo Vargas', 'Camila Mendoza',
     'Luis Navarro', 'Gabriela Silva', 'Alejandro Rojas', 'Ximena Gutiérrez', 'Eduardo Peña',
+    'Mariana Aguilar', 'Roberto Medina', 'Natalia Herrera', 'Sergio Domínguez', 'Regina Vázquez',
+    'Héctor Castro', 'Andrea Romero', 'Iván Sandoval',
   ];
   const custs = await db
     .insert(customers)
@@ -76,7 +79,7 @@ async function main() {
         name,
         phone: `+52551000${String(1000 + i).slice(-4)}`,
         email: `${name.split(' ')[0]!.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')}${i}@example.com`,
-        createdAt: DateTime.now().minus({ days: 150 - i * 6 }).toJSDate(),
+        createdAt: DateTime.now().minus({ days: 420 - i * 13 }).toJSDate(),
       })),
     )
     .returning();
@@ -104,6 +107,7 @@ async function main() {
           status,
           priceCents: service.priceCents,
           source: rand() > 0.6 ? 'online' : 'staff',
+          staffUserId: pick(staffIds),
           reminderSentAt: start.minus({ hours: 24 }).toJSDate(),
         });
         first = false;
@@ -133,6 +137,7 @@ async function main() {
         status: rand() > 0.5 ? 'confirmed' : 'scheduled',
         priceCents: service.priceCents,
         source: rand() > 0.5 ? 'online' : 'staff',
+        staffUserId: pick(staffIds),
       });
     }
   }

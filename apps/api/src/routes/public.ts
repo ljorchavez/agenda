@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
   computeDepositCents,
@@ -14,6 +14,7 @@ import { getDb } from '../db/client.js';
 import { appointments, customers, services, tenants, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
+import { manageToken } from '../lib/crypto.js';
 import { apiBaseUrl, createOnlinePayment, tenantMpToken } from '../lib/online-payments.js';
 
 /**
@@ -64,6 +65,7 @@ export async function computeSlots(
   durationMin: number,
   date: string,
   now: DateTime = DateTime.now(),
+  opts: { excludeId?: string } = {},
 ): Promise<string[]> {
   const { hours } = tenant.settings;
   const day = DateTime.fromISO(date, { zone: tenant.timezone });
@@ -84,6 +86,7 @@ export async function computeSlots(
         inArray(appointments.status, ['scheduled', 'confirmed']),
         lt(appointments.startsAt, close.toJSDate()),
         gt(appointments.endsAt, open.toJSDate()),
+        opts.excludeId ? ne(appointments.id, opts.excludeId) : undefined,
       ),
     );
 
@@ -171,6 +174,7 @@ publicRoutes.post('/public/:slug/bookings', async (c) => {
     endsAt: result.appt.endsAt.toISOString(),
     serviceName: service.name,
     businessName: tenant.name,
+    managePath: `/c/${manageToken(result.appt.id)}`,
     deposit: null,
   };
 

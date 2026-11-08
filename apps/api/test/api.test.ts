@@ -233,5 +233,98 @@ d('API (integration)', () => {
     expect(del.status).toBe(200);
     expect(del.body.mercadoPago.connected).toBe(false);
   });
-});
 
+  it('reports: ranges, filters, comparison and tenant isolation', async () => {
+    const today = DateTime.now().setZone('America/Mexico_City');
+    const from = today.minus({ days: 29 }).toISODate();
+    const to = today.toISODate();
+    const r = await call('GET', `/reports?from=${from}&to=${to}`, undefined, a.token);
+    expect(r.status).toBe(200);
+    expect(r.body.granularity).toBe('day');
+    expect(r.body.series).toHaveLength(30);
+    expect(r.body.kpis.revenueCents).toBeGreaterThanOrEqual(20000);
+    expect(r.body.kpis.completed).toBeGreaterThanOrEqual(1);
+    expect(r.body.byService.find((s: { name: string }) => s.name === 'Corte')).toBeTruthy();
+    expect(r.body.byMethod.find((m: { method: string }) => m.method === 'cash')?.revenueCents).toBeGreaterThanOrEqual(20000);
+    expect(r.body.previousRange.to).toBe(today.minus({ days: 30 }).toISODate());
+    const seriesRevenue = (r.body.series as { revenueCents: number }[]).reduce((acc, p) => acc + p.revenueCents, 0);
+    expect(seriesRevenue).toBe(r.body.kpis.revenueCents);
+
+    const weekly = await call('GET', `/reports?from=${from}&to=${to}&granularity=week`, undefined, a.token);
+    expect(weekly.body.series.length).toBeGreaterThanOrEqual(5);
+    expect(weekly.body.series.length).toBeLessThanOrEqual(6);
+
+    const svc = (await call('GET', '/services', undefined, a.token)).body[0];
+    const bySvc = await call('GET', `/reports?from=${from}&to=${to}&serviceId=${svc.id}`, undefined, a.token);
+    expect(bySvc.body.kpis.revenueCents).toBe(r.body.kpis.revenueCents);
+    const other = await call('GET', `/reports?from=${from}&to=${to}&serviceId=00000000-0000-4000-8000-000000000000`, undefined, a.token);
+    expect(other.body.kpis.revenueCents).toBe(0);
+    expect(other.body.kpis.appointments).toBe(0);
+    const online = await call('GET', `/reports?from=${from}&to=${to}&source=online`, undefined, a.token);
+    expect(online.body.kpis.revenueCents).toBe(0); // the paid appointment was booked by staff
+
+    expect((await call('GET', `/reports?from=${to}&to=${from}`, undefined, a.token)).status).toBe(422);
+    expect((await call('GET', `/reports?from=2000-01-01&to=${to}`, undefined, a.token)).status).toBe(422);
+    expect((await call('GET', `/reports?from=${from}&to=${to}`)).status).toBe(401);
+
+    const rb = await call('GET', `/reports?from=${from}&to=${to}`, undefined, b.token);
+    expect(rb.body.kpis.revenueCents).toBe(0);
+    expect(rb.body.byService).toHaveLength(0);
+  });
+
+  it('self-service link: view, reschedule, deadline and cancel', async () => {
+    const pub = await call('GET', '/public/negocio-a');
+    const svc = pub.body.services[0];
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 5 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const avail = await call('GET', `/public/negocio-a/availability?serviceId=${svc.id}&date=${day.toISODate()}`);
+    const booking = await call('POST', '/public/negocio-a/bookings', { serviceId: svc.id, startsAt: avail.body.slots[4], name: 'Ana Reagenda', phone: '5543214321' });
+    expect(booking.status).toBe(201);
+    const path: string = booking.body.managePath;
+    expect(path).toMatch(/^\/c\/[0-9a-f-]{36}\.[A-Za-z0-9_-]{24}$/);
+    const token = path.slice(3);
+
+    // Staff sees the same link
+    const list = await call('GET', `/appointments?from=${day.startOf('day').toISO()}&to=${day.endOf('day').toISO()}`, undefined, a.token);
+    expect(list.body.find((x: { id: string }) => x.id === booking.body.id)?.managePath).toBe(path);
+
+    const view = await call('GET', `/public/manage/${token}`);
+    expect(view.status).toBe(200);
+    expect(view.body.appointment.customerFirstName).toBe('Ana');
+    expect(JSON.stringify(view.body)).not.toContain('5543214321');
+    expect(view.body.canReschedule).toBe(true);
+    expect((await call('GET', `/public/manage/${token.slice(0, -2)}xx`)).status).toBe(404);
+
+    let next = day.plus({ days: 1 });
+    while (next.weekday === 7) next = next.plus({ days: 1 });
+    const slots = await call('GET', `/public/manage/${token}/availability?date=${next.toISODate()}`);
+    expect(slots.body.slots.length).toBeGreaterThan(0);
+    const target = slots.body.slots[1];
+    const moved = await call('POST', `/public/manage/${token}/reschedule`, { startsAt: target });
+    expect(moved.status).toBe(200);
+    expect(new Date(moved.body.appointment.startsAt).getTime()).toBe(new Date(target).getTime());
+    const appt = (await call('GET', `/appointments?from=${next.startOf('day').toISO()}&to=${next.endOf('day').toISO()}`, undefined, a.token)).body.find((x: { id: string }) => x.id === booking.body.id);
+    expect(appt.notes).toContain('Reagendada por el cliente');
+
+    // Taken slot is rejected
+    const other = await call('POST', '/public/negocio-a/bookings', { serviceId: svc.id, startsAt: slots.body.slots[3], name: 'Otro', phone: '5543214399' });
+    expect(other.status).toBe(201);
+    expect((await call('POST', `/public/manage/${token}/reschedule`, { startsAt: slots.body.slots[3] })).status).toBe(409);
+
+    // Deadline: with 7 days notice required the change is refused
+    const me = await call('GET', '/auth/me', undefined, a.token);
+    const base = me.body.tenant.settings;
+    expect(base.selfService).toEqual({ rescheduleEnabled: true, cancelEnabled: true, minHoursNotice: 24 });
+    await call('PATCH', '/tenant', { settings: { ...base, selfService: { ...base.selfService, minHoursNotice: 168 } } }, a.token);
+    const late = await call('GET', `/public/manage/${token}`);
+    expect(late.body.reason).toBe('too_late');
+    expect((await call('POST', `/public/manage/${token}/cancel`)).body.error).toBe('too_late');
+    await call('PATCH', '/tenant', { settings: base }, a.token);
+
+    const cancelled = await call('POST', `/public/manage/${token}/cancel`);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.appointment.status).toBe('cancelled');
+    expect((await call('POST', `/public/manage/${token}/cancel`)).status).toBe(422);
+    expect((await call('POST', `/public/manage/${token}/reschedule`, { startsAt: target })).status).toBe(422);
+  });
+});

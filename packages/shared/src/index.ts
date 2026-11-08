@@ -160,8 +160,30 @@ export const tenantSettingsSchema = z.object({
   reminderHoursBefore: z.number().int().min(1).max(72),
   onlineBookingEnabled: z.boolean(),
   payments: paymentSettingsSchema.optional(),
+  selfService: z
+    .object({
+      /** Customers can reschedule their own appointment from a private link */
+      rescheduleEnabled: z.boolean(),
+      /** Customers can cancel their own appointment from the same link */
+      cancelEnabled: z.boolean(),
+      /** Minimum notice (hours before the appointment) to change it online */
+      minHoursNotice: z.number().int().min(0).max(168),
+    })
+    .optional(),
 });
 export type TenantSettings = z.infer<typeof tenantSettingsSchema>;
+export type SelfServiceSettings = NonNullable<TenantSettings['selfService']>;
+
+export const DEFAULT_SELF_SERVICE: SelfServiceSettings = {
+  rescheduleEnabled: true,
+  cancelEnabled: true,
+  minHoursNotice: 24,
+};
+
+/** Self-service settings with defaults filled in (older tenants lack the key). */
+export function selfServiceOf(settings: Pick<TenantSettings, 'selfService'> | null | undefined): SelfServiceSettings {
+  return { ...DEFAULT_SELF_SERVICE, ...(settings?.selfService ?? {}) };
+}
 
 export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   hours: DEFAULT_BUSINESS_HOURS,
@@ -169,6 +191,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   reminderHoursBefore: 24,
   onlineBookingEnabled: true,
   payments: DEFAULT_PAYMENT_SETTINGS,
+  selfService: DEFAULT_SELF_SERVICE,
 };
 
 // ---------- Auth ----------
@@ -381,6 +404,8 @@ export interface AppointmentDto {
   source: AppointmentSource;
   notes: string | null;
   paidCents: number;
+  /** Private customer link to reschedule/cancel: /c/<token> */
+  managePath: string;
 }
 
 export interface PaymentDto {
@@ -420,6 +445,91 @@ export interface DashboardDto {
   upcoming: AppointmentDto[];
 }
 
+// ---------- Reports (historical, filterable) ----------
+
+export const REPORT_GRANULARITIES = ['day', 'week', 'month'] as const;
+export type ReportGranularity = (typeof REPORT_GRANULARITIES)[number];
+
+export const reportQuerySchema = z
+  .object({
+    /** Local dates (tenant time zone), both inclusive */
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    granularity: z.enum(REPORT_GRANULARITIES).optional(),
+    serviceId: z.string().uuid().optional(),
+    staffUserId: z.string().uuid().optional(),
+    source: z.enum(APPOINTMENT_SOURCES).optional(),
+  })
+  .refine((q) => q.from <= q.to, { message: 'from_after_to', path: ['from'] });
+export type ReportQuery = z.infer<typeof reportQuerySchema>;
+
+export interface ReportKpis {
+  revenueCents: number;
+  payments: number;
+  avgTicketCents: number;
+  appointments: number;
+  completed: number;
+  cancelled: number;
+  noShows: number;
+  noShowRate: number;
+  cancellationRate: number;
+  newCustomers: number;
+  activeCustomers: number;
+  returningCustomers: number;
+  onlineShare: number;
+}
+
+export interface ReportPoint {
+  /** Bucket start as local date YYYY-MM-DD */
+  bucket: string;
+  revenueCents: number;
+  appointments: number;
+  completed: number;
+  noShows: number;
+  cancelled: number;
+  newCustomers: number;
+}
+
+export interface ReportDto {
+  range: { from: string; to: string };
+  previousRange: { from: string; to: string };
+  granularity: ReportGranularity;
+  kpis: ReportKpis;
+  previousKpis: ReportKpis;
+  series: ReportPoint[];
+  previousSeries: ReportPoint[];
+  byService: { id: string; name: string; count: number; revenueCents: number }[];
+  byMethod: { method: PaymentMethod; count: number; revenueCents: number }[];
+  bySource: { source: AppointmentSource; count: number }[];
+  byWeekday: { weekday: number; count: number }[];
+  /** weekday 1-7 x local hour 0-23 */
+  heatmap: { weekday: number; hour: number; count: number }[];
+  topCustomers: { id: string; name: string; visits: number; totalSpentCents: number }[];
+}
+
+// ---------- Customer self-service (manage link) ----------
+
+export const manageRescheduleSchema = z.object({ startsAt: z.string().datetime({ offset: true }) });
+
+export interface ManageAppointmentDto {
+  business: { name: string; slug: string; timezone: string; locale: Locale; phone: string | null; hours: BusinessHours };
+  appointment: {
+    id: string;
+    serviceName: string;
+    durationMin: number;
+    startsAt: string;
+    status: AppointmentStatus;
+    customerFirstName: string;
+  };
+  canReschedule: boolean;
+  canCancel: boolean;
+  /** Changes allowed until this instant; null when not allowed at all */
+  changeDeadline: string | null;
+  minHoursNotice: number;
+  /** Why changes are not allowed, if they aren't */
+  reason: null | 'disabled' | 'too_late' | 'not_active' | 'past';
+}
+
 export interface PublicBusinessDto {
   name: string;
   slug: string;
@@ -439,6 +549,8 @@ export interface PublicBookingResult {
   endsAt: string;
   serviceName: string;
   businessName: string;
+  /** Private path (/c/<token>) where the customer can reschedule or cancel */
+  managePath: string;
   deposit: null | {
     amountCents: number;
     /** Mercado Pago checkout (card) or SPEI instructions page */

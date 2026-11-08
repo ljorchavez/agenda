@@ -5,6 +5,7 @@ import {
   BUSINESS_TYPES,
   isValidClabe,
   paymentSettingsOf,
+  selfServiceOf,
   type SessionUser,
   type TenantDto,
   type TenantSettings,
@@ -24,7 +25,11 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<TenantSettings>({
     ...tenant!.settings,
     payments: paymentSettingsOf(tenant!.settings),
+    selfService: selfServiceOf(tenant!.settings),
   });
+  const selfService = settings.selfService!;
+  const setSelfService = (patch: Partial<typeof selfService>) =>
+    setSettings((s) => ({ ...s, selfService: { ...s.selfService!, ...patch } }));
   const payments = settings.payments!;
   const invalid = payments.transfer.clabe !== '' && !isValidClabe(payments.transfer.clabe);
   const [saved, setSaved] = useState(false);
@@ -107,6 +112,23 @@ export function SettingsPage() {
             <input type="checkbox" disabled={!isOwner} checked={settings.onlineBookingEnabled} onChange={(e) => setSettings({ ...settings, onlineBookingEnabled: e.target.checked })} />
             {t('settings.onlineBookingEnabled')}
           </label>
+
+          <h2 className="pt-2 font-semibold">{t('settings.selfService')}</h2>
+          <p className="text-sm text-slate-500">{t('settings.selfServiceHelp')}</p>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!isOwner} checked={selfService.rescheduleEnabled} onChange={(e) => setSelfService({ rescheduleEnabled: e.target.checked })} />
+            {t('settings.rescheduleEnabled')}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!isOwner} checked={selfService.cancelEnabled} onChange={(e) => setSelfService({ cancelEnabled: e.target.checked })} />
+            {t('settings.cancelEnabled')}
+          </label>
+          {(selfService.rescheduleEnabled || selfService.cancelEnabled) && (
+            <div className="max-w-56">
+              <label className="label">{t('settings.minHoursNotice')}</label>
+              <input type="number" min={0} max={168} disabled={!isOwner} className="input" value={selfService.minHoursNotice} onChange={(e) => setSelfService({ minHoursNotice: Math.max(0, Math.min(168, Number(e.target.value) || 0)) })} />
+            </div>
+          )}
 
           <h2 className="pt-2 font-semibold">{t('settings.reminders')}</h2>
           <label className="flex items-center gap-2 text-sm">

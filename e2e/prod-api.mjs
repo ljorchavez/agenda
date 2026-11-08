@@ -78,7 +78,7 @@ r = await call('GET', '/api/services', null, token);
 check('services list (3 seeded)', r.status === 200 && r.body?.length === 3, r.body?.length);
 const services = r.body ?? [];
 r = await call('GET', '/api/customers?sort=totalSpent', null, token);
-check('customers list (20 seeded)', r.status === 200 && r.body?.total === 20, r.body?.total);
+check('customers list (28 seeded)', r.status === 200 && r.body?.total === 28, r.body?.total);
 const top = r.body?.items?.[0];
 check('customer stats computed', top && top.visits > 0 && top.totalSpentCents > 0, JSON.stringify(top));
 check('sort by totalSpent desc', r.body?.items?.[0]?.totalSpentCents >= r.body?.items?.[1]?.totalSpentCents);
@@ -208,6 +208,75 @@ if (process.env.CRON_SECRET) {
   r = await call('GET', '/api/cron/reminders', null, null, { authorization: `Bearer ${process.env.CRON_SECRET}` });
   check('cron with secret runs reminders', r.status === 200 && typeof r.body?.processed === 'number', r.text);
   results.push(`INFO  reminders processed=${r.body?.processed} sent(dry-run)=${r.body?.sent}`);
+}
+
+// ---- Historical reports
+{
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  const yearAgo = new Date(Date.now() - 364 * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  let t0 = Date.now();
+  r = await call('GET', `/api/reports?from=${yearAgo}&to=${today}`, null, token);
+  const ms = Date.now() - t0;
+  check('reports: 12 months, monthly buckets', r.status === 200 && r.body?.granularity === 'month' && r.body?.series?.length >= 12, r.text.slice(0, 200));
+  check('reports: 12 months has a year of history', (r.body?.series ?? []).filter((p) => p.revenueCents > 0).length >= 11, JSON.stringify(r.body?.series?.map((p) => p.revenueCents)));
+  check('reports: series revenue adds up to KPI', (r.body?.series ?? []).reduce((a, p) => a + p.revenueCents, 0) === r.body?.kpis?.revenueCents);
+  check('reports: methods add up to revenue', (r.body?.byMethod ?? []).reduce((a, m) => a + m.revenueCents, 0) === r.body?.kpis?.revenueCents);
+  check('reports: previous period compared', r.body?.previousKpis && r.body?.previousSeries?.length > 0);
+  check('reports: heatmap and services present', r.body?.heatmap?.length > 0 && r.body?.byService?.length === 3);
+  check('reports: responds in < 5s', ms < 5000, `${ms}ms`);
+  results.push(`INFO  reports 12m took ${ms}ms, revenue=${r.body?.kpis?.revenueCents / 100} MXN`);
+  const total = r.body?.kpis?.revenueCents ?? 0;
+  const svcs = r.body?.byService ?? [];
+  let sum = 0;
+  for (const s of svcs) {
+    const x = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&serviceId=${s.id}`, null, token);
+    sum += x.body?.kpis?.revenueCents ?? 0;
+  }
+  check('reports: per-service revenue partitions the total', sum === total, `${sum} vs ${total}`);
+  const on = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&source=online`, null, token);
+  const off = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&source=staff`, null, token);
+  check('reports: online + front desk = all appointments', on.body.kpis.appointments + off.body.kpis.appointments === r.body.kpis.appointments);
+  const users = await call('GET', '/api/users', null, token);
+  check('demo has 2 team members', users.body?.length === 2, users.text);
+  const st = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&staffUserId=${users.body?.[1]?.id}`, null, token);
+  check('reports: staff filter narrows results', st.body.kpis.appointments > 0 && st.body.kpis.appointments < r.body.kpis.appointments);
+  const d = await call('GET', `/api/reports?from=${today}&to=${today}&granularity=day`, null, token);
+  check('reports: single day works', d.status === 200 && d.body.series.length === 1, d.text.slice(0, 200));
+  check('reports: bad range -> 422', (await call('GET', `/api/reports?from=${today}&to=${yearAgo}`, null, token)).status === 422);
+  check('reports: requires auth', (await call('GET', `/api/reports?from=${yearAgo}&to=${today}`)).status === 401);
+}
+
+// ---- Customer self-service link (reschedule / cancel)
+{
+  const pub = await call('GET', '/api/public/nutricion-demo');
+  const svc2 = pub.body.services[0];
+  let slots2 = [];
+  let day2;
+  for (let i = 8; i < 16 && !slots2.length; i++) {
+    day2 = new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    slots2 = (await call('GET', `/api/public/nutricion-demo/availability?serviceId=${svc2.id}&date=${day2}`)).body?.slots ?? [];
+  }
+  const b = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svc2.id, startsAt: slots2[0], name: 'Reagenda QA', phone: '5511990011' });
+  check('booking returns private manage link', b.status === 201 && /^\/c\/[0-9a-f-]{36}\.[\w-]{24}$/.test(b.body?.managePath ?? ''), b.text);
+  const tok = (b.body?.managePath ?? '/c/x').slice(3);
+  let m = await call('GET', `/api/public/manage/${tok}`);
+  check('manage page loads, can reschedule & cancel', m.status === 200 && m.body.canReschedule && m.body.canCancel, m.text);
+  check('manage page does not leak customer phone', !m.text.includes('5511990011'));
+  check('tampered manage token -> 404', (await call('GET', `/api/public/manage/${tok.slice(0, -3)}abc`)).status === 404);
+  const n = await call('GET', `/api/public/manage/${tok}/availability?date=${day2}`);
+  check('manage availability excludes current slot', n.status === 200 && !n.body.slots.includes(slots2[0]) && n.body.slots.length > 0);
+  const target = n.body.slots[n.body.slots.length - 1];
+  m = await call('POST', `/api/public/manage/${tok}/reschedule`, { startsAt: target });
+  check('customer reschedules', m.status === 200 && new Date(m.body.appointment.startsAt).getTime() === new Date(target).getTime(), m.text);
+  const back = await call('GET', `/api/public/nutricion-demo/availability?serviceId=${svc2.id}&date=${day2}`);
+  check('old slot is free again', back.body.slots.includes(slots2[0]));
+  check('reschedule to past -> 409', (await call('POST', `/api/public/manage/${tok}/reschedule`, { startsAt: '2020-01-01T10:00:00-06:00' })).status === 409);
+  m = await call('POST', `/api/public/manage/${tok}/cancel`);
+  check('customer cancels', m.status === 200 && m.body.appointment.status === 'cancelled', m.text);
+  check('cancel twice -> 422', (await call('POST', `/api/public/manage/${tok}/cancel`)).status === 422);
+  const appts = await call('GET', `/api/appointments?from=${encodeURIComponent(new Date(target).toISOString())}&to=${encodeURIComponent(new Date(new Date(target).getTime() + 3600e3).toISOString())}`, null, token);
+  const mine = appts.body?.find?.((a) => a.managePath === b.body.managePath);
+  check('business sees the change in the calendar with a note', mine?.status === 'cancelled' && /Reagendada por el cliente/.test(mine?.notes ?? '') && /Cancelada por el cliente/.test(mine?.notes ?? ''), JSON.stringify(mine));
 }
 
 console.log(results.join('\n'));

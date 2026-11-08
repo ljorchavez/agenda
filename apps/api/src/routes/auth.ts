@@ -21,9 +21,13 @@ import { requireAuth, requireOwner, type AppEnv } from '../middleware/auth.js';
 
 export const authRoutes = new Hono<AppEnv>();
 
+/** Slugs that collide with public API paths (/api/public/manage/...). */
+const RESERVED_SLUGS = new Set(['manage', 'api', 'admin']);
+
 async function uniqueSlug(base: string): Promise<string> {
   const db = getDb();
-  const root = slugify(base) || 'negocio';
+  const slug = slugify(base) || 'negocio';
+  const root = RESERVED_SLUGS.has(slug) ? `${slug}-negocio` : slug;
   for (let i = 0; i < 20; i++) {
     const candidate = i === 0 ? root : `${root}-${Math.random().toString(36).slice(2, 6)}`;
     const existing = await db.query.tenants.findFirst({ where: eq(tenants.slug, candidate) });

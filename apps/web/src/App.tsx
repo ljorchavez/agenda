@@ -9,7 +9,9 @@ import { CustomerDetailPage } from './pages/CustomerDetail';
 import { CustomersPage } from './pages/Customers';
 import { DashboardPage } from './pages/Dashboard';
 import { LoginPage, RegisterPage } from './pages/Auth';
+import { ManagePage } from './pages/Manage';
 import { PaymentsPage } from './pages/Payments';
+import { ReportsPage } from './pages/Reports';
 import { ServicesPage } from './pages/Services';
 import { SettingsPage } from './pages/Settings';
 
@@ -28,6 +30,8 @@ export function App() {
       <Route path="/register" element={<RegisterPage />} />
       {/* Public booking page for end customers */}
       <Route path="/b/:slug" element={<BookingPage />} />
+      {/* Private link for a customer to reschedule/cancel their appointment */}
+      <Route path="/c/:token" element={<ManagePage />} />
       <Route
         path="/"
         element={
@@ -42,6 +46,7 @@ export function App() {
         <Route path="customers/:id" element={<CustomerDetailPage />} />
         <Route path="services" element={<ServicesPage />} />
         <Route path="payments" element={<PaymentsPage />} />
+        <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

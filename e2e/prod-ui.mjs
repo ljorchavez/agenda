@@ -54,6 +54,18 @@ async function run(viewport, label) {
   await page.getByRole('heading', { name: 'Pagos' }).waitFor();
   check(`[${label}] payments page`, await page.getByText('Cobrado').isVisible());
 
+  await page.goto(`${BASE}/reports`);
+  await page.getByRole('heading', { name: 'Reportes' }).waitFor();
+  await page.getByText('Ingresos cobrados').waitFor({ timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  check(`[${label}] reports: KPIs`, await page.getByText('Ingresos cobrados').isVisible());
+  check(`[${label}] reports: charts render`, (await page.locator('.recharts-bar-rectangle').count()) > 10);
+  check(`[${label}] reports: heatmap`, (await page.locator('td[title]').count()) > 20);
+  await page.locator('select').first().selectOption('last12Months');
+  await page.waitForTimeout(2500);
+  check(`[${label}] reports: 12-month view`, page.url().includes('p=last12Months') && (await page.locator('.recharts-bar-rectangle').count()) > 10);
+  await page.screenshot({ path: `${out}/${label}-reports.png`, fullPage: true });
+
   await page.goto(`${BASE}/settings`);
   await page.getByRole('heading', { name: 'Configuración' }).waitFor();
   check(`[${label}] settings page`, await page.getByText('Tu página de reservas').isVisible());
@@ -89,6 +101,22 @@ async function run(viewport, label) {
     await page.getByText('Anticipo pendiente').waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] booking: deposit box with CLABE`, await page.getByText('012180001234567899').isVisible());
     await page.screenshot({ path: `${out}/${label}-booking-done.png`, fullPage: true });
+    await page.getByText('Administrar mi cita').click();
+    await page.getByText('Cambiar fecha u hora').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] manage page opens`, await page.getByText('Cambiar fecha u hora').isVisible());
+    await page.getByText('Cambiar fecha u hora').click();
+    const mdays = page.locator('section:has-text("Elige el día") button');
+    await mdays.nth(7).click();
+    await page.waitForTimeout(1500);
+    await page.locator('section:has-text("Elige la hora") button').first().click();
+    await page.getByRole('button', { name: 'Confirmar cambio' }).click();
+    await page.getByText('Tu cita se cambió').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] customer reschedules from link`, await page.getByText('Tu cita se cambió').isVisible());
+    await page.screenshot({ path: `${out}/${label}-manage.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Cancelar cita' }).click();
+    await page.getByRole('button', { name: 'Sí, cancelar' }).click();
+    await page.getByText('Tu cita fue cancelada').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] customer cancels from link`, await page.getByText('Tu cita fue cancelada').isVisible());
   }
 
   // logout

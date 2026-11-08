@@ -8,6 +8,7 @@ const NAV = [
   { to: '/customers', key: 'customers', icon: '☺' },
   { to: '/services', key: 'services', icon: '✂' },
   { to: '/payments', key: 'payments', icon: '$' },
+  { to: '/reports', key: 'reports', icon: '▤' },
   { to: '/settings', key: 'settings', icon: '⚙' },
 ] as const;
 
@@ -88,18 +89,18 @@ export function Layout() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-slate-200 bg-white md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-slate-200 bg-white md:hidden">
         {NAV.map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
             end={'end' in n}
             className={({ isActive }) =>
-              `flex flex-col items-center py-2 text-[11px] ${isActive ? 'text-brand-700' : 'text-slate-500'}`
+              `flex min-w-0 flex-col items-center py-2 text-[10px] ${isActive ? 'text-brand-700' : 'text-slate-500'}`
             }
           >
             <span className="text-base">{n.icon}</span>
-            {t(`nav.${n.key}`)}
+            <span className="w-full truncate px-0.5 text-center">{t(`navShort.${n.key}`)}</span>
           </NavLink>
         ))}
       </nav>

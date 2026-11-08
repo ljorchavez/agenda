@@ -25,7 +25,8 @@
     "services": "Servicios",
     "payments": "Pagos",
     "settings": "Configuración",
-    "logout": "Cerrar sesión"
+    "logout": "Cerrar sesión",
+    "reports": "Reportes"
   },
   "auth": {
     "tagline": "Agenda, recordatorios por WhatsApp y cobros para tu negocio.",
@@ -101,7 +102,8 @@
     "upcoming": "Próximas citas",
     "noUpcoming": "No hay citas próximas",
     "visits": "{{count}} visitas",
-    "noData": "Aún no hay datos en este periodo"
+    "noData": "Aún no hay datos en este periodo",
+    "fullReports": "Ver reportes"
   },
   "agenda": {
     "title": "Agenda",
@@ -134,7 +136,10 @@
     "sendWhatsapp": "Enviar por WhatsApp",
     "deleteConfirm": "¿Eliminar esta cita? Esta acción no se puede deshacer.",
     "mercadopago_not_configured": "Mercado Pago aún no está configurado",
-    "method_disabled": "Ese método de pago está desactivado en Configuración"
+    "method_disabled": "Ese método de pago está desactivado en Configuración",
+    "manageLink": "Enlace para que el cliente reagende o cancele",
+    "manageLinkHelp": "Hasta {{hours}} h antes de la cita (cámbialo en Configuración).",
+    "manageMessage": "Hola {{name}}, tu cita en {{business}} es el {{date}}. Si necesitas cambiarla o cancelarla, hazlo aquí: {{url}}"
   },
   "customers": {
     "title": "Clientes",
@@ -212,7 +217,12 @@
     "role": {
       "owner": "Dueño",
       "staff": "Staff"
-    }
+    },
+    "selfService": "Cambios por el cliente",
+    "selfServiceHelp": "Tus clientes reciben un enlace privado para administrar su cita.",
+    "rescheduleEnabled": "Permitir que reagenden solos",
+    "cancelEnabled": "Permitir que cancelen solos",
+    "minHoursNotice": "Hasta cuántas horas antes"
   },
   "booking": {
     "title": "Agenda tu cita",
@@ -232,7 +242,9 @@
     "depositHelp": "Tu cita queda confirmada al recibir el anticipo.",
     "payNow": "Pagar anticipo",
     "paySpei": "Ver datos para pagar por SPEI",
-    "depositContact": "El negocio te contactará para el pago del anticipo."
+    "depositContact": "El negocio te contactará para el pago del anticipo.",
+    "manageHelp": "¿Necesitas cambiar o cancelar? Guarda este enlace:",
+    "manageLink": "Administrar mi cita"
   },
   "paymentSettings": {
     "title": "Métodos de pago",
@@ -264,5 +276,119 @@
     "mercadopago_not_mexico": "La cuenta de Mercado Pago debe ser de México",
     "mercadopago_not_connected": "Primero conecta tu cuenta de Mercado Pago",
     "validation_error": "Revisa los datos (por ejemplo, la CLABE o el porcentaje)"
+  },
+  "navShort": {
+    "dashboard": "Inicio",
+    "agenda": "Agenda",
+    "customers": "Clientes",
+    "services": "Servicios",
+    "payments": "Pagos",
+    "reports": "Reportes",
+    "settings": "Ajustes"
+  },
+  "reports": {
+    "title": "Reportes",
+    "customize": "Personalizar",
+    "customizeHelp": "Elige qué gráficas quieres ver. Se guarda en este dispositivo.",
+    "exportCsv": "Exportar CSV",
+    "period": "Periodo",
+    "presets": {
+      "last7": "Últimos 7 días",
+      "last30": "Últimos 30 días",
+      "thisMonth": "Este mes",
+      "lastMonth": "Mes pasado",
+      "last3Months": "Últimos 3 meses",
+      "last6Months": "Últimos 6 meses",
+      "last12Months": "Últimos 12 meses",
+      "thisYear": "Este año",
+      "lastYear": "Año pasado",
+      "custom": "Personalizado…"
+    },
+    "from": "Desde",
+    "to": "Hasta",
+    "groupBy": "Agrupar por",
+    "auto": "Automático",
+    "granularity": {
+      "day": "Día",
+      "week": "Semana",
+      "month": "Mes"
+    },
+    "service": "Servicio",
+    "staff": "Miembro del equipo",
+    "source": "Origen de la cita",
+    "all": "Todos",
+    "compare": "Comparar con el periodo anterior",
+    "clear": "Quitar filtros",
+    "invalidRange": "La fecha inicial debe ser anterior a la final.",
+    "comparing": "Comparado con {{range}}",
+    "vsPrev": "vs. periodo anterior",
+    "noPrev": "sin datos del periodo anterior",
+    "kpi": {
+      "revenue": "Ingresos cobrados",
+      "appointments": "Citas",
+      "completedOf": "{{count}} completadas",
+      "avgTicket": "Ticket promedio",
+      "newCustomers": "Clientes nuevos",
+      "activeCustomers": "Clientes atendidos",
+      "returning": "{{count}} regresaron",
+      "noShowRate": "Inasistencias",
+      "cancellationRate": "Cancelaciones",
+      "count": "{{count}} citas",
+      "onlineShare": "Reservas en línea"
+    },
+    "charts": {
+      "revenue": "Ingresos en el tiempo",
+      "appointments": "Citas en el tiempo",
+      "newCustomers": "Clientes nuevos en el tiempo",
+      "services": "Citas completadas por servicio",
+      "methods": "Ingresos por método de pago",
+      "sources": "Origen de las citas",
+      "heatmap": "Horarios más ocupados"
+    },
+    "current": "Periodo actual",
+    "previous": "Periodo anterior",
+    "pending": "Por atender",
+    "completedAppts": "Completadas",
+    "widgets": {
+      "kpis": "Indicadores",
+      "revenue": "Ingresos en el tiempo",
+      "appointments": "Citas en el tiempo",
+      "newCustomers": "Clientes nuevos",
+      "services": "Por servicio",
+      "methods": "Métodos de pago",
+      "sources": "Origen de las citas",
+      "weekday": "Por día de la semana",
+      "heatmap": "Horarios más ocupados",
+      "topCustomers": "Mejores clientes"
+    },
+    "range_too_long": "El periodo es demasiado largo; agrupa por semana o mes.",
+    "invalid_range": "Fechas no válidas.",
+    "validation_error": "Revisa las fechas del filtro."
+  },
+  "manage": {
+    "title": "Tu cita",
+    "notFound": "Este enlace no es válido o la cita ya no existe.",
+    "hello": "Hola {{name}}, estos son los datos de tu cita:",
+    "done": {
+      "rescheduled": "¡Listo! Tu cita se cambió. Te esperamos en el nuevo horario.",
+      "cancelled": "Tu cita fue cancelada."
+    },
+    "reason": {
+      "disabled": "Este negocio no permite cambios en línea.",
+      "too_late": "Los cambios en línea se permiten hasta {{hours}} horas antes de la cita."
+    },
+    "contact": "Escríbenos por WhatsApp",
+    "deadline": "Puedes hacer cambios hasta el {{date}}.",
+    "reschedule": "Cambiar fecha u hora",
+    "cancel": "Cancelar cita",
+    "cancelConfirm": "¿Seguro que quieres cancelar tu cita?",
+    "cancelYes": "Sí, cancelar",
+    "newTime": "Nuevo horario",
+    "confirmReschedule": "Confirmar cambio",
+    "bookAgain": "Agendar una nueva cita",
+    "slot_unavailable": "Ese horario se acaba de ocupar. Elige otro.",
+    "too_late": "Ya no es posible hacer cambios en línea para esta cita.",
+    "reschedule_not_allowed": "Esta cita ya no se puede cambiar en línea.",
+    "cancel_not_allowed": "Esta cita ya no se puede cancelar en línea."
   }
 }

@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { computeDepositCents, DEFAULT_PAYMENT_SETTINGS, isValidClabe, normalizeMxPhone } from '@agenda/shared';
-import { decryptSecret, encryptSecret } from '../src/lib/crypto.js';
+import { decryptSecret, encryptSecret, manageToken, verifyManageToken } from '../src/lib/crypto.js';
+import { DateTime } from 'luxon';
+import { defaultGranularity, previousRange } from '../src/routes/reports.js';
+import { policy } from '../src/routes/manage.js';
 import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 
@@ -68,5 +71,53 @@ describe('payments helpers', () => {
     expect(a).not.toContain('secret');
     expect(a).not.toBe(encryptSecret('APP_USR-secret'));
     expect(decryptSecret(a)).toBe('APP_USR-secret');
+  });
+});
+
+describe('manage link token', () => {
+  it('verifies only authentic tokens', () => {
+    const id = '0b9f3a5e-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
+    const tok = manageToken(id);
+    expect(verifyManageToken(tok)).toBe(id);
+    expect(verifyManageToken(tok.slice(0, -1) + (tok.endsWith('A') ? 'B' : 'A'))).toBeNull();
+    expect(verifyManageToken(manageToken(id).replace(id, '1b9f3a5e-1c2d-4e5f-8a9b-0c1d2e3f4a5b'))).toBeNull();
+    expect(verifyManageToken('garbage')).toBeNull();
+  });
+});
+
+describe('reports ranges', () => {
+  const tz = 'America/Mexico_City';
+  const d = (s: string) => DateTime.fromISO(s, { zone: tz });
+  it('compares whole months with the same number of previous months', () => {
+    const p = previousRange({ start: d('2026-03-01'), end: d('2026-04-01') });
+    expect(p.start.toISODate()).toBe('2026-02-01');
+    expect(p.end.toISODate()).toBe('2026-03-01');
+    const q = previousRange({ start: d('2026-01-01'), end: d('2027-01-01') });
+    expect(q.start.toISODate()).toBe('2025-01-01');
+  });
+  it('compares arbitrary ranges with the same number of days', () => {
+    const p = previousRange({ start: d('2026-03-10'), end: d('2026-03-17') });
+    expect(p.start.toISODate()).toBe('2026-03-03');
+    expect(p.end.toISODate()).toBe('2026-03-10');
+  });
+  it('picks a sensible default granularity', () => {
+    expect(defaultGranularity(7)).toBe('day');
+    expect(defaultGranularity(90)).toBe('week');
+    expect(defaultGranularity(365)).toBe('month');
+  });
+});
+
+describe('self-service policy', () => {
+  const settings = { selfService: { rescheduleEnabled: true, cancelEnabled: false, minHoursNotice: 24 } } as never;
+  const now = DateTime.fromISO('2026-05-10T10:00:00Z');
+  it('allows changes before the deadline only', () => {
+    const ok = policy({ status: 'scheduled', startsAt: new Date('2026-05-12T10:00:00Z') }, { settings }, now);
+    expect(ok.canReschedule).toBe(true);
+    expect(ok.canCancel).toBe(false);
+    const late = policy({ status: 'confirmed', startsAt: new Date('2026-05-11T09:00:00Z') }, { settings }, now);
+    expect(late.reason).toBe('too_late');
+    expect(late.canReschedule).toBe(false);
+    const done = policy({ status: 'completed', startsAt: new Date('2026-05-12T10:00:00Z') }, { settings }, now);
+    expect(done.reason).toBe('not_active');
   });
 });

@@ -78,11 +78,14 @@ export function DashboardPage() {
       <PageHeader
         title={t('dashboard.title')}
         actions={
+          <>
+          <Link to="/reports" className="btn-secondary">{t('dashboard.fullReports')}</Link>
           <select className="input w-auto" value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
             {(['thisMonth', 'lastMonth', 'last3Months'] as const).map((p) => (
               <option key={p} value={p}>{t(`dashboard.${p}`)}</option>
             ))}
           </select>
+          </>
         }
       />
 

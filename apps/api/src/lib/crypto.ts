@@ -24,3 +24,30 @@ export function decryptSecret(payload: string): string {
   decipher.setAuthTag(buf.subarray(12, 28));
   return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8');
 }
+
+/**
+ * Signed, unguessable token for a customer's "manage my appointment" link (/c/<token>).
+ * Stateless: <appointmentId>.<hmac>. Changing JWT_SECRET invalidates old links.
+ */
+function manageKey(): Buffer {
+  const material = process.env.JWT_SECRET;
+  if (!material) throw new Error('JWT_SECRET must be set');
+  return crypto.createHash('sha256').update(`agenda-manage-key:${material}`).digest();
+}
+
+function manageSig(appointmentId: string): string {
+  return crypto.createHmac('sha256', manageKey()).update(appointmentId).digest('base64url').slice(0, 24);
+}
+
+export function manageToken(appointmentId: string): string {
+  return `${appointmentId}.${manageSig(appointmentId)}`;
+}
+
+/** Returns the appointment id if the token is authentic, otherwise null. */
+export function verifyManageToken(token: string): string | null {
+  const m = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{24})$/.exec(token);
+  if (!m) return null;
+  const expected = Buffer.from(manageSig(m[1]!));
+  const given = Buffer.from(m[2]!);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given) ? m[1]! : null;
+}

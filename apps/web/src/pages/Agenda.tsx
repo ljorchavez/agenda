@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
-import { computeDepositCents, paymentSettingsOf, type AppointmentDto, type CustomerDto, type PaymentDto } from '@agenda/shared';
+import { computeDepositCents, paymentSettingsOf, selfServiceOf, type AppointmentDto, type CustomerDto, type PaymentDto } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
@@ -248,6 +248,15 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const [deposit, setDeposit] = useState<{ amount: string; method: 'mercadopago' | 'spei' } | null>(null);
   const [link, setLink] = useState<PaymentDto | null>(null);
   const outstanding = Math.max(appt.priceCents - appt.paidCents, 0);
+  const selfService = selfServiceOf(tenant!.settings);
+  const [copied, setCopied] = useState(false);
+  const manageUrl = `${window.location.origin}${appt.managePath}`;
+  const manageMsg = t('agenda.manageMessage', {
+    name: appt.customerName.split(' ')[0],
+    business: tenant!.name,
+    date: dateTime(appt.startsAt),
+    url: manageUrl,
+  });
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['appointments'] });
@@ -339,6 +348,29 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
               </button>
             </div>
           </div>
+
+          {(selfService.rescheduleEnabled || selfService.cancelEnabled) && (
+            <div className="rounded-lg border border-slate-200 p-3 text-sm">
+              <label className="label">{t('agenda.manageLink')}</label>
+              <p className="mb-2 text-xs text-slate-500">{t('agenda.manageLinkHelp', { hours: selfService.minHoursNotice })}</p>
+              <div className="flex flex-wrap gap-2">
+                <input readOnly className="input min-w-0 flex-1" value={manageUrl} onFocus={(e) => e.target.select()} />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(manageUrl);
+                    setCopied(true);
+                  }}
+                >
+                  {copied ? t('common.copied') : t('common.copy')}
+                </button>
+                {waLink(manageMsg) && (
+                  <a className="btn-secondary" href={waLink(manageMsg)} target="_blank" rel="noreferrer">WhatsApp</a>
+                )}
+              </div>
+            </div>
+          )}
 
           {online.length > 0 && <div className="rounded-lg border border-slate-200 p-3">
             {!deposit ? (

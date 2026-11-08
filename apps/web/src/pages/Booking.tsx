@@ -84,6 +84,12 @@ export function BookingPage() {
               {t('booking.successDetail', { service: book.data.serviceName, date: dateTime(book.data.startsAt, biz.data.timezone) })}
             </p>
             {book.data.deposit && <DepositBox deposit={book.data.deposit} />}
+            <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-sm">
+              <p className="text-slate-700">{t('booking.manageHelp')}</p>
+              <a className="mt-2 inline-block font-medium text-brand-700 underline" href={book.data.managePath}>
+                {t('booking.manageLink')}
+              </a>
+            </div>
             <button className="btn-secondary mt-6" onClick={() => { book.reset(); setSlot(''); }}>{t('booking.another')}</button>
           </div>
         ) : (
