@@ -1,0 +1,47 @@
+name: Deploy
+
+# Deploys to AWS when main changes (after CI) or manually.
+# Setup (once): create an IAM role trusted by GitHub OIDC and save its ARN in the
+# repository secret AWS_DEPLOY_ROLE_ARN. See README → "Deploy to AWS".
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to deploy
+        default: prod
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event.inputs.stage || 'prod' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.stage || 'prod' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm --filter @agenda/web build
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'mx-central-1' }}
+      - run: pnpm --filter @agenda/infra deploy -c stage=${{ github.event.inputs.stage || 'prod' }}
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'mx-central-1' }}

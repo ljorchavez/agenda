@@ -1,0 +1,25 @@
+{
+  "name": "agenda",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant appointment CRM for local businesses (working name: agenda)",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @agenda/api --filter @agenda/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:up": "docker compose up -d db",
+    "db:migrate": "pnpm --filter @agenda/api db:migrate",
+    "db:generate": "pnpm --filter @agenda/api db:generate",
+    "db:seed": "pnpm --filter @agenda/api db:seed",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}
