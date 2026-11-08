@@ -1,0 +1,261 @@
+import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
+import type { DirectoryDto, DirectoryEntryDto } from '@agenda/shared';
+import { LanguageSwitch } from '../components/Layout';
+import { distanceKm, MapView, TYPE_COLORS, type MapMarker } from '../components/MapView';
+import { Loading } from '../components/ui';
+import { api } from '../lib/api';
+import { money } from '../lib/format';
+
+const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/** Public page (no login): map + list of businesses that opted into the directory. */
+export function DirectoryPage() {
+  const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [view, setView] = useState<'list' | 'map'>('list');
+  const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState(false);
+
+  const type = params.get('tipo') ?? '';
+  const state = params.get('estado') ?? '';
+  const city = params.get('ciudad') ?? '';
+  const q = params.get('q') ?? '';
+  const onlineOnly = params.get('reserva') === '1';
+  const set = (patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(patch)) {
+      if (!v) next.delete(k);
+      else next.set(k, v);
+    }
+    setParams(next, { replace: true });
+    setSelected(null);
+  };
+
+  const dir = useQuery({ queryKey: ['directory'], queryFn: () => api<DirectoryDto>('/public-directory') });
+  const all = dir.data?.entries ?? [];
+
+  const inZone = (e: DirectoryEntryDto) => (!state || e.state === state) && (!city || e.city === city);
+  const matchesText = (e: DirectoryEntryDto) =>
+    !q || norm(`${e.name} ${e.description ?? ''} ${e.neighborhood ?? ''} ${e.city ?? ''} ${t(`businessTypes.${e.businessType}`)}`).includes(norm(q));
+
+  const results = useMemo(() => {
+    const list = all.filter((e) => (!type || e.businessType === type) && inZone(e) && matchesText(e) && (!onlineOnly || e.onlineBooking));
+    if (me) list.sort((a, b) => distanceKm(me, a) - distanceKm(me, b));
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, type, state, city, q, onlineOnly, me]);
+
+  // Specialty chips: only types present in the current zone/search, with counts
+  const typeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of all) if (inZone(e) && matchesText(e)) m.set(e.businessType, (m.get(e.businessType) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, state, city, q]);
+
+  const cities = dir.data?.zones.find((z) => z.state === state)?.cities ?? [];
+
+  const markers: MapMarker[] = useMemo(
+    () =>
+      results.map((e) => ({
+        id: e.slug,
+        lat: e.lat,
+        lng: e.lng,
+        color: TYPE_COLORS[e.businessType] ?? TYPE_COLORS.other!,
+        title: e.name,
+        popup: {
+          heading: e.name,
+          lines: [t(`businessTypes.${e.businessType}`), [e.neighborhood, e.city].filter(Boolean).join(', ')],
+          link: e.onlineBooking ? { href: `/b/${e.slug}`, label: e.kind === 'reservations' ? t('directory.reserveTable') : t('directory.book') } : undefined,
+        },
+      })),
+    [results, t],
+  );
+
+  const locate = () => {
+    if (!navigator.geolocation) return setLocError(true);
+    setLocating(true);
+    setLocError(false);
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        setMe({ lat: p.coords.latitude, lng: p.coords.longitude });
+        setLocating(false);
+      },
+      () => {
+        setLocating(false);
+        setLocError(true);
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+    );
+  };
+
+  const fitKey = `${type}|${state}|${city}|${q}|${onlineOnly}|${results.length}`;
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
+          <Link to="/directorio" className="font-bold text-brand-700">Agenda <span className="font-normal text-slate-500">· {t('directory.title')}</span></Link>
+          <div className="flex items-center gap-2">
+            <Link to="/register" className="hidden text-sm font-medium text-brand-700 sm:inline">{t('directory.forBusinesses')}</Link>
+            <LanguageSwitch />
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 py-6">
+        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{t('directory.heading')}</h1>
+        <p className="mt-1 text-slate-600">{t('directory.subheading')}</p>
+
+        {/* Filters */}
+        <div className="mt-5 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
+            <input
+              type="search"
+              className="input"
+              placeholder={t('directory.searchPlaceholder')}
+              value={q}
+              onChange={(e) => set({ q: e.target.value })}
+              aria-label={t('common.search')}
+            />
+            <select className="input" value={state} onChange={(e) => set({ estado: e.target.value, ciudad: null })} aria-label={t('directory.state')}>
+              <option value="">{t('directory.allStates')}</option>
+              {dir.data?.zones.map((z) => <option key={z.state} value={z.state}>{z.state}</option>)}
+            </select>
+            <select className="input" value={city} disabled={!state} onChange={(e) => set({ ciudad: e.target.value })} aria-label={t('directory.city')}>
+              <option value="">{t('directory.allCities')}</option>
+              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button className="btn-secondary whitespace-nowrap" onClick={me ? () => setMe(null) : locate} disabled={locating}>
+              {locating ? t('common.loading') : me ? t('directory.clearNearMe') : `◎ ${t('directory.nearMe')}`}
+            </button>
+          </div>
+          {locError && <p className="text-sm text-amber-700">{t('directory.locationDenied')}</p>}
+
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+            <button
+              onClick={() => set({ tipo: null })}
+              className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-sm ${!type ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+            >
+              {t('directory.allTypes')}
+            </button>
+            {typeCounts.map(([bt, n]) => (
+              <button
+                key={bt}
+                onClick={() => set({ tipo: type === bt ? null : bt })}
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm ${type === bt ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+              >
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: TYPE_COLORS[bt] ?? TYPE_COLORS.other }} />
+                {t(`businessTypes.${bt}`)} <span className="opacity-60">{n}</span>
+              </button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={onlineOnly} onChange={(e) => set({ reserva: e.target.checked ? '1' : null })} />
+            {t('directory.onlineOnly')}
+          </label>
+        </div>
+
+        {/* Mobile view switch */}
+        <div className="mt-4 grid grid-cols-2 rounded-lg border border-slate-300 bg-white p-1 text-sm lg:hidden" role="tablist">
+          {(['list', 'map'] as const).map((v) => (
+            <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`rounded-md py-1.5 ${view === v ? 'bg-slate-800 text-white' : 'text-slate-600'}`}>
+              {v === 'list' ? t('directory.list') : t('directory.map')}
+            </button>
+          ))}
+        </div>
+
+        {dir.isLoading ? (
+          <Loading />
+        ) : dir.isError ? (
+          <p className="mt-6 text-rose-700">{t('common.error')}</p>
+        ) : (
+          <div className="mt-4 grid gap-4 lg:grid-cols-5">
+            <section className={`lg:col-span-2 ${view === 'map' ? 'hidden lg:block' : ''}`} aria-label={t('directory.list')}>
+              <p className="mb-2 text-sm text-slate-500">{t('directory.results', { count: results.length })}</p>
+              {results.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">{t('directory.empty')}</div>
+              ) : (
+                <ul className="space-y-3 lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto lg:pr-1">
+                  {results.map((e) => (
+                    <li key={e.slug}>
+                      <article
+                        className={`card cursor-pointer !p-4 transition ${selected === e.slug ? 'ring-2 ring-brand-500' : 'hover:border-slate-300'}`}
+                        onClick={() => setSelected(e.slug)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: TYPE_COLORS[e.businessType] ?? TYPE_COLORS.other }} />
+                              {t(`businessTypes.${e.businessType}`)}
+                            </div>
+                            <h2 className="mt-0.5 truncate font-semibold text-slate-900">{e.name}</h2>
+                            <p className="truncate text-sm text-slate-500">{[e.neighborhood, e.city].filter(Boolean).join(', ')}</p>
+                          </div>
+                          <div className="shrink-0 text-right text-xs text-slate-500">
+                            {me && <div className="font-medium text-slate-700">{distanceKm(me, e).toFixed(1)} km</div>}
+                            {e.priceFromCents != null && <div>{t('directory.from', { price: money(e.priceFromCents) })}</div>}
+                          </div>
+                        </div>
+                        {e.description && <p className="mt-2 line-clamp-2 text-sm text-slate-600">{e.description}</p>}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {e.onlineBooking ? (
+                            <Link to={`/b/${e.slug}`} className="btn-primary !py-1.5 text-sm" onClick={(ev) => ev.stopPropagation()}>
+                              {e.kind === 'reservations' ? t('directory.reserveTable') : t('directory.book')}
+                            </Link>
+                          ) : (
+                            <span className="text-sm text-slate-500">{t('directory.noOnline')}</span>
+                          )}
+                          {e.phone && (
+                            <a className="btn-secondary !py-1.5 text-sm" href={`https://wa.me/${e.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}>
+                              WhatsApp
+                            </a>
+                          )}
+                          <button
+                            className="btn-secondary !py-1.5 text-sm lg:hidden"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setSelected(e.slug);
+                              setView('map');
+                            }}
+                          >
+                            {t('directory.showOnMap')}
+                          </button>
+                        </div>
+                      </article>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className={`lg:col-span-3 ${view === 'list' ? 'hidden lg:block' : ''}`} aria-label={t('directory.map')}>
+              <div className="lg:sticky lg:top-20">
+                <MapView
+                  markers={markers}
+                  selectedId={selected}
+                  onSelect={setSelected}
+                  userLocation={me}
+                  fitKey={`${fitKey}|${view}`}
+                  className="h-[60vh] lg:h-[calc(100vh-180px)]"
+                />
+              </div>
+            </section>
+          </div>
+        )}
+
+        <div className="mt-10 rounded-2xl bg-brand-700 p-6 text-white sm:flex sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">{t('directory.ctaTitle')}</h2>
+            <p className="text-brand-50/90 text-sm">{t('directory.ctaText')}</p>
+          </div>
+          <Link to="/register" className="mt-3 inline-block rounded-lg bg-white px-4 py-2 font-semibold text-brand-800 sm:mt-0">{t('directory.ctaButton')}</Link>
+        </div>
+      </main>
+    </div>
+  );
+}

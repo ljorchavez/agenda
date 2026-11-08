@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import {
+  businessKind,
+  DEFAULT_RESERVATION_SETTINGS,
   DEFAULT_TENANT_SETTINGS,
   loginSchema,
   mercadoPagoConnectSchema,
@@ -11,7 +13,8 @@ import {
   type AuthResponse,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { tenants, users } from '../db/schema.js';
+import { diningTables, services, tenants, users } from '../db/schema.js';
+import { DEFAULT_TABLES } from '../lib/tables.js';
 import { hashPassword, signToken, slugify, verifyPassword } from '../lib/auth.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { encryptSecret } from '../lib/crypto.js';
@@ -68,6 +71,16 @@ authRoutes.post('/auth/register', async (c) => {
         role: 'owner',
       })
       .returning();
+    if (businessKind(input.businessType) === 'reservations') {
+      // Restaurants can take online reservations right away.
+      await tx.insert(services).values({
+        tenantId: tenant!.id,
+        name: 'Reservación',
+        durationMin: DEFAULT_RESERVATION_SETTINGS.durationMin,
+        priceCents: 0,
+      });
+      await tx.insert(diningTables).values(DEFAULT_TABLES.map((t) => ({ ...t, tenantId: tenant!.id })));
+    }
     return { tenant: tenant!, user: user! };
   });
 
@@ -124,10 +137,12 @@ authRoutes.patch('/tenant', requireAuth, requireOwner, async (c) => {
       throw new AppError(422, 'mercadopago_not_connected', 'Connect Mercado Pago first');
     }
   }
+  const { profile, ...rest } = input;
   const [tenant] = await db
     .update(tenants)
     .set({
-      ...input,
+      ...rest,
+      ...(profile ?? {}),
       phone: input.phone === undefined ? undefined : input.phone && normalizeMxPhone(input.phone),
     })
     .where(eq(tenants.id, c.get('tenantId')))

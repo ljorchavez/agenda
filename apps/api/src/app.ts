@@ -8,12 +8,14 @@ import { requireAuth, type AppEnv } from './middleware/auth.js';
 import { appointmentRoutes } from './routes/appointments.js';
 import { authRoutes } from './routes/auth.js';
 import { customerRoutes } from './routes/customers.js';
+import { directoryRoutes } from './routes/directory.js';
 import { manageRoutes } from './routes/manage.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { paymentRoutes } from './routes/payments.js';
 import { publicRoutes } from './routes/public.js';
 import { reportRoutes } from './routes/reports.js';
 import { serviceRoutes } from './routes/services.js';
+import { tableRoutes } from './routes/tables.js';
 import { webhookRoutes } from './routes/webhooks.js';
 
 export function createApp() {
@@ -37,6 +39,7 @@ export function createApp() {
   });
 
   // Public (no auth)
+  app.route('/', directoryRoutes);
   app.route('/', manageRoutes);
   app.route('/', publicRoutes);
   app.route('/', webhookRoutes);
@@ -45,7 +48,7 @@ export function createApp() {
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();
   // Auth on explicit prefixes so unknown paths still return 404 instead of 401.
-  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports']) {
+  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/tables']) {
     priv.use(prefix, requireAuth);
     priv.use(`${prefix}/*`, requireAuth);
   }
@@ -55,6 +58,7 @@ export function createApp() {
   priv.route('/', paymentRoutes);
   priv.route('/', metricsRoutes);
   priv.route('/', reportRoutes);
+  priv.route('/', tableRoutes);
   app.route('/', priv);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));

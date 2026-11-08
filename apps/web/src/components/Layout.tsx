@@ -35,6 +35,15 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
 export function Layout() {
   const { t } = useTranslation();
   const { tenant, user, logout } = useAuth();
+  const isRestaurant = tenant?.kind === 'reservations';
+  // Restaurants manage tables instead of services, and call the calendar "Reservations".
+  const nav = NAV.map((n) =>
+    isRestaurant && n.key === 'services'
+      ? { ...n, to: '/tables', key: 'tables' as const, icon: '▣' }
+      : isRestaurant && n.key === 'agenda'
+        ? { ...n, key: 'reservations' as const }
+        : n,
+  );
   const navigate = useNavigate();
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -51,7 +60,7 @@ export function Layout() {
           <div className="truncate text-sm text-slate-500">{tenant?.name}</div>
         </div>
         <nav className="flex flex-1 flex-col gap-1">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <NavLink key={n.to} to={n.to} end={'end' in n} className={linkClass}>
               <span className="w-5 text-center">{n.icon}</span>
               {t(`nav.${n.key}`)}
@@ -90,7 +99,7 @@ export function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-slate-200 bg-white md:hidden">
-        {NAV.map((n) => (
+        {nav.map((n) => (
           <NavLink
             key={n.to}
             to={n.to}

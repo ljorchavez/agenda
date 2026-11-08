@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { and, eq, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
+  businessKind,
   manageRescheduleSchema,
   selfServiceOf,
   type Locale,
@@ -12,7 +13,8 @@ import { appointments, customers, services, tenants, type Appointment, type Serv
 import { hasOverlap } from '../lib/appointments.js';
 import { verifyManageToken } from '../lib/crypto.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { computeSlots } from './public.js';
+import { computeSlots, computeTableSlots } from './public.js';
+import { assignTable } from '../lib/tables.js';
 
 /**
  * Customer self-service via the private link /c/<token> (sent after booking or by the business).
@@ -22,6 +24,7 @@ import { computeSlots } from './public.js';
 export const manageRoutes = new Hono();
 
 type Loaded = { appt: Appointment; tenant: Tenant; service: Service; customerName: string };
+const isTables = (l: Loaded) => businessKind(l.tenant.businessType) === 'reservations';
 
 async function load(token: string): Promise<Loaded> {
   const id = verifyManageToken(token);
@@ -76,6 +79,7 @@ function toDto({ appt, tenant, service, customerName }: Loaded): ManageAppointme
       startsAt: appt.startsAt.toISOString(),
       status: appt.status,
       customerFirstName: customerName.trim().split(/\s+/)[0] ?? '',
+      partySize: appt.partySize,
     },
     canReschedule: p.canReschedule,
     canCancel: p.canCancel,
@@ -98,7 +102,9 @@ manageRoutes.get('/public/manage/:token/availability', async (c) => {
   if (!policy(l.appt, l.tenant).canReschedule) return c.json({ slots: [] });
   const minStart = DateTime.now().plus({ hours: selfServiceOf(l.tenant.settings).minHoursNotice });
   const durationMin = Math.round((l.appt.endsAt.getTime() - l.appt.startsAt.getTime()) / 60000);
-  const slots = await computeSlots(l.tenant, durationMin, date, minStart, { excludeId: l.appt.id });
+  const slots = isTables(l)
+    ? await computeTableSlots(l.tenant, l.appt.partySize ?? 2, date, minStart, { excludeId: l.appt.id, durationMin })
+    : await computeSlots(l.tenant, durationMin, date, minStart, { excludeId: l.appt.id });
   return c.json({ slots: slots.filter((s) => DateTime.fromISO(s).toMillis() !== l.appt.startsAt.getTime()) });
 });
 
@@ -111,7 +117,9 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
   const start = DateTime.fromISO(input.startsAt).setZone(l.tenant.timezone);
   const durationMin = Math.round((l.appt.endsAt.getTime() - l.appt.startsAt.getTime()) / 60000);
   const minStart = DateTime.now().plus({ hours: p.ss.minHoursNotice });
-  const slots = await computeSlots(l.tenant, durationMin, start.toISODate()!, minStart, { excludeId: l.appt.id });
+  const slots = isTables(l)
+    ? await computeTableSlots(l.tenant, l.appt.partySize ?? 2, start.toISODate()!, minStart, { excludeId: l.appt.id, durationMin })
+    : await computeSlots(l.tenant, durationMin, start.toISODate()!, minStart, { excludeId: l.appt.id });
   if (!slots.some((s) => DateTime.fromISO(s).toMillis() === start.toMillis())) {
     throw conflict('slot_unavailable', 'This time is no longer available');
   }
@@ -121,7 +129,14 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
 
   await getDb().transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${l.tenant.id} for update`);
-    if (await hasOverlap(tx, l.tenant.id, startsAt, endsAt, { excludeId: l.appt.id })) {
+    let tableId = l.appt.tableId;
+    if (isTables(l)) {
+      try {
+        tableId = (await assignTable(tx, l.tenant.id, l.appt.partySize ?? 2, startsAt, endsAt, { excludeId: l.appt.id })).id;
+      } catch {
+        throw conflict('slot_unavailable', 'This time is no longer available');
+      }
+    } else if (await hasOverlap(tx, l.tenant.id, startsAt, endsAt, { excludeId: l.appt.id })) {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
     // Status is re-read under the lock so a concurrent cancel can't be undone.
@@ -132,6 +147,7 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
         endsAt,
         status: 'scheduled',
         reminderSentAt: null,
+        tableId,
         notes: appendNote(l.appt.notes, stamp(l.tenant, `Reagendada por el cliente (antes: ${previous})`)),
       })
       .where(

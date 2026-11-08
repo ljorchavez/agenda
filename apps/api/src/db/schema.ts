@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -54,9 +55,39 @@ export const tenants = pgTable(
     mpAccessTokenEnc: text('mp_access_token_enc'),
     /** Mercado Pago account nickname/email shown in settings */
     mpAccount: text('mp_account'),
+    // Public profile (booking page + directory)
+    description: text('description'),
+    address: text('address'),
+    neighborhood: text('neighborhood'),
+    city: text('city'),
+    state: text('state'),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    /** Opt-in: show this business in the public directory/map */
+    directoryListed: boolean('directory_listed').notNull().default(false),
     ...timestamps,
   },
-  (t) => [uniqueIndex('tenants_slug_idx').on(t.slug)],
+  (t) => [
+    uniqueIndex('tenants_slug_idx').on(t.slug),
+    index('tenants_directory_idx').on(t.directoryListed, t.businessType),
+  ],
+);
+
+/** Restaurant tables (bookable resources with a seat count). */
+export const diningTables = pgTable(
+  'dining_tables',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    seats: integer('seats').notNull(),
+    area: text('area'),
+    active: boolean('active').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [index('dining_tables_tenant_idx').on(t.tenantId)],
 );
 
 export const users = pgTable(
@@ -133,6 +164,9 @@ export const appointments = pgTable(
     priceCents: integer('price_cents').notNull().default(0),
     source: appointmentSourceEnum('source').notNull().default('staff'),
     notes: text('notes'),
+    /** Restaurants: number of people and assigned table */
+    partySize: integer('party_size'),
+    tableId: uuid('table_id').references(() => diningTables.id, { onDelete: 'set null' }),
     reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
     ...timestamps,
   },
@@ -208,3 +242,4 @@ export type Customer = typeof customers.$inferSelect;
 export type Service = typeof services.$inferSelect;
 export type Appointment = typeof appointments.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
+export type DiningTable = typeof diningTables.$inferSelect;

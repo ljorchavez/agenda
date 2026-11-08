@@ -14,9 +14,20 @@ export const BUSINESS_TYPES = [
   'physiotherapy',
   'psychology',
   'dental',
+  'spa',
+  'veterinary',
+  'restaurant',
+  'cafe',
+  'bar',
   'other',
 ] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
+
+/** Restaurants book tables for a party size; everyone else books a service with a time slot. */
+export const RESERVATION_TYPES: readonly BusinessType[] = ['restaurant', 'cafe', 'bar'];
+export type BusinessKind = 'appointments' | 'reservations';
+export const businessKind = (t: BusinessType): BusinessKind =>
+  RESERVATION_TYPES.includes(t) ? 'reservations' : 'appointments';
 
 export const APPOINTMENT_STATUSES = [
   'scheduled',
@@ -170,8 +181,21 @@ export const tenantSettingsSchema = z.object({
       minHoursNotice: z.number().int().min(0).max(168),
     })
     .optional(),
+  reservations: z
+    .object({
+      /** How long a table is held for one reservation */
+      durationMin: z.number().int().min(30).max(360),
+      /** Largest party that can book online */
+      maxPartySize: z.number().int().min(1).max(50),
+    })
+    .optional(),
 });
 export type TenantSettings = z.infer<typeof tenantSettingsSchema>;
+export type ReservationSettings = NonNullable<TenantSettings['reservations']>;
+export const DEFAULT_RESERVATION_SETTINGS: ReservationSettings = { durationMin: 90, maxPartySize: 8 };
+export function reservationSettingsOf(settings: Pick<TenantSettings, 'reservations'> | null | undefined): ReservationSettings {
+  return { ...DEFAULT_RESERVATION_SETTINGS, ...(settings?.reservations ?? {}) };
+}
 export type SelfServiceSettings = NonNullable<TenantSettings['selfService']>;
 
 export const DEFAULT_SELF_SERVICE: SelfServiceSettings = {
@@ -220,8 +244,82 @@ export const tenantUpdateSchema = z.object({
   timezone: z.string().min(3).max(64).refine(isValidTimeZone, 'invalid_timezone').optional(),
   locale: z.enum(LOCALES).optional(),
   settings: tenantSettingsSchema.optional(),
+  profile: z.lazy(() => tenantProfileSchema).optional(),
 });
 export type TenantUpdateInput = z.infer<typeof tenantUpdateSchema>;
+
+// ---------- Public profile & directory ----------
+
+/** Public info shown on the booking page and (if listed) in the directory. */
+export const tenantProfileSchema = z
+  .object({
+    description: z.string().trim().max(500).nullable(),
+    address: z.string().trim().max(200).nullable(),
+    neighborhood: z.string().trim().max(120).nullable(),
+    city: z.string().trim().max(120).nullable(),
+    state: z.string().trim().max(120).nullable(),
+    lat: z.number().min(-90).max(90).nullable(),
+    lng: z.number().min(-180).max(180).nullable(),
+    directoryListed: z.boolean(),
+  })
+  .refine((p) => (p.lat === null) === (p.lng === null), { message: 'lat_lng_pair', path: ['lat'] })
+  .refine((p) => !p.directoryListed || (p.lat !== null && p.city), {
+    message: 'directory_needs_location',
+    path: ['directoryListed'],
+  });
+export type TenantProfile = z.infer<typeof tenantProfileSchema>;
+
+export interface DirectoryEntryDto {
+  slug: string;
+  name: string;
+  businessType: BusinessType;
+  kind: BusinessKind;
+  description: string | null;
+  address: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+  lat: number;
+  lng: number;
+  phone: string | null;
+  onlineBooking: boolean;
+  /** Lowest active service price, for "desde $X" */
+  priceFromCents: number | null;
+}
+
+export interface DirectoryDto {
+  entries: DirectoryEntryDto[];
+  /** Zones present in the directory, for the filter */
+  zones: { state: string; cities: string[] }[];
+}
+
+// ---------- Restaurant tables ----------
+
+export const tableInputSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  seats: z.number().int().min(1).max(50),
+  area: z.string().trim().max(60).nullable().optional(),
+  active: z.boolean().default(true),
+});
+export type TableInput = z.infer<typeof tableInputSchema>;
+
+export interface TableDto {
+  id: string;
+  name: string;
+  seats: number;
+  area: string | null;
+  active: boolean;
+}
+
+export const publicReservationSchema = z.object({
+  partySize: z.number().int().min(1).max(50),
+  startsAt: z.string().datetime({ offset: true }),
+  name: z.string().trim().min(2).max(160),
+  phone: phoneSchema,
+  email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
+  notes: z.string().max(1000).optional(),
+});
+export type PublicReservationInput = z.infer<typeof publicReservationSchema>;
 
 export const mercadoPagoConnectSchema = z.object({
   accessToken: z.string().trim().min(20).max(300),
@@ -274,6 +372,9 @@ export const appointmentCreateSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   /** Skip the double-booking check (e.g. businesses with several chairs) */
   allowOverlap: z.boolean().optional(),
+  /** Restaurants: number of people; a table is assigned automatically unless tableId is given */
+  partySize: z.number().int().min(1).max(50).optional(),
+  tableId: z.string().uuid().nullable().optional(),
 });
 export type AppointmentCreateInput = z.infer<typeof appointmentCreateSchema>;
 
@@ -285,6 +386,8 @@ export const appointmentUpdateSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   staffUserId: z.string().uuid().nullable().optional(),
   allowOverlap: z.boolean().optional(),
+  partySize: z.number().int().min(1).max(50).optional(),
+  tableId: z.string().uuid().nullable().optional(),
   /**
    * When marking as completed, registers a paid payment for the outstanding balance
    * with this method in the same request.
@@ -349,6 +452,8 @@ export interface TenantDto {
   currency: string;
   locale: Locale;
   settings: TenantSettings;
+  kind: BusinessKind;
+  profile: TenantProfile;
   /** Never includes the token itself. */
   mercadoPago: { connected: boolean; account: string | null };
 }
@@ -406,6 +511,10 @@ export interface AppointmentDto {
   paidCents: number;
   /** Private customer link to reschedule/cancel: /c/<token> */
   managePath: string;
+  /** Restaurants only */
+  partySize: number | null;
+  tableId: string | null;
+  tableName: string | null;
 }
 
 export interface PaymentDto {
@@ -520,6 +629,7 @@ export interface ManageAppointmentDto {
     startsAt: string;
     status: AppointmentStatus;
     customerFirstName: string;
+    partySize: number | null;
   };
   canReschedule: boolean;
   canCancel: boolean;
@@ -541,6 +651,16 @@ export interface PublicBusinessDto {
   services: Pick<ServiceDto, 'id' | 'name' | 'durationMin' | 'priceCents'>[];
   /** Present when the business requires a deposit to book online. */
   deposit: { type: DepositType; value: number } | null;
+  kind: BusinessKind;
+  description: string | null;
+  address: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+  lat: number | null;
+  lng: number | null;
+  /** Restaurants: largest party bookable online */
+  maxPartySize: number | null;
 }
 
 export interface PublicBookingResult {
@@ -549,6 +669,7 @@ export interface PublicBookingResult {
   endsAt: string;
   serviceName: string;
   businessName: string;
+  partySize: number | null;
   /** Private path (/c/<token>) where the customer can reschedule or cancel */
   managePath: string;
   deposit: null | {

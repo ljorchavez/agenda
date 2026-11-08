@@ -8,12 +8,14 @@ import { BookingPage } from './pages/Booking';
 import { CustomerDetailPage } from './pages/CustomerDetail';
 import { CustomersPage } from './pages/Customers';
 import { DashboardPage } from './pages/Dashboard';
+import { DirectoryPage } from './pages/Directory';
 import { LoginPage, RegisterPage } from './pages/Auth';
 import { ManagePage } from './pages/Manage';
 import { PaymentsPage } from './pages/Payments';
 import { ReportsPage } from './pages/Reports';
 import { ServicesPage } from './pages/Services';
 import { SettingsPage } from './pages/Settings';
+import { TablesPage } from './pages/Tables';
 
 function Protected({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -32,6 +34,8 @@ export function App() {
       <Route path="/b/:slug" element={<BookingPage />} />
       {/* Private link for a customer to reschedule/cancel their appointment */}
       <Route path="/c/:token" element={<ManagePage />} />
+      {/* Public directory/map of businesses (no login) */}
+      <Route path="/directorio" element={<DirectoryPage />} />
       <Route
         path="/"
         element={
@@ -47,6 +51,7 @@ export function App() {
         <Route path="services" element={<ServicesPage />} />
         <Route path="payments" element={<PaymentsPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="tables" element={<TablesPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

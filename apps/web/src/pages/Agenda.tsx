@@ -2,15 +2,20 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
-import { computeDepositCents, paymentSettingsOf, selfServiceOf, type AppointmentDto, type CustomerDto, type PaymentDto } from '@agenda/shared';
+import { computeDepositCents, paymentSettingsOf, selfServiceOf, type AppointmentDto, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
 import { useCustomers, useServices } from '../lib/queries';
 
+const useTables = (enabled: boolean) =>
+  useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables'), enabled });
+
 export function AgendaPage() {
   const { t } = useTranslation();
+  const { tenant } = useAuth();
+  const isRestaurant = tenant?.kind === 'reservations';
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [creating, setCreating] = useState<Date | null>(null);
   const [selected, setSelected] = useState<AppointmentDto | null>(null);
@@ -35,7 +40,7 @@ export function AgendaPage() {
   return (
     <>
       <PageHeader
-        title={t('agenda.title')}
+        title={isRestaurant ? t('nav.reservations') : t('agenda.title')}
         actions={
           <>
             <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="prev">‹</button>
@@ -43,7 +48,7 @@ export function AgendaPage() {
               {t('agenda.today')}
             </button>
             <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="next">›</button>
-            <button className="btn-primary" onClick={() => setCreating(newAt(new Date()))}>{t('agenda.new')}</button>
+            <button className="btn-primary" onClick={() => setCreating(newAt(new Date()))}>{isRestaurant ? t('tables.newReservation') : t('agenda.new')}</button>
           </>
         }
       />
@@ -83,7 +88,9 @@ export function AgendaPage() {
                         <StatusBadge status={a.status} />
                       </div>
                       <div className="mt-1 truncate font-medium text-slate-700">{a.customerName}</div>
-                      <div className="truncate text-slate-500">{a.serviceName}</div>
+                      <div className="truncate text-slate-500">
+                        {a.partySize ? `${t('tables.people', { count: a.partySize })}${a.tableName ? ` · ${a.tableName}` : ''}` : a.serviceName}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -102,6 +109,11 @@ export function AgendaPage() {
 function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { tenant } = useAuth();
+  const isRestaurant = tenant?.kind === 'reservations';
+  const tables = useTables(isRestaurant);
+  const [partySize, setPartySize] = useState('2');
+  const [tableId, setTableId] = useState('');
   const services = useServices();
   const [search, setSearch] = useState('');
   const customers = useCustomers(search);
@@ -130,12 +142,13 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
         method: 'POST',
         body: {
           customerId: cid,
-          serviceId,
+          serviceId: serviceId || active[0]?.id,
           startsAt: new Date(startsAt).toISOString(),
           durationMin: duration ? Number(duration) : undefined,
-          priceCents: price !== '' ? toCents(price) : undefined,
+          priceCents: isRestaurant ? 0 : price !== '' ? toCents(price) : undefined,
           notes: notes || null,
           allowOverlap,
+          ...(isRestaurant ? { partySize: Number(partySize), tableId: tableId || null } : {}),
         },
       });
     },
@@ -157,7 +170,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
   };
 
   return (
-    <Modal open title={t('agenda.new')} onClose={onClose}>
+    <Modal open title={isRestaurant ? t('tables.newReservation') : t('agenda.new')} onClose={onClose}>
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -192,6 +205,23 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
             </>
           )}
         </div>
+        {isRestaurant ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">{t('tables.partySize')}</label>
+              <input type="number" min={1} max={50} required className="input" value={partySize} onChange={(e) => setPartySize(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">{t('tables.table')}</label>
+              <select className="input" value={tableId} onChange={(e) => setTableId(e.target.value)}>
+                <option value="">{t('tables.auto')}</option>
+                {(tables.data ?? []).filter((x) => x.active && x.seats >= Number(partySize || 1)).map((x) => (
+                  <option key={x.id} value={x.id}>{x.name} · {t('tables.seatsN', { count: x.seats })}{x.area ? ` · ${x.area}` : ''}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
         <div>
           <label className="label">{t('agenda.service')}</label>
           <select required className="input" value={serviceId} onChange={(e) => pickService(e.target.value)}>
@@ -201,6 +231,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
             ))}
           </select>
         </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="sm:col-span-3">
             <label className="label">{t('agenda.startsAt')}</label>
@@ -210,10 +241,12 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
             <label className="label">{t('agenda.duration')}</label>
             <input type="number" min={5} className="input" value={duration} onChange={(e) => setDuration(e.target.value)} />
           </div>
+          {!isRestaurant && (
           <div>
             <label className="label">{t('agenda.price')}</label>
             <input type="number" min={0} step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} />
           </div>
+          )}
         </div>
         <div>
           <label className="label">{t('agenda.notes')}</label>
@@ -221,9 +254,9 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
-          {t('agenda.allowOverlap')}
+          {isRestaurant ? t('tables.noTable') : t('agenda.allowOverlap')}
         </label>
-        <ErrorText error={create.error} ns="agenda" />
+        <ErrorText error={create.error} ns={isRestaurant ? 'tables' : 'agenda'} />
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn-primary" disabled={create.isPending}>{t('common.save')}</button>
@@ -250,6 +283,10 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const outstanding = Math.max(appt.priceCents - appt.paidCents, 0);
   const selfService = selfServiceOf(tenant!.settings);
   const [copied, setCopied] = useState(false);
+  const tablesQ = useTables(appt.partySize != null);
+  const [party, setParty] = useState(String(appt.partySize ?? 2));
+  const [table, setTable] = useState(appt.tableId ?? '');
+  const [bill, setBill] = useState('');
   const manageUrl = `${window.location.origin}${appt.managePath}`;
   const manageMsg = t('agenda.manageMessage', {
     name: appt.customerName.split(' ')[0],
@@ -306,6 +343,11 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
         <div className="text-slate-600">{appt.serviceName}</div>
         <div className="text-sm text-slate-500">{dateTime(appt.startsAt)} – {timeOnly(appt.endsAt)} · {t(`source.${appt.source}`)}</div>
+        {appt.partySize != null && (
+          <div className="text-sm font-medium text-slate-700">
+            {t('tables.people', { count: appt.partySize })} · {appt.tableName ?? t('tables.unassigned')}
+          </div>
+        )}
         {appt.customerPhone && <div className="text-sm text-slate-500">{appt.customerPhone}</div>}
         {appt.notes && <p className="mt-2 rounded-lg bg-slate-50 p-2 text-sm">{appt.notes}</p>}
         <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm">
@@ -325,6 +367,22 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <button className="btn-secondary text-rose-700" onClick={() => update.mutate({ status: 'cancelled' })}>{t('agenda.cancelAppt')}</button>
           </div>
 
+          {appt.partySize != null && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <label className="label">{t('tables.table')}</label>
+              <div className="flex flex-wrap gap-2">
+                <input type="number" min={1} max={50} className="input w-24" value={party} onChange={(e) => setParty(e.target.value)} aria-label={t('tables.partySize')} />
+                <select className="input w-auto" value={table} onChange={(e) => setTable(e.target.value)}>
+                  <option value="">{t('tables.auto')}</option>
+                  {(tablesQ.data ?? []).filter((x) => x.active && x.seats >= Number(party || 1)).map((x) => (
+                    <option key={x.id} value={x.id}>{x.name} · {t('tables.seatsN', { count: x.seats })}</option>
+                  ))}
+                </select>
+                <button className="btn-secondary" onClick={() => update.mutate({ partySize: Number(party), tableId: table || null })}>{t('common.save')}</button>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-lg border border-slate-200 p-3">
             <label className="label">{t('agenda.paymentMethod')}</label>
             <div className="flex flex-wrap gap-2">
@@ -333,7 +391,10 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                   <option key={m} value={m}>{t(`methods.${m}`)}</option>
                 ))}
               </select>
-              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method })}>
+              {appt.partySize != null && (
+                <input type="number" min={0} step="0.01" className="input w-32" placeholder={t('tables.bill')} value={bill} onChange={(e) => setBill(e.target.value)} aria-label={t('tables.bill')} />
+              )}
+              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method, ...(appt.partySize != null && bill !== '' ? { priceCents: toCents(bill) } : {}) })}>
                 {t('agenda.complete')}
               </button>
             </div>
@@ -404,7 +465,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
       )}
 
-      <ErrorText error={update.error} ns="agenda" />
+      <ErrorText error={update.error} ns={appt.partySize != null ? 'tables' : 'agenda'} />
       <div className="mt-6 flex justify-between">
         <button
           className="text-sm text-rose-700 hover:underline"

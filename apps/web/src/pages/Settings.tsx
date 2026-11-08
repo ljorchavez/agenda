@@ -5,12 +5,14 @@ import {
   BUSINESS_TYPES,
   isValidClabe,
   paymentSettingsOf,
+  reservationSettingsOf,
   selfServiceOf,
   type SessionUser,
   type TenantDto,
   type TenantSettings,
 } from '@agenda/shared';
 import { PaymentSettingsSection } from '../components/PaymentSettings';
+import { PublicProfileSection } from '../components/PublicProfile';
 import { ErrorText, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -26,7 +28,11 @@ export function SettingsPage() {
     ...tenant!.settings,
     payments: paymentSettingsOf(tenant!.settings),
     selfService: selfServiceOf(tenant!.settings),
+    reservations: reservationSettingsOf(tenant!.settings),
   });
+  const isRestaurant = tenant?.kind === 'reservations';
+  const rs = settings.reservations!;
+  const setRs = (patch: Partial<typeof rs>) => setSettings((x) => ({ ...x, reservations: { ...x.reservations!, ...patch } }));
   const selfService = settings.selfService!;
   const setSelfService = (patch: Partial<typeof selfService>) =>
     setSettings((s) => ({ ...s, selfService: { ...s.selfService!, ...patch } }));
@@ -113,6 +119,24 @@ export function SettingsPage() {
             {t('settings.onlineBookingEnabled')}
           </label>
 
+          {isRestaurant && (
+            <>
+              <h2 className="pt-2 font-semibold">{t('tables.settingsTitle')}</h2>
+              <div className="grid max-w-md gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="label">{t('tables.duration')}</label>
+                  <select disabled={!isOwner} className="input" value={rs.durationMin} onChange={(e) => setRs({ durationMin: Number(e.target.value) })}>
+                    {[60, 75, 90, 105, 120, 150, 180].map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">{t('tables.maxParty')}</label>
+                  <input type="number" min={1} max={50} disabled={!isOwner} className="input" value={rs.maxPartySize} onChange={(e) => setRs({ maxPartySize: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} />
+                </div>
+              </div>
+            </>
+          )}
+
           <h2 className="pt-2 font-semibold">{t('settings.selfService')}</h2>
           <p className="text-sm text-slate-500">{t('settings.selfServiceHelp')}</p>
           <label className="flex items-center gap-2 text-sm">
@@ -179,6 +203,8 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+
+        <PublicProfileSection disabled={!isOwner} />
 
         <PaymentSettingsSection
           value={payments}

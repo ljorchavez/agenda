@@ -1,4 +1,4 @@
-import { paymentSettingsOf, selfServiceOf } from '@agenda/shared';
+import { businessKind, paymentSettingsOf, reservationSettingsOf, selfServiceOf } from '@agenda/shared';
 import { manageToken } from './crypto.js';
 import type {
   AppointmentDto,
@@ -23,7 +23,23 @@ export function toTenantDto(t: Tenant): TenantDto {
     timezone: t.timezone,
     currency: t.currency,
     locale: t.locale as Locale,
-    settings: { ...t.settings, payments: paymentSettingsOf(t.settings), selfService: selfServiceOf(t.settings) },
+    settings: {
+      ...t.settings,
+      payments: paymentSettingsOf(t.settings),
+      selfService: selfServiceOf(t.settings),
+      reservations: reservationSettingsOf(t.settings),
+    },
+    kind: businessKind(t.businessType),
+    profile: {
+      description: t.description,
+      address: t.address,
+      neighborhood: t.neighborhood,
+      city: t.city,
+      state: t.state,
+      lat: t.lat,
+      lng: t.lng,
+      directoryListed: t.directoryListed,
+    },
     mercadoPago: { connected: Boolean(t.mpAccessTokenEnc), account: t.mpAccount },
   };
 }
@@ -84,6 +100,9 @@ export type AppointmentRow = {
   source: AppointmentDto['source'];
   notes: string | null;
   paid_cents: number | string | null;
+  party_size: number | null;
+  table_id: string | null;
+  table_name: string | null;
 };
 
 export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
@@ -103,5 +122,8 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     notes: r.notes,
     paidCents: Number(r.paid_cents ?? 0),
     managePath: `/c/${manageToken(r.id)}`,
+    partySize: r.party_size == null ? null : Number(r.party_size),
+    tableId: r.table_id,
+    tableName: r.table_name,
   };
 }

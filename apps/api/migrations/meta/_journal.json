@@ -15,6 +15,13 @@
       "when": 1794152000000,
       "tag": "0001_payment_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794170000000,
+      "tag": "0002_restaurants_directory",
+      "breakpoints": true
     }
   ]
 }

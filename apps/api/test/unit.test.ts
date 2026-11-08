@@ -5,6 +5,7 @@ import { decryptSecret, encryptSecret, manageToken, verifyManageToken } from '..
 import { DateTime } from 'luxon';
 import { defaultGranularity, previousRange } from '../src/routes/reports.js';
 import { policy } from '../src/routes/manage.js';
+import { pickTable } from '../src/lib/tables.js';
 import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 
@@ -119,5 +120,28 @@ describe('self-service policy', () => {
     expect(late.canReschedule).toBe(false);
     const done = policy({ status: 'completed', startsAt: new Date('2026-05-12T10:00:00Z') }, { settings }, now);
     expect(done.reason).toBe('not_active');
+  });
+});
+
+describe('restaurant table assignment', () => {
+  const tables = [
+    { id: 't4', name: 'Mesa 4', seats: 4 },
+    { id: 't2', name: 'Mesa 2', seats: 2 },
+    { id: 't10', name: 'Mesa 10', seats: 2 },
+    { id: 't6', name: 'Mesa 6', seats: 6 },
+  ];
+  const at = (h: number) => new Date(Date.UTC(2026, 4, 10, h));
+  it('picks the smallest table that fits, by natural name order', () => {
+    expect(pickTable(tables, [], 2, at(20), at(21))?.id).toBe('t2');
+    expect(pickTable(tables, [], 3, at(20), at(21))?.id).toBe('t4');
+    expect(pickTable(tables, [], 7, at(20), at(21))).toBeNull();
+  });
+  it('skips busy tables and frees them after the reservation ends', () => {
+    const busy = [
+      { tableId: 't2', s: at(19), e: at(21) },
+      { tableId: 't10', s: at(20), e: at(22) },
+    ];
+    expect(pickTable(tables, busy, 2, at(20), at(21))?.id).toBe('t4');
+    expect(pickTable(tables, busy, 2, at(21), at(22))?.id).toBe('t2');
   });
 });

@@ -99,7 +99,7 @@ export function ManagePage() {
             <p className="text-sm text-slate-500">{t('manage.hello', { name: a.customerFirstName })}</p>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="font-semibold text-slate-900">{a.serviceName}</div>
+                <div className="font-semibold text-slate-900">{a.partySize ? t('booking.tableFor', { count: a.partySize }) : a.serviceName}</div>
                 <div className="text-slate-700">{dateTime(a.startsAt, tz)}</div>
               </div>
               <StatusBadge status={a.status} />

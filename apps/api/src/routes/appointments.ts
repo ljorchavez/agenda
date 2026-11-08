@@ -4,11 +4,13 @@ import {
   appointmentCreateSchema,
   appointmentListQuerySchema,
   appointmentUpdateSchema,
+  businessKind,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, payments, services, users } from '../db/schema.js';
+import { appointments, customers, payments, services, tenants, users } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { hasOverlap, queryAppointments } from '../lib/appointments.js';
+import { assignTable } from '../lib/tables.js';
 import { conflict, notFound } from '../lib/errors.js';
 import type { AppEnv } from '../middleware/auth.js';
 
@@ -25,6 +27,12 @@ async function assertStaffInTenant(db: Db, tenantId: string, staffUserId: string
     columns: { id: true },
   });
   if (!staff) throw notFound('staff');
+}
+
+/** Restaurants assign tables per reservation instead of blocking the whole business. */
+async function isRestaurant(db: Db, tenantId: string): Promise<boolean> {
+  const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { businessType: true } });
+  return t ? businessKind(t.businessType) === 'reservations' : false;
 }
 
 /** Serializes writes per tenant so two requests can't take the same slot. */
@@ -71,10 +79,18 @@ appointmentRoutes.post('/appointments', async (c) => {
 
   const startsAt = new Date(input.startsAt);
   const endsAt = new Date(startsAt.getTime() + (input.durationMin ?? service.durationMin) * MIN);
+  const restaurant = await isRestaurant(db, tenantId);
+  const partySize = restaurant ? (input.partySize ?? 2) : null;
 
   const row = await db.transaction(async (tx) => {
     await lockTenant(tx, tenantId);
-    if (
+    let tableId: string | null = null;
+    if (restaurant) {
+      // Explicit table is always validated; otherwise auto-assign unless overlap is allowed.
+      if (input.tableId || !input.allowOverlap) {
+        tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { tableId: input.tableId })).id;
+      }
+    } else if (
       !input.allowOverlap &&
       (await hasOverlap(tx, tenantId, startsAt, endsAt, { staffUserId: input.staffUserId ?? null }))
     ) {
@@ -92,6 +108,8 @@ appointmentRoutes.post('/appointments', async (c) => {
         priceCents: input.priceCents ?? service.priceCents,
         notes: input.notes ?? null,
         source: 'staff',
+        partySize,
+        tableId,
       })
       .returning({ id: appointments.id });
     return inserted;
@@ -124,14 +142,33 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
   if (input.staffUserId !== undefined) await assertStaffInTenant(db, tenantId, staffUserId);
   const nextStatus = input.status ?? current.status;
   const reactivated = ACTIVE.has(nextStatus) && !ACTIVE.has(current.status);
+  const restaurant = await isRestaurant(db, tenantId);
+  const partySize = restaurant ? (input.partySize ?? current.partySize ?? 2) : current.partySize;
+  const tableChanged = input.tableId !== undefined && input.tableId !== current.tableId;
   const needsOverlapCheck =
     ACTIVE.has(nextStatus) &&
     !input.allowOverlap &&
-    (timeChanged || staffUserId !== current.staffUserId || reactivated);
+    (timeChanged || staffUserId !== current.staffUserId || reactivated ||
+      (restaurant && (tableChanged || partySize !== current.partySize)));
 
   await db.transaction(async (tx) => {
     await lockTenant(tx, tenantId);
-    if (
+    let tableId = input.tableId === undefined ? current.tableId : input.tableId;
+    if (restaurant && needsOverlapCheck) {
+      if (input.tableId) {
+        tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, tableId: input.tableId })).id;
+      } else {
+        // Keep the current table if it still works, otherwise pick another one.
+        try {
+          tableId = current.tableId && input.tableId === undefined
+            ? (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, tableId: current.tableId })).id
+            : (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id })).id;
+        } catch {
+          tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id })).id;
+        }
+      }
+    } else if (
+      !restaurant &&
       needsOverlapCheck &&
       (await hasOverlap(tx, tenantId, startsAt, endsAt, { staffUserId, excludeId: id }))
     ) {
@@ -146,6 +183,8 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
         status: nextStatus,
         priceCents: input.priceCents ?? current.priceCents,
         notes: input.notes === undefined ? current.notes : input.notes,
+        partySize,
+        tableId,
         // Rescheduling re-arms the reminder.
         reminderSentAt: timeChanged ? null : current.reminderSentAt,
       })

@@ -14,12 +14,14 @@ export async function queryAppointments(
     select a.id, a.customer_id, c.name as customer_name, c.phone as customer_phone,
            a.service_id, s.name as service_name, a.staff_user_id,
            a.starts_at, a.ends_at, a.status, a.price_cents, a.source, a.notes,
+           a.party_size, a.table_id, t.name as table_name,
            coalesce((select sum(p.amount_cents) from payments p
                      where p.appointment_id = a.id and p.tenant_id = a.tenant_id
                        and p.status = 'paid'), 0) as paid_cents
     from appointments a
     join customers c on c.id = a.customer_id
     join services s on s.id = a.service_id
+    left join dining_tables t on t.id = a.table_id and t.tenant_id = a.tenant_id
     where a.tenant_id = ${tenantId} and ${where}
     ${orderLimit}`);
   return res.rows.map(toAppointmentDto);

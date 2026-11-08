@@ -68,7 +68,7 @@ async function run(viewport, label) {
 
   await page.goto(`${BASE}/settings`);
   await page.getByRole('heading', { name: 'Configuración' }).waitFor();
-  check(`[${label}] settings page`, await page.getByText('Tu página de reservas').isVisible());
+  check(`[${label}] settings page`, await page.getByRole('heading', { name: 'Tu página de reservas' }).isVisible());
   await page.getByText('Métodos de pago').scrollIntoViewIfNeeded();
   check(`[${label}] settings: payment methods section`, await page.getByText('Métodos de pago').isVisible());
   check(`[${label}] settings: deposit section`, await page.getByText('Anticipo para reservar').isVisible());
@@ -129,8 +129,107 @@ async function run(viewport, label) {
   await ctx.close();
 }
 
+const pinTotal = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('section .leaflet-marker-icon')].reduce(
+      (a, el) => a + Number(el.querySelector('[data-count]')?.getAttribute('data-count') ?? 1),
+      0,
+    ),
+  );
+
+async function publicPages(viewport, label) {
+  const ctx = await browser.newContext({ viewport, locale: 'es-MX', timezoneId: 'America/Mexico_City' });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`${label}: ${e.message}`));
+  page.on('console', (m) => m.type() === 'error' && !/tile\.openstreetmap/.test(m.text()) && errors.push(`${label} console: ${m.text()}`));
+  const mobile = viewport.width < 1024;
+  const showMap = async () => { if (mobile) await page.getByRole('tab', { name: 'Mapa' }).click(); };
+
+  // Directory with map
+  await page.goto(`${BASE}/directorio`);
+  await page.getByText('Encuentra y reserva').waitFor({ timeout: 15000 });
+  await page.getByText(/\d+ negocios/).first().waitFor({ timeout: 15000 });
+  const total = Number((await page.getByText(/\d+ negocios/).first().textContent()).match(/\d+/)[0]);
+  check(`[${label}] directory lists businesses`, total >= 15, total);
+  await page.screenshot({ path: `${out}/${label}-directory-list.png`, fullPage: false });
+  await showMap();
+  await page.locator('.leaflet-marker-icon').first().waitFor({ timeout: 15000 }).catch(() => {});
+  const pins = await pinTotal(page);
+  check(`[${label}] map shows every business (pins + bubbles)`, pins === total, `${pins}/${total}`);
+  check(`[${label}] dense areas are grouped into bubbles`, (await page.locator('.map-cluster').count()) > 0);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${out}/${label}-directory-map.png`, fullPage: false });
+  await page.locator('.leaflet-marker-icon[title*="Yucateca"]').click();
+  check(`[${label}] pin popup opens`, await page.locator('.leaflet-popup').isVisible().catch(() => false));
+
+  // Filter by specialty
+  if (mobile) await page.getByRole('tab', { name: 'Lista' }).click();
+  await page.getByRole('button', { name: /^Restaurante \d+/ }).click();
+  await page.waitForTimeout(500);
+  const rest = Number((await page.getByText(/\d+ negocios?/).first().textContent()).match(/\d+/)[0]);
+  check(`[${label}] filter by specialty`, rest > 0 && rest < total && page.url().includes('tipo=restaurant'), `${rest}/${total}`);
+  await showMap();
+  await page.waitForTimeout(500);
+  check(`[${label}] map pins follow the filter`, (await pinTotal(page)) === rest);
+  await page.locator('.map-cluster').first().click().catch(() => {});
+  await page.waitForTimeout(800);
+
+  // Filter by zone (state + city)
+  await page.goto(`${BASE}/directorio?estado=Jalisco`);
+  await page.getByText(/\d+ negocios?/).first().waitFor({ timeout: 15000 });
+  const jal = Number((await page.getByText(/\d+ negocios?/).first().textContent()).match(/\d+/)[0]);
+  check(`[${label}] filter by zone`, jal > 0 && jal < total, `${jal}/${total}`);
+  check(`[${label}] city select enabled after state`, await page.getByLabel('Ciudad').isEnabled());
+
+  // Restaurant reservation from the public page
+  await page.goto(`${BASE}/b/restaurante-demo`);
+  await page.getByText('Reserva tu mesa', { exact: true }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: '4', exact: true }).click();
+  const dates = page.locator('section:has(h2:has-text("Elige el día")) button');
+  let picked = false;
+  for (let i = 4; i < 10 && !picked; i++) {
+    await dates.nth(i).click();
+    await page.waitForTimeout(800);
+    const times = page.locator('section:has(h2:has-text("Elige la hora")) .grid button');
+    if ((await times.count()) > 2) {
+      await times.nth(2).click();
+      picked = true;
+    }
+  }
+  check(`[${label}] restaurant slots for 4 people`, picked);
+  await page.getByPlaceholder('Nombre', { exact: true }).fill(`Mesa UI ${label}`);
+  await page.getByPlaceholder('WhatsApp').fill('5512340000');
+  await page.screenshot({ path: `${out}/${label}-restaurant-booking.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Confirmar reservación' }).click();
+  await page.getByText('Tu mesa está reservada').waitFor({ timeout: 15000 }).catch(() => {});
+  check(`[${label}] guest reserves a table`, await page.getByText('Tu mesa está reservada').isVisible());
+  check(`[${label}] confirmation mentions party size`, await page.getByText(/Mesa para 4 personas/).isVisible());
+
+  // Restaurant back office
+  await page.goto(`${BASE}/login`);
+  await page.fill('#email', 'restaurante@agenda.mx');
+  await page.fill('#password', 'demo1234');
+  await page.click('button[type=submit], form button');
+  await page.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
+  await page.goto(`${BASE}/agenda`);
+  await page.getByRole('heading', { name: 'Reservaciones' }).waitFor({ timeout: 15000 }).catch(() => {});
+  check(`[${label}] restaurant agenda is "Reservaciones"`, await page.getByRole('heading', { name: 'Reservaciones' }).isVisible());
+  await page.waitForTimeout(1000);
+  await page.screenshot({ path: `${out}/${label}-restaurant-agenda.png`, fullPage: true });
+  await page.goto(`${BASE}/tables`);
+  await page.getByText('Mesa 8').waitFor({ timeout: 15000 }).catch(() => {});
+  check(`[${label}] tables page`, await page.getByText('Mesa 8').isVisible());
+  await page.screenshot({ path: `${out}/${label}-tables.png`, fullPage: true });
+  await page.goto(`${BASE}/settings`);
+  await page.locator('#perfil .leaflet-marker-icon').waitFor({ timeout: 15000 }).catch(() => {});
+  check(`[${label}] settings shows profile map pin`, (await page.locator('#perfil .leaflet-marker-icon').count()) === 1);
+  await ctx.close();
+}
+
 await run({ width: 1366, height: 900 }, 'desktop');
 await run({ width: 390, height: 844 }, 'mobile');
+await publicPages({ width: 1366, height: 900 }, 'desktop');
+await publicPages({ width: 390, height: 844 }, 'mobile');
 await browser.close();
 check('no JS errors in browser', errors.length === 0, errors.slice(0, 5).join(' | '));
 console.log(results.join('\n'));

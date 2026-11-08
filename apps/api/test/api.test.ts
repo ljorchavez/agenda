@@ -327,4 +327,107 @@ d('API (integration)', () => {
     expect((await call('POST', `/public/manage/${token}/cancel`)).status).toBe(422);
     expect((await call('POST', `/public/manage/${token}/reschedule`, { startsAt: target })).status).toBe(422);
   });
+
+  it('restaurants: tables, party-size availability, auto assignment and capacity', async () => {
+    const reg = await call('POST', '/auth/register', {
+      businessName: 'Restaurante Prueba', businessType: 'restaurant', name: 'Chef', email: 'chef@test.mx', password: 'password123',
+    });
+    expect(reg.status).toBe(201);
+    const tok = reg.body.token;
+    expect(reg.body.tenant.kind).toBe('reservations');
+    const tables = await call('GET', '/tables', undefined, tok);
+    expect(tables.body.map((t: { seats: number }) => t.seats)).toEqual([2, 2, 4, 4, 6]);
+    // B can't see A's tables
+    expect((await call('GET', '/tables', undefined, b.token)).body).toHaveLength(0);
+    expect((await call('PUT', `/tables/${tables.body[0].id}`, { name: 'x', seats: 2 }, b.token)).status).toBe(404);
+
+    const pub = await call('GET', '/public/restaurante-prueba');
+    expect(pub.body.kind).toBe('reservations');
+    expect(pub.body.maxPartySize).toBe(8);
+
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 4 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const d = day.toISODate();
+    const av = await call('GET', `/public/restaurante-prueba/availability?partySize=2&date=${d}`);
+    expect(av.body.slots.length).toBeGreaterThan(0);
+    const slot = av.body.slots[0];
+    expect((await call('GET', `/public/restaurante-prueba/availability?partySize=9&date=${d}`)).body.slots).toHaveLength(0);
+
+    // Two 2-seat tables, then 4-seat tables, then the 6-seat one: five parties of 2 fit, a sixth doesn't.
+    const seated: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = await call('POST', '/public/restaurante-prueba/bookings', { partySize: 2, startsAt: slot, name: `Grupo ${i}`, phone: `55000011${10 + i}` });
+      expect(r.status).toBe(201);
+      expect(r.body.partySize).toBe(2);
+      seated.push(r.body.id);
+    }
+    const full = await call('POST', '/public/restaurante-prueba/bookings', { partySize: 2, startsAt: slot, name: 'Grupo 6', phone: '5500001199' });
+    expect(full.status).toBe(409);
+    expect((await call('GET', `/public/restaurante-prueba/availability?partySize=2&date=${d}`)).body.slots).not.toContain(slot);
+    expect((await call('POST', '/public/restaurante-prueba/bookings', { partySize: 12, startsAt: slot, name: 'Grande', phone: '5500001198' })).status).toBe(422);
+
+    const list = await call('GET', `/appointments?from=${day.startOf('day').toISO()}&to=${day.endOf('day').toISO()}`, undefined, tok);
+    const names = list.body.map((a: { tableName: string }) => a.tableName).sort();
+    expect(names).toEqual(['Mesa 1', 'Mesa 2', 'Mesa 3', 'Mesa 4', 'Mesa 5']);
+    expect(new Set(list.body.map((a: { tableId: string }) => a.tableId)).size).toBe(5);
+
+    // Staff reservation at the same time has no table left -> 409; with allowOverlap it's saved without a table
+    const cust = await call('POST', '/customers', { name: 'Walk In', phone: '5512345000' }, tok);
+    const svc = (await call('GET', '/services', undefined, tok)).body[0];
+    const noRoom = await call('POST', '/appointments', { customerId: cust.body.id, serviceId: svc.id, startsAt: slot, partySize: 2 }, tok);
+    expect(noRoom.status).toBe(409);
+    expect(noRoom.body.error).toBe('no_table_available');
+    const walkIn = await call('POST', '/appointments', { customerId: cust.body.id, serviceId: svc.id, startsAt: slot, partySize: 2, allowOverlap: true }, tok);
+    expect(walkIn.status).toBe(201);
+    expect(walkIn.body.tableId).toBeNull();
+
+    // Cancelling frees the table for the next booking
+    await call('PATCH', `/appointments/${seated[0]}`, { status: 'cancelled' }, tok);
+    expect((await call('POST', '/public/restaurante-prueba/bookings', { partySize: 2, startsAt: slot, name: 'Grupo 7', phone: '5500001197' })).status).toBe(201);
+
+    // Customer reschedule keeps a table
+    const one = (await call('GET', `/appointments?from=${day.startOf('day').toISO()}&to=${day.endOf('day').toISO()}`, undefined, tok)).body.find((a: { tableId: string | null; status: string }) => a.tableId && a.status === 'scheduled');
+    const later = av.body.slots[av.body.slots.length - 1];
+    const moved = await call('POST', `/public/manage/${one.managePath.slice(3)}/reschedule`, { startsAt: later });
+    expect(moved.status).toBe(200);
+    expect(moved.body.appointment.partySize).toBe(2);
+  });
+
+  it('public directory: opt-in, location required, only public fields', async () => {
+    // Not listed by default
+    let dir = await call('GET', '/public-directory');
+    expect(dir.status).toBe(200);
+    expect(dir.body.entries.find((e: { slug: string }) => e.slug === 'negocio-a')).toBeUndefined();
+
+    const me = await call('GET', '/auth/me', undefined, a.token);
+    expect(me.body.tenant.profile.directoryListed).toBe(false);
+    // Listing without a location is rejected
+    let r = await call('PATCH', '/tenant', { profile: { ...me.body.tenant.profile, directoryListed: true } }, a.token);
+    expect(r.status).toBe(422);
+    r = await call('PATCH', '/tenant', { profile: { ...me.body.tenant.profile, lat: 99, lng: 0, city: 'X', directoryListed: true } }, a.token);
+    expect(r.status).toBe(422);
+    r = await call('PATCH', '/tenant', {
+      profile: { description: 'Cortes', address: 'Calle 1', neighborhood: 'Roma Norte', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.42, lng: -99.16, directoryListed: true },
+    }, a.token);
+    expect(r.status).toBe(200);
+    expect(r.body.profile.city).toBe('Ciudad de México');
+
+    dir = await call('GET', '/public-directory');
+    const entry = dir.body.entries.find((e: { slug: string }) => e.slug === 'negocio-a');
+    expect(entry).toMatchObject({ name: 'Negocio a', businessType: 'barbershop', city: 'Ciudad de México', lat: 19.42, onlineBooking: true });
+    expect(entry.priceFromCents).toBe(20000);
+    expect(dir.body.zones).toContainEqual({ state: 'Ciudad de México', cities: ['Ciudad de México'] });
+    const raw = JSON.stringify(dir.body);
+    for (const leak of ['owner-a@test.mx', 'Juan Pérez', 'settings', 'mp_access', 'tenant_id']) expect(raw).not.toContain(leak);
+
+    const pub = await call('GET', '/public/negocio-a');
+    expect(pub.body).toMatchObject({ neighborhood: 'Roma Norte', lat: 19.42, kind: 'appointments', maxPartySize: null });
+
+    // Staff can't change the profile; turning it off hides it again
+    const staff = await call('POST', '/auth/login', { email: 'staff-a@test.mx', password: 'password123' });
+    expect((await call('PATCH', '/tenant', { profile: { ...r.body.profile, directoryListed: false } }, staff.body.token)).status).toBe(403);
+    await call('PATCH', '/tenant', { profile: { ...r.body.profile, directoryListed: false } }, a.token);
+    dir = await call('GET', '/public-directory');
+    expect(dir.body.entries.find((e: { slug: string }) => e.slug === 'negocio-a')).toBeUndefined();
+  });
 });

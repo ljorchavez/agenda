@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
@@ -16,6 +16,7 @@ export function BookingPage() {
   const [serviceId, setServiceId] = useState('');
   const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [slot, setSlot] = useState('');
+  const [partySize, setPartySize] = useState(2);
   const [form, setForm] = useState({ name: '', phone: '', email: '' });
 
   const biz = useQuery({
@@ -31,17 +32,25 @@ export function BookingPage() {
     if (biz.data && !stored) void i18n.changeLanguage(biz.data.locale);
   }, [biz.data, i18n]);
 
+  const isTables = biz.data?.kind === 'reservations';
   const slots = useQuery({
-    queryKey: ['slots', slug, serviceId, date],
-    queryFn: () => api<{ slots: string[] }>(`/public/${slug}/availability?serviceId=${serviceId}&date=${date}`),
-    enabled: Boolean(serviceId && date),
+    queryKey: ['slots', slug, isTables ? `p${partySize}` : serviceId, date],
+    queryFn: () =>
+      api<{ slots: string[] }>(
+        isTables
+          ? `/public/${slug}/availability?partySize=${partySize}&date=${date}`
+          : `/public/${slug}/availability?serviceId=${serviceId}&date=${date}`,
+      ),
+    enabled: Boolean(biz.data && date && (isTables || serviceId)),
   });
 
   const book = useMutation({
     mutationFn: () =>
       api<PublicBookingResult>(`/public/${slug}/bookings`, {
         method: 'POST',
-        body: { serviceId, startsAt: slot, ...form, email: form.email || undefined },
+        body: isTables
+          ? { partySize, startsAt: slot, ...form, email: form.email || undefined }
+          : { serviceId, startsAt: slot, ...form, email: form.email || undefined },
       }),
     onError: () => {
       setSlot('');
@@ -60,6 +69,13 @@ export function BookingPage() {
 
   const business = biz.data;
   const service = business.services.find((s) => s.id === serviceId);
+  const ready = isTables || Boolean(service);
+  const mapsUrl =
+    business.lat != null
+      ? `https://www.google.com/maps/search/?api=1&query=${business.lat},${business.lng}`
+      : business.address
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([business.address, business.neighborhood, business.city].filter(Boolean).join(', '))}`
+        : null;
   const slotFmt = new Intl.DateTimeFormat(i18n.language.startsWith('en') ? 'en-US' : 'es-MX', {
     timeStyle: 'short',
     timeZone: business.timezone,
@@ -70,8 +86,21 @@ export function BookingPage() {
       <div className="mx-auto max-w-xl">
         <div className="mb-6 flex items-start justify-between">
           <div>
+            <Link to="/directorio" className="text-xs text-slate-500 hover:text-brand-700">← {t('directory.title')}</Link>
             <h1 className="text-2xl font-bold text-slate-900">{biz.data.name}</h1>
-            <p className="text-slate-600">{t('booking.title')}</p>
+            <p className="text-slate-600">{isTables ? t('booking.titleTable') : t('booking.title')}</p>
+            {business.description && <p className="mt-2 max-w-md text-sm text-slate-600">{business.description}</p>}
+            {(business.address || business.neighborhood) && (
+              <p className="mt-1 text-sm text-slate-500">
+                {[business.address, business.neighborhood, business.city].filter(Boolean).join(', ')}
+                {mapsUrl && (
+                  <>
+                    {' · '}
+                    <a href={mapsUrl} target="_blank" rel="noreferrer" className="font-medium text-brand-700">{t('booking.directions')}</a>
+                  </>
+                )}
+              </p>
+            )}
           </div>
           <LanguageSwitch />
         </div>
@@ -79,9 +108,11 @@ export function BookingPage() {
         {book.isSuccess ? (
           <div className="card text-center">
             <div className="mb-2 text-4xl">✓</div>
-            <h2 className="text-xl font-semibold">{t('booking.success')}</h2>
+            <h2 className="text-xl font-semibold">{book.data.partySize ? t('booking.successTitleTable') : t('booking.success')}</h2>
             <p className="mt-2 text-slate-600">
-              {t('booking.successDetail', { service: book.data.serviceName, date: dateTime(book.data.startsAt, biz.data.timezone) })}
+              {book.data.partySize
+                ? t('booking.successTable', { count: book.data.partySize, date: dateTime(book.data.startsAt, biz.data.timezone) })
+                : t('booking.successDetail', { service: book.data.serviceName, date: dateTime(book.data.startsAt, biz.data.timezone) })}
             </p>
             {book.data.deposit && <DepositBox deposit={book.data.deposit} />}
             <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-sm">
@@ -94,6 +125,24 @@ export function BookingPage() {
           </div>
         ) : (
           <div className="card space-y-6">
+            {isTables ? (
+              <section>
+                <h2 className="mb-2 font-semibold">{t('booking.choosePeople')}</h2>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: business.maxPartySize ?? 8 }, (_, i) => i + 1).map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => { setPartySize(n); setSlot(''); }}
+                      className={`h-11 min-w-11 rounded-lg border px-3 text-sm font-medium ${partySize === n ? 'border-brand-600 bg-brand-700 text-white' : 'border-slate-200 hover:border-slate-400'}`}
+                      aria-pressed={partySize === n}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">{t('booking.largerGroups')}</p>
+              </section>
+            ) : (
             <section>
               <h2 className="mb-2 font-semibold">{t('booking.chooseService')}</h2>
               <div className="grid gap-2">
@@ -122,8 +171,9 @@ export function BookingPage() {
                 ))}
               </div>
             </section>
+            )}
 
-            {service && (
+            {ready && (
               <section>
                 <h2 className="mb-2 font-semibold">{t('booking.chooseDate')}</h2>
                 <div className="flex gap-2 overflow-x-auto pb-1">
@@ -145,7 +195,7 @@ export function BookingPage() {
               </section>
             )}
 
-            {service && (
+            {ready && (
               <section>
                 <h2 className="mb-2 font-semibold">{t('booking.chooseTime')}</h2>
                 {slots.isLoading ? (
@@ -174,7 +224,7 @@ export function BookingPage() {
                 <input required minLength={2} placeholder={t('customers.name')} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 <input required type="tel" placeholder={t('customers.phone')} className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                 <input type="email" placeholder={`${t('customers.email')} (${t('common.optional')})`} className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                <button className="btn-primary w-full" disabled={book.isPending}>{t('booking.confirm')}</button>
+                <button className="btn-primary w-full" disabled={book.isPending}>{isTables ? t('booking.confirmTable') : t('booking.confirm')}</button>
               </form>
             )}
             <ErrorText error={book.error} ns="booking" />

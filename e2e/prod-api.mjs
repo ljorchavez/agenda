@@ -279,6 +279,67 @@ if (process.env.CRON_SECRET) {
   check('business sees the change in the calendar with a note', mine?.status === 'cancelled' && /Reagendada por el cliente/.test(mine?.notes ?? '') && /Cancelada por el cliente/.test(mine?.notes ?? ''), JSON.stringify(mine));
 }
 
+// ---- Public directory
+{
+  const d = await call('GET', '/api/public-directory');
+  check('directory lists opt-in businesses', d.status === 200 && d.body.entries.length >= 15, d.text.slice(0, 200));
+  const slugs = (d.body?.entries ?? []).map((e) => e.slug);
+  check('directory includes demo clinic & restaurant', slugs.includes('nutricion-demo') && slugs.includes('restaurante-demo'));
+  check('directory entries all have coordinates & city', (d.body?.entries ?? []).every((e) => Number.isFinite(e.lat) && Number.isFinite(e.lng) && e.city));
+  check('directory exposes only public fields', !/password|email|customer|token|accessToken/i.test(JSON.stringify(d.body?.entries?.[0] ?? {})));
+  check('directory zones include several states', (d.body?.zones ?? []).length >= 4, JSON.stringify(d.body?.zones));
+  check('directory has restaurants and services', d.body.entries.some((e) => e.kind === 'reservations') && d.body.entries.some((e) => e.kind === 'appointments'));
+  check('directory is cacheable', /max-age=60/.test(d.headers.get('cache-control') ?? ''));
+  const page = await call('GET', '/directorio');
+  check('/directorio serves SPA', page.status === 200 && page.text.includes('<div id="root">'));
+}
+
+// ---- Restaurant reservations
+{
+  const login = await call('POST', '/api/auth/login', { email: 'restaurante@agenda.mx', password: 'demo1234' });
+  check('restaurant demo login', login.status === 200 && login.body?.tenant?.kind === 'reservations', login.text.slice(0, 200));
+  const rt = login.body?.token;
+  const pub = await call('GET', '/api/public/restaurante-demo');
+  check('restaurant public page is table-based', pub.status === 200 && pub.body.kind === 'reservations' && pub.body.maxPartySize >= 8 && pub.body.lat != null, pub.text.slice(0, 200));
+  const tables = await call('GET', '/api/tables', null, rt);
+  check('restaurant has 8 tables', tables.status === 200 && tables.body.length === 8, tables.text.slice(0, 200));
+  check('tables are private', (await call('GET', '/api/tables')).status === 401);
+  check('party larger than max -> no slots', ((await call('GET', `/api/public/restaurante-demo/availability?partySize=40&date=${new Date(Date.now() + 3 * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' })}`)).body?.slots ?? []).length === 0);
+  let day = null;
+  let slots = [];
+  for (let i = 10; i < 20 && !slots.length; i++) {
+    day = new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    slots = (await call('GET', `/api/public/restaurante-demo/availability?partySize=5&date=${day}`)).body?.slots ?? [];
+  }
+  check('availability for 5 people', slots.length > 0, day);
+  const slot = slots[Math.floor(slots.length / 2)];
+  const b = await call('POST', '/api/public/restaurante-demo/bookings', { partySize: 5, startsAt: slot, name: 'Mesa QA', phone: '5511223344' });
+  check('online table reservation', b.status === 201 && b.body.partySize === 5 && /^\/c\//.test(b.body.managePath ?? ''), b.text);
+  const appts = await call('GET', `/api/appointments?from=${encodeURIComponent(slot)}&to=${encodeURIComponent(new Date(new Date(slot).getTime() + 60e3).toISOString())}`, null, rt);
+  const mine = appts.body?.find?.((a) => a.managePath === b.body?.managePath);
+  const table = tables.body?.find?.((x) => x.id === mine?.tableId);
+  check('reservation assigned to a table that fits', !!table && table.seats >= 5 && mine.tableName === table.name, JSON.stringify(mine));
+  check('restaurant reservation over capacity -> 422', (await call('POST', '/api/public/restaurante-demo/bookings', { partySize: 60, startsAt: slot, name: 'Grupo QA', phone: '5511223355' })).status === 422);
+  // Fill every 6-seat-or-larger table at that slot -> the slot disappears for 6 people
+  const big = tables.body.filter((x) => x.active && x.seats >= 6).length;
+  let filled = 0;
+  for (let i = 0; i < big + 1; i++) {
+    const x = await call('POST', '/api/public/restaurante-demo/bookings', { partySize: 6, startsAt: slot, name: `Grupo QA ${i}`, phone: `55112233${60 + i}` });
+    if (x.status === 201) filled++;
+    else check('extra party of 6 rejected when big tables are full', x.status === 409 && x.body?.error === 'slot_unavailable', x.text);
+  }
+  check('only as many parties of 6 as big tables', filled <= big, `${filled}/${big}`);
+  const after = (await call('GET', `/api/public/restaurante-demo/availability?partySize=6&date=${day}`)).body?.slots ?? [];
+  check('full slot no longer offered for 6', !after.includes(slot));
+  const tok = b.body.managePath.slice(3);
+  const m = await call('GET', `/api/public/manage/${tok}`);
+  check('restaurant manage link shows party size', m.status === 200 && m.body.appointment.partySize === 5, m.text.slice(0, 200));
+  const c = await call('POST', `/api/public/manage/${tok}/cancel`);
+  check('guest cancels reservation', c.status === 200 && c.body.appointment.status === 'cancelled');
+  const rep = await call('GET', '/api/reports?from=2026-01-01&to=2026-06-30', null, rt);
+  check('restaurant reports have history', rep.status === 200 && (rep.body?.summary?.appointments ?? rep.body?.totals?.appointments ?? 1) > 0, rep.text.slice(0, 200));
+}
+
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed  (${mx(Date.now())})`);
 process.exit(fail ? 1 : 0);
