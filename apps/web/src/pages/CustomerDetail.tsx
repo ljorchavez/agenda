@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AppointmentStatus, CustomerWithStats, PaymentMethod, PaymentStatus } from '@agenda/shared';
+import { paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
+import { useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
@@ -145,7 +146,11 @@ function PaymentModal({ customerId, onClose }: { customerId: string; onClose: ()
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<PaymentMethod>('cash');
+  const { tenant } = useAuth();
+  const pay = paymentSettingsOf(tenant!.settings);
+  const enabled = (['cash', 'card', 'transfer', 'spei'] as const).filter((m) => pay.methods[m]);
+  const options = enabled.length ? enabled : (['cash', 'card', 'transfer'] as const);
+  const [method, setMethod] = useState<PaymentMethod>(options[0]!);
   const save = useMutation({
     mutationFn: () => api('/payments', { method: 'POST', body: { customerId, amountCents: toCents(amount), method, status: 'paid' } }),
     onSuccess: () => {
@@ -167,7 +172,7 @@ function PaymentModal({ customerId, onClose }: { customerId: string; onClose: ()
           <div>
             <label className="label">{t('payments.method')}</label>
             <select className="input" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
-              {(['cash', 'card', 'transfer', 'spei'] as const).map((m) => (
+              {options.map((m) => (
                 <option key={m} value={m}>{t(`methods.${m}`)}</option>
               ))}
             </select>

@@ -57,6 +57,11 @@ async function run(viewport, label) {
   await page.goto(`${BASE}/settings`);
   await page.getByRole('heading', { name: 'Configuración' }).waitFor();
   check(`[${label}] settings page`, await page.getByText('Tu página de reservas').isVisible());
+  await page.getByText('Métodos de pago').scrollIntoViewIfNeeded();
+  check(`[${label}] settings: payment methods section`, await page.getByText('Métodos de pago').isVisible());
+  check(`[${label}] settings: deposit section`, await page.getByText('Anticipo para reservar').isVisible());
+  check(`[${label}] settings: CLABE prefilled`, (await page.locator('input[value="012180001234567899"]').count()) === 1);
+  await page.screenshot({ path: `${out}/${label}-settings.png`, fullPage: true });
 
   // language switch
   await page.locator('button:visible:text-is("EN")').first().click();
@@ -74,7 +79,17 @@ async function run(viewport, label) {
   await days.nth(6).click();
   await page.waitForTimeout(1500);
   check(`[${label}] booking: times shown`, (await page.locator('section:has-text("Elige la hora") button').count()) > 0);
+  check(`[${label}] booking: deposit shown on services`, (await page.getByText(/Anticipo: \$/).count()) > 0);
   await page.screenshot({ path: `${out}/${label}-booking.png`, fullPage: true });
+  if (label === 'desktop') {
+    await page.locator('section:has-text("Elige la hora") button').last().click();
+    await page.fill('input[type=tel]', '5512340000');
+    await page.locator('input[minlength="2"]').fill('Prueba UI Anticipo');
+    await page.getByRole('button', { name: 'Confirmar cita' }).click();
+    await page.getByText('Anticipo pendiente').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] booking: deposit box with CLABE`, await page.getByText('012180001234567899').isVisible());
+    await page.screenshot({ path: `${out}/${label}-booking-done.png`, fullPage: true });
+  }
 
   // logout
   await page.goto(`${BASE}/`);

@@ -5,7 +5,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
+import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { closeDb, getDb } from './client.js';
 import { appointments, customers, payments, services, tenants, users } from './schema.js';
@@ -33,7 +33,14 @@ async function main() {
       businessType: 'nutrition',
       phone: '+525512345678',
       timezone: TZ,
-      settings: DEFAULT_TENANT_SETTINGS,
+      settings: {
+        ...DEFAULT_TENANT_SETTINGS,
+        payments: {
+          ...DEFAULT_PAYMENT_SETTINGS,
+          transfer: { bank: 'BBVA', accountHolder: 'Nutrición Demo SA de CV', clabe: '012180001234567899' },
+          deposit: { enabled: true, type: 'percent', value: 30 },
+        },
+      },
     })
     .returning();
   const tenantId = tenant!.id;

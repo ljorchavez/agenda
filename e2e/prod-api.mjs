@@ -135,7 +135,11 @@ check('confirm appointment', r.status === 200 && r.body?.status === 'confirmed',
 r = await call('PATCH', `/api/appointments/${appt?.id}`, { startsAt: new Date(start.getTime() + 60 * 6e4).toISOString() }, token);
 check('reschedule appointment', r.status === 200 && new Date(r.body?.startsAt).getTime() === start.getTime() + 3.6e6, r.text);
 r = await call('POST', '/api/payments/link', { appointmentId: appt?.id, amountCents: 20000, method: 'mercadopago' }, token);
-check('MP link without credentials -> 422 not configured', r.status === 422 && r.body?.error === 'mercadopago_not_configured', r.text);
+check('MP link refused (method disabled / not connected)', r.status === 422 && ['method_disabled', 'mercadopago_not_configured'].includes(r.body?.error), r.text);
+r = await call('GET', '/api/auth/me', null, token);
+check('payment settings exposed, token never', r.body?.tenant?.settings?.payments?.deposit?.enabled === true && r.body?.tenant?.mercadoPago?.connected === false && !r.text.includes('APP_USR'), r.text.slice(0, 300));
+r = await call('PATCH', '/api/tenant', { settings: { ...r.body.tenant.settings, payments: { ...r.body.tenant.settings.payments, methods: { ...r.body.tenant.settings.payments.methods, spei: true } } } }, token);
+check('SPEI online needs Mercado Pago connected', r.status === 422 && r.body?.error === 'mercadopago_not_connected', r.text);
 r = await call('POST', '/api/payments', { customerId: cust?.id, appointmentId: appt?.id, amountCents: 10000, method: 'transfer' }, token);
 check('register partial payment', r.status === 201 && r.body?.status === 'paid', r.text);
 r = await call('PATCH', `/api/appointments/${appt?.id}`, { status: 'completed', paymentMethod: 'cash' }, token);
@@ -164,6 +168,8 @@ check('update settings', r.status === 200, r.text);
 // ---- Public booking
 r = await call('GET', '/api/public/nutricion-demo');
 check('public business page', r.status === 200 && r.body?.services?.length >= 3, r.text.slice(0, 200));
+check('public page shows 30% deposit', r.body?.deposit?.type === 'percent' && r.body?.deposit?.value === 30, JSON.stringify(r.body?.deposit));
+check('public page does not leak CLABE', !r.text.includes('012180001234567899'));
 check('public page does not leak customers', !r.text.includes('Fernández') && !r.text.includes('@example.com'));
 r = await call('GET', '/api/public/no-existe-123');
 check('unknown business -> 404', r.status === 404, r.status);
@@ -179,6 +185,7 @@ const firstHourMx = slots[0] && new Date(slots[0]).toLocaleTimeString('en-GB', {
 check('first slot at 09:00 Mexico City', firstHourMx === '09:00', `${firstHourMx} (${slots[0]})`);
 r = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svc.id, startsAt: slots[0], name: 'Paciente Web QA', phone: '5511223344' });
 check('public booking', r.status === 201, r.text);
+check('booking returns 30% deposit with transfer data', r.body?.deposit?.amountCents === Math.round(svc.priceCents * 0.3) && r.body?.deposit?.method === 'transfer' && r.body?.deposit?.transfer?.clabe === '012180001234567899', JSON.stringify(r.body?.deposit));
 r = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svc.id, startsAt: slots[0], name: 'Otra Persona', phone: '5599887766' });
 check('same slot again -> 409', r.status === 409 && r.body?.error === 'slot_unavailable', r.text);
 r = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svc.id, startsAt: '2020-01-01T10:00:00-06:00', name: 'Pasado', phone: '5500000000' });

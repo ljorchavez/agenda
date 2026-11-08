@@ -1,3 +1,4 @@
+import { paymentSettingsOf } from '@agenda/shared';
 import type {
   AppointmentDto,
   CustomerDto,
@@ -21,7 +22,8 @@ export function toTenantDto(t: Tenant): TenantDto {
     timezone: t.timezone,
     currency: t.currency,
     locale: t.locale as Locale,
-    settings: t.settings,
+    settings: { ...t.settings, payments: paymentSettingsOf(t.settings) },
+    mercadoPago: { connected: Boolean(t.mpAccessTokenEnc), account: t.mpAccount },
   };
 }
 

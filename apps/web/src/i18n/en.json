@@ -133,7 +133,8 @@
     "linkReady": "Share this link with your customer:",
     "sendWhatsapp": "Send via WhatsApp",
     "deleteConfirm": "Delete this appointment? This cannot be undone.",
-    "mercadopago_not_configured": "Mercado Pago is not configured yet"
+    "mercadopago_not_configured": "Mercado Pago is not configured yet",
+    "method_disabled": "That payment method is disabled in Settings"
   },
   "customers": {
     "title": "Customers",
@@ -208,7 +209,10 @@
     "timezone": "Time zone",
     "team": "Team",
     "addMember": "Add member",
-    "role": { "owner": "Owner", "staff": "Staff" }
+    "role": {
+      "owner": "Owner",
+      "staff": "Staff"
+    }
   },
   "booking": {
     "title": "Book your appointment",
@@ -222,6 +226,43 @@
     "successDetail": "{{service}} on {{date}}. We'll send you a WhatsApp reminder.",
     "another": "Book another",
     "slot_unavailable": "That time was just taken. Please choose another.",
-    "notFound": "This business doesn't exist or doesn't accept online bookings."
+    "notFound": "This business doesn't exist or doesn't accept online bookings.",
+    "depositOf": "Deposit: {{amount}}",
+    "depositTitle": "Deposit due: {{amount}}",
+    "depositHelp": "Your appointment is confirmed once the deposit is received.",
+    "payNow": "Pay deposit",
+    "paySpei": "See SPEI payment details",
+    "depositContact": "The business will contact you about the deposit."
+  },
+  "paymentSettings": {
+    "title": "Payment methods",
+    "subtitle": "Choose how your customers can pay you. Everything is optional.",
+    "bank": "Bank",
+    "holder": "Account holder",
+    "invalidClabe": "Invalid CLABE (check the 18 digits)",
+    "connected": "Connected",
+    "notConnected": "Not connected",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "disconnectConfirm": "Disconnect Mercado Pago? Online payments will be turned off.",
+    "tokenHelp": "Paste your production Access Token (Mercado Pago → Your integrations → Credentials). Money goes straight to your account; we never show the token.",
+    "online": {
+      "mercadopago": "Charge online by card (Mercado Pago)",
+      "spei": "Charge online via SPEI (Mercado Pago)"
+    },
+    "deposit": "Booking deposit",
+    "depositHelp": "Ask online bookings to pay part upfront. Helps reduce no-shows.",
+    "type": {
+      "percent": "Percentage of price",
+      "fixed": "Fixed amount"
+    },
+    "percent": "Percentage (%)",
+    "amount": "Amount (MXN)",
+    "example": "Example: for a {{price}} service, the deposit would be {{deposit}}.",
+    "noDepositMethod": "To collect deposits, enable Mercado Pago or add your transfer CLABE.",
+    "mercadopago_invalid_token": "Invalid Mercado Pago token",
+    "mercadopago_not_mexico": "The Mercado Pago account must be from Mexico",
+    "mercadopago_not_connected": "Connect your Mercado Pago account first",
+    "validation_error": "Check the data (e.g. CLABE or percentage)"
   }
 }

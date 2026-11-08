@@ -50,6 +50,10 @@ export const tenants = pgTable(
     currency: text('currency').notNull().default('MXN'),
     locale: text('locale').notNull().default('es'),
     settings: jsonb('settings').$type<TenantSettings>().notNull(),
+    /** Business's own Mercado Pago access token, AES-256-GCM encrypted. Never sent to clients. */
+    mpAccessTokenEnc: text('mp_access_token_enc'),
+    /** Mercado Pago account nickname/email shown in settings */
+    mpAccount: text('mp_account'),
     ...timestamps,
   },
   (t) => [uniqueIndex('tenants_slug_idx').on(t.slug)],

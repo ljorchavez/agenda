@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
-import type { PublicBusinessDto } from '@agenda/shared';
+import type { PublicBookingResult, PublicBusinessDto } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
 import { ErrorText, Loading } from '../components/ui';
 import { api } from '../lib/api';
@@ -39,7 +39,7 @@ export function BookingPage() {
 
   const book = useMutation({
     mutationFn: () =>
-      api<{ startsAt: string; serviceName: string }>(`/public/${slug}/bookings`, {
+      api<PublicBookingResult>(`/public/${slug}/bookings`, {
         method: 'POST',
         body: { serviceId, startsAt: slot, ...form, email: form.email || undefined },
       }),
@@ -83,6 +83,7 @@ export function BookingPage() {
             <p className="mt-2 text-slate-600">
               {t('booking.successDetail', { service: book.data.serviceName, date: dateTime(book.data.startsAt, biz.data.timezone) })}
             </p>
+            {book.data.deposit && <DepositBox deposit={book.data.deposit} />}
             <button className="btn-secondary mt-6" onClick={() => { book.reset(); setSlot(''); }}>{t('booking.another')}</button>
           </div>
         ) : (
@@ -97,7 +98,20 @@ export function BookingPage() {
                     className={`flex justify-between rounded-lg border p-3 text-left text-sm ${serviceId === s.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-400'}`}
                   >
                     <span className="font-medium">{s.name}</span>
-                    <span className="text-slate-600">{s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</span>
+                    <span className="text-right text-slate-600">
+                      {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}
+                      {business.deposit && s.priceCents > 0 && (
+                        <span className="block text-xs text-amber-700">
+                          {t('booking.depositOf', {
+                            amount: money(
+                              business.deposit.type === 'percent'
+                                ? Math.round((s.priceCents * business.deposit.value) / 100)
+                                : Math.min(business.deposit.value, s.priceCents),
+                            ),
+                          })}
+                        </span>
+                      )}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -161,6 +175,42 @@ export function BookingPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function DepositBox({ deposit }: { deposit: NonNullable<PublicBookingResult['deposit']> }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left text-sm">
+      <div className="font-semibold text-amber-900">{t('booking.depositTitle', { amount: money(deposit.amountCents) })}</div>
+      <p className="mt-1 text-amber-800">{t('booking.depositHelp')}</p>
+      {deposit.checkoutUrl ? (
+        <a className="btn-primary mt-3 w-full" href={deposit.checkoutUrl} target="_blank" rel="noreferrer">
+          {deposit.method === 'spei' ? t('booking.paySpei') : t('booking.payNow')}
+        </a>
+      ) : deposit.transfer ? (
+        <div className="mt-3 space-y-1 rounded-lg bg-white p-3">
+          <div>{t('paymentSettings.bank')}: <b>{deposit.transfer.bank}</b></div>
+          <div>{t('paymentSettings.holder')}: <b>{deposit.transfer.accountHolder}</b></div>
+          <div className="flex items-center justify-between gap-2">
+            <span>CLABE: <b className="font-mono">{deposit.transfer.clabe}</b></span>
+            <button
+              type="button"
+              className="text-brand-700"
+              onClick={() => {
+                void navigator.clipboard?.writeText(deposit.transfer!.clabe);
+                setCopied(true);
+              }}
+            >
+              {copied ? t('common.copied') : t('common.copy')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-2 text-amber-800">{t('booking.depositContact')}</p>
+      )}
     </div>
   );
 }

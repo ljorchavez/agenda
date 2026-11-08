@@ -1,11 +1,16 @@
 import { Hono } from 'hono';
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { paymentCreateSchema, paymentLinkSchema, PAYMENT_STATUSES } from '@agenda/shared';
+import {
+  paymentCreateSchema,
+  paymentLinkSchema,
+  paymentSettingsOf,
+  PAYMENT_STATUSES,
+} from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, payments, services } from '../db/schema.js';
-import { createCardCheckout, createSpeiOrder } from '../integrations/mercadopago.js';
-import { notFound } from '../lib/errors.js';
+import { appointments, customers, payments, services, tenants } from '../db/schema.js';
+import { AppError, notFound } from '../lib/errors.js';
+import { apiBaseUrl, createOnlinePayment } from '../lib/online-payments.js';
 import { toPaymentDto } from '../lib/mappers.js';
 import type { AppEnv } from '../middleware/auth.js';
 
@@ -93,40 +98,19 @@ paymentRoutes.post('/payments/link', async (c) => {
     .where(and(eq(appointments.id, input.appointmentId), eq(appointments.tenantId, tenantId)));
   if (!appt) throw notFound('appointment');
 
-  const [pending] = await db
-    .insert(payments)
-    .values({
-      tenantId,
-      customerId: appt.customer.id,
-      appointmentId: appt.a.id,
-      amountCents: input.amountCents,
-      method: input.method,
-      status: 'pending',
-      provider: 'mercadopago',
-    })
-    .returning();
-
-  const apiBase = process.env.PUBLIC_API_URL ?? `${new URL(c.req.url).origin}/api`;
-  const params = {
-    paymentId: pending!.id,
+  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+  if (!tenant) throw notFound('tenant');
+  if (!paymentSettingsOf(tenant.settings).methods[input.method]) {
+    throw new AppError(422, 'method_disabled', 'This payment method is disabled');
+  }
+  const row = await createOnlinePayment(db, tenant, {
+    appointmentId: appt.a.id,
+    customerId: appt.customer.id,
+    customerEmail: appt.customer.email,
     title: appt.serviceName,
     amountCents: input.amountCents,
-    payerEmail: appt.customer.email,
-    notificationUrl: `${apiBase}/webhooks/mercadopago`,
-    backUrl: process.env.APP_URL ?? 'http://localhost:5173',
-  };
-
-  try {
-    const result =
-      input.method === 'spei' ? await createSpeiOrder(params) : await createCardCheckout(params);
-    const [row] = await db
-      .update(payments)
-      .set({ providerRef: result.providerRef, checkoutUrl: result.checkoutUrl })
-      .where(eq(payments.id, pending!.id))
-      .returning();
-    return c.json(toPaymentDto(row!), 201);
-  } catch (err) {
-    await db.update(payments).set({ status: 'failed' }).where(eq(payments.id, pending!.id));
-    throw err;
-  }
+    method: input.method,
+    apiBase: apiBaseUrl(c.req.url),
+  });
+  return c.json(toPaymentDto(row), 201);
 });

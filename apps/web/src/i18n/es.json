@@ -133,7 +133,8 @@
     "linkReady": "Comparte este link con tu cliente:",
     "sendWhatsapp": "Enviar por WhatsApp",
     "deleteConfirm": "¿Eliminar esta cita? Esta acción no se puede deshacer.",
-    "mercadopago_not_configured": "Mercado Pago aún no está configurado"
+    "mercadopago_not_configured": "Mercado Pago aún no está configurado",
+    "method_disabled": "Ese método de pago está desactivado en Configuración"
   },
   "customers": {
     "title": "Clientes",
@@ -208,7 +209,10 @@
     "timezone": "Zona horaria",
     "team": "Equipo",
     "addMember": "Agregar miembro",
-    "role": { "owner": "Dueño", "staff": "Staff" }
+    "role": {
+      "owner": "Dueño",
+      "staff": "Staff"
+    }
   },
   "booking": {
     "title": "Agenda tu cita",
@@ -222,6 +226,43 @@
     "successDetail": "{{service}} el {{date}}. Te enviaremos un recordatorio por WhatsApp.",
     "another": "Agendar otra cita",
     "slot_unavailable": "Ese horario se acaba de ocupar. Elige otro.",
-    "notFound": "Este negocio no existe o no acepta reservas en línea."
+    "notFound": "Este negocio no existe o no acepta reservas en línea.",
+    "depositOf": "Anticipo: {{amount}}",
+    "depositTitle": "Anticipo pendiente: {{amount}}",
+    "depositHelp": "Tu cita queda confirmada al recibir el anticipo.",
+    "payNow": "Pagar anticipo",
+    "paySpei": "Ver datos para pagar por SPEI",
+    "depositContact": "El negocio te contactará para el pago del anticipo."
+  },
+  "paymentSettings": {
+    "title": "Métodos de pago",
+    "subtitle": "Elige cómo te pueden pagar tus clientes. Todo es opcional.",
+    "bank": "Banco",
+    "holder": "Titular",
+    "invalidClabe": "La CLABE no es válida (revisa los 18 dígitos)",
+    "connected": "Conectado",
+    "notConnected": "No conectado",
+    "connect": "Conectar",
+    "disconnect": "Desconectar",
+    "disconnectConfirm": "¿Desconectar Mercado Pago? Se desactivarán los cobros en línea.",
+    "tokenHelp": "Pega tu Access Token de producción (Mercado Pago → Tus integraciones → Credenciales). El dinero llega directo a tu cuenta; nunca mostramos el token.",
+    "online": {
+      "mercadopago": "Cobrar en línea con tarjeta (Mercado Pago)",
+      "spei": "Cobrar en línea por SPEI (Mercado Pago)"
+    },
+    "deposit": "Anticipo para reservar",
+    "depositHelp": "Pide un pago por adelantado a quien reserve en línea. Ayuda a reducir inasistencias.",
+    "type": {
+      "percent": "Porcentaje del precio",
+      "fixed": "Monto fijo"
+    },
+    "percent": "Porcentaje (%)",
+    "amount": "Monto (MXN)",
+    "example": "Ejemplo: en un servicio de {{price}}, el anticipo sería {{deposit}}.",
+    "noDepositMethod": "Para cobrar el anticipo activa Mercado Pago o captura tu CLABE de transferencia.",
+    "mercadopago_invalid_token": "El token de Mercado Pago no es válido",
+    "mercadopago_not_mexico": "La cuenta de Mercado Pago debe ser de México",
+    "mercadopago_not_connected": "Primero conecta tu cuenta de Mercado Pago",
+    "validation_error": "Revisa los datos (por ejemplo, la CLABE o el porcentaje)"
   }
 }

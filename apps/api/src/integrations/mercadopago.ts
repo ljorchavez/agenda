@@ -13,8 +13,8 @@ import { AppError } from '../lib/errors.js';
 
 const API = 'https://api.mercadopago.com';
 
-function token(): string {
-  const t = process.env.MERCADOPAGO_ACCESS_TOKEN;
+function token(override?: string | null): string {
+  const t = override || process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!t) throw new AppError(422, 'mercadopago_not_configured', 'Mercado Pago is not configured');
   return t;
 }
@@ -23,13 +23,17 @@ export function isMercadoPagoConfigured(): boolean {
   return Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN);
 }
 
-async function mpFetch<T>(path: string, init: RequestInit & { idempotencyKey?: string } = {}) {
+async function mpFetch<T>(
+  path: string,
+  init: RequestInit & { idempotencyKey?: string; accessToken?: string | null } = {},
+) {
+  const { accessToken, idempotencyKey, ...rest } = init;
   const res = await fetch(`${API}${path}`, {
-    ...init,
+    ...rest,
     headers: {
-      Authorization: `Bearer ${token()}`,
+      Authorization: `Bearer ${token(accessToken)}`,
       'Content-Type': 'application/json',
-      ...(init.idempotencyKey ? { 'X-Idempotency-Key': init.idempotencyKey } : {}),
+      ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}),
     },
   });
   const json = (await res.json().catch(() => ({}))) as T & { message?: string };
@@ -49,12 +53,26 @@ export interface CheckoutParams {
   payerEmail?: string | null;
   notificationUrl: string;
   backUrl: string;
+  /** The business's own token; falls back to the platform token */
+  accessToken?: string | null;
+}
+
+/** Validates a token and returns a label for the connected account. */
+export async function getAccount(accessToken: string): Promise<{ id: number; label: string }> {
+  const res = await fetch(`${API}/users/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) throw new AppError(422, 'mercadopago_invalid_token', 'Invalid Mercado Pago token');
+  const me = (await res.json()) as { id: number; nickname?: string; email?: string; site_id?: string };
+  if (me.site_id && me.site_id !== 'MLM') {
+    throw new AppError(422, 'mercadopago_not_mexico', 'Mercado Pago account must be from Mexico');
+  }
+  return { id: me.id, label: me.email || me.nickname || String(me.id) };
 }
 
 export async function createCardCheckout(p: CheckoutParams) {
   const pref = await mpFetch<{ id: string; init_point: string }>('/checkout/preferences', {
     method: 'POST',
     idempotencyKey: p.paymentId,
+    accessToken: p.accessToken,
     body: JSON.stringify({
       items: [
         { title: p.title, quantity: 1, unit_price: Number(pesos(p.amountCents)), currency_id: 'MXN' },
@@ -79,6 +97,7 @@ export async function createSpeiOrder(p: CheckoutParams) {
   }>('/v1/orders', {
     method: 'POST',
     idempotencyKey: p.paymentId,
+    accessToken: p.accessToken,
     body: JSON.stringify({
       type: 'online',
       processing_mode: 'automatic',
@@ -104,15 +123,18 @@ export async function createSpeiOrder(p: CheckoutParams) {
 export async function fetchStatus(
   topic: 'payment' | 'order',
   id: string,
+  accessToken?: string | null,
 ): Promise<{ externalReference: string | null; status: 'paid' | 'pending' | 'failed' | 'refunded' }> {
   if (topic === 'payment') {
     const p = await mpFetch<{ status: string; external_reference: string | null }>(
       `/v1/payments/${encodeURIComponent(id)}`,
+      { accessToken },
     );
     return { externalReference: p.external_reference, status: mapStatus(p.status) };
   }
   const o = await mpFetch<{ status: string; external_reference: string | null }>(
     `/v1/orders/${encodeURIComponent(id)}`,
+    { accessToken },
   );
   return { externalReference: o.external_reference, status: mapStatus(o.status) };
 }

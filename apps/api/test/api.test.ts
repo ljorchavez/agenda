@@ -177,4 +177,61 @@ d('API (integration)', () => {
     const second = await sendDueReminders();
     expect(second.processed).toBe(0);
   });
+
+  it('payment settings: defaults, validation, deposit on public booking', async () => {
+    const me = await call('GET', '/auth/me', undefined, a.token);
+    expect(me.body.tenant.settings.payments.deposit.enabled).toBe(false);
+    expect(me.body.tenant.mercadoPago).toEqual({ connected: false, account: null });
+    const base = me.body.tenant.settings;
+
+    // invalid CLABE rejected
+    let r = await call('PATCH', '/tenant', { settings: { ...base, payments: { ...base.payments, transfer: { bank: 'X', accountHolder: 'Y', clabe: '012180001234567890' } } } }, a.token);
+    expect(r.status).toBe(422);
+    // percent > 100 rejected
+    r = await call('PATCH', '/tenant', { settings: { ...base, payments: { ...base.payments, deposit: { enabled: true, type: 'percent', value: 150 } } } }, a.token);
+    expect(r.status).toBe(422);
+    // online methods need Mercado Pago connected
+    r = await call('PATCH', '/tenant', { settings: { ...base, payments: { ...base.payments, methods: { ...base.payments.methods, mercadopago: true } } } }, a.token);
+    expect(r.status).toBe(422);
+    expect(r.body.error).toBe('mercadopago_not_connected');
+    // staff (non-owner) cannot change settings
+    await call('POST', '/users', { name: 'Staff', email: 'staff-a@test.mx', password: 'password123' }, a.token);
+    const staff = await call('POST', '/auth/login', { email: 'staff-a@test.mx', password: 'password123' });
+    r = await call('PATCH', '/tenant', { settings: base }, staff.body.token);
+    expect(r.status).toBe(403);
+
+    // enable 40% deposit with transfer details
+    r = await call('PATCH', '/tenant', { settings: { ...base, payments: { ...base.payments, transfer: { bank: 'BBVA', accountHolder: 'Negocio A', clabe: '012180001234567899' }, deposit: { enabled: true, type: 'percent', value: 40 } } } }, a.token);
+    expect(r.status).toBe(200);
+    expect(r.body.settings.payments.deposit.value).toBe(40);
+
+    const pub = await call('GET', '/public/negocio-a');
+    expect(pub.body.deposit).toEqual({ type: 'percent', value: 40 });
+    const svc = pub.body.services[0];
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 3 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const avail = await call('GET', `/public/negocio-a/availability?serviceId=${svc.id}&date=${day.toISODate()}`);
+    const booking = await call('POST', '/public/negocio-a/bookings', { serviceId: svc.id, startsAt: avail.body.slots[2], name: 'Con Anticipo', phone: '5512121212' });
+    expect(booking.status).toBe(201);
+    expect(booking.body.deposit.amountCents).toBe(Math.round(svc.priceCents * 0.4));
+    expect(booking.body.deposit.method).toBe('transfer');
+    expect(booking.body.deposit.transfer.clabe).toBe('012180001234567899');
+    expect(booking.body.deposit.checkoutUrl).toBeNull();
+
+    // payment link refuses disabled / unconnected online methods
+    r = await call('POST', '/payments/link', { appointmentId: booking.body.id, amountCents: 1000, method: 'mercadopago' }, a.token);
+    expect(r.status).toBe(422);
+  });
+
+  it('Mercado Pago connect rejects invalid tokens and never exposes them', async () => {
+    const r = await call('PUT', '/tenant/mercadopago', { accessToken: 'APP_USR-0000000000-invalid-token-for-tests' }, a.token);
+    expect(r.status).toBe(422);
+    expect(r.body.error).toBe('mercadopago_invalid_token');
+    const me = await call('GET', '/auth/me', undefined, a.token);
+    expect(JSON.stringify(me.body)).not.toContain('APP_USR');
+    const del = await call('DELETE', '/tenant/mercadopago', undefined, a.token);
+    expect(del.status).toBe(200);
+    expect(del.body.mercadoPago.connected).toBe(false);
+  });
 });
+

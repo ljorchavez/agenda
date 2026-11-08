@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
-import type { AppointmentDto, CustomerDto, PaymentDto } from '@agenda/shared';
+import { computeDepositCents, paymentSettingsOf, type AppointmentDto, type CustomerDto, type PaymentDto } from '@agenda/shared';
+import { useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
@@ -235,7 +236,14 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
 function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [method, setMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
+  const { tenant } = useAuth();
+  const pay = paymentSettingsOf(tenant!.settings);
+  const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
+  const offline = inPerson.length ? inPerson : (['cash', 'card', 'transfer'] as const);
+  const online = tenant?.mercadoPago.connected
+    ? (['mercadopago', 'spei'] as const).filter((m) => pay.methods[m])
+    : [];
+  const [method, setMethod] = useState<'cash' | 'card' | 'transfer'>(offline[0]!);
   const [reschedule, setReschedule] = useState(toLocalInput(new Date(appt.startsAt)));
   const [deposit, setDeposit] = useState<{ amount: string; method: 'mercadopago' | 'spei' } | null>(null);
   const [link, setLink] = useState<PaymentDto | null>(null);
@@ -312,7 +320,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <label className="label">{t('agenda.paymentMethod')}</label>
             <div className="flex flex-wrap gap-2">
               <select className="input w-auto" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
-                {(['cash', 'card', 'transfer'] as const).map((m) => (
+                {offline.map((m) => (
                   <option key={m} value={m}>{t(`methods.${m}`)}</option>
                 ))}
               </select>
@@ -332,9 +340,9 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 p-3">
+          {online.length > 0 && <div className="rounded-lg border border-slate-200 p-3">
             {!deposit ? (
-              <button className="text-sm font-medium text-brand-700" onClick={() => setDeposit({ amount: String(outstanding / 100 / 2 || ''), method: 'mercadopago' })}>
+              <button className="text-sm font-medium text-brand-700" onClick={() => setDeposit({ amount: String((computeDepositCents(outstanding, pay) || Math.round(outstanding / 2)) / 100 || ''), method: online[0]! })}>
                 {t('agenda.requestDeposit')} →
               </button>
             ) : link?.checkoutUrl ? (
@@ -352,14 +360,15 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                   <input type="number" min={1} step="0.01" className="input w-32" value={deposit.amount} onChange={(e) => setDeposit({ ...deposit, amount: e.target.value })} />
                 </div>
                 <select className="input w-auto" value={deposit.method} onChange={(e) => setDeposit({ ...deposit, method: e.target.value as 'mercadopago' | 'spei' })}>
-                  <option value="mercadopago">{t('methods.mercadopago')}</option>
-                  <option value="spei">{t('methods.spei')}</option>
+                  {online.map((m) => (
+                    <option key={m} value={m}>{t(`methods.${m}`)}</option>
+                  ))}
                 </select>
                 <button className="btn-primary" disabled={createLink.isPending} onClick={() => createLink.mutate()}>{t('agenda.createLink')}</button>
               </div>
             )}
             <ErrorText error={createLink.error} ns="agenda" />
-          </div>
+          </div>}
         </div>
       )}
 

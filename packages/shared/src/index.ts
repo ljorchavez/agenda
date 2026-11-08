@@ -88,12 +88,78 @@ export const DEFAULT_BUSINESS_HOURS: BusinessHours = {
   slotMinutes: 30,
 };
 
+// ---------- Payment settings (optional per business) ----------
+
+export const DEPOSIT_TYPES = ['percent', 'fixed'] as const;
+export type DepositType = (typeof DEPOSIT_TYPES)[number];
+
+export const paymentSettingsSchema = z.object({
+  /** Which methods the business accepts. Online methods need Mercado Pago connected. */
+  methods: z.object({
+    cash: z.boolean(),
+    card: z.boolean(),
+    transfer: z.boolean(),
+    mercadopago: z.boolean(),
+    spei: z.boolean(),
+  }),
+  /** Bank details shown to customers who pay by transfer. */
+  transfer: z.object({
+    bank: z.string().trim().max(80),
+    accountHolder: z.string().trim().max(120),
+    clabe: z
+      .string()
+      .trim()
+      .refine((v) => v === '' || isValidClabe(v), 'invalid_clabe'),
+  }),
+  deposit: z.object({
+    enabled: z.boolean(),
+    type: z.enum(DEPOSIT_TYPES),
+    /** Percent (1-100) when type = percent; cents when type = fixed. */
+    value: z.number().int().min(0).max(100_000_000),
+  }).refine((d) => d.type !== 'percent' || (d.value >= 1 && d.value <= 100), {
+    message: 'percent_out_of_range',
+    path: ['value'],
+  }),
+});
+export type PaymentSettings = z.infer<typeof paymentSettingsSchema>;
+
+export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
+  methods: { cash: true, card: true, transfer: true, mercadopago: false, spei: false },
+  transfer: { bank: '', accountHolder: '', clabe: '' },
+  deposit: { enabled: false, type: 'percent', value: 50 },
+};
+
+/** Deposit amount in cents for a given price, or 0 when deposits are off. Never exceeds the price. */
+export function computeDepositCents(priceCents: number, payments?: PaymentSettings | null): number {
+  const d = payments?.deposit;
+  if (!d?.enabled || priceCents <= 0) return 0;
+  const raw = d.type === 'percent' ? Math.round((priceCents * d.value) / 100) : d.value;
+  return Math.max(0, Math.min(raw, priceCents));
+}
+
+/** Settings stored before payments existed have no `payments` key. */
+export function paymentSettingsOf(settings: { payments?: PaymentSettings }): PaymentSettings {
+  return settings.payments ?? DEFAULT_PAYMENT_SETTINGS;
+}
+
+/** Validates a CLABE check digit (Mexican interbank account number). */
+export function isValidClabe(clabe: string): boolean {
+  if (!/^\d{18}$/.test(clabe)) return false;
+  const w = [3, 7, 1];
+  const sum = clabe
+    .slice(0, 17)
+    .split('')
+    .reduce((acc, ch, i) => acc + ((Number(ch) * w[i % 3]!) % 10), 0);
+  return (10 - (sum % 10)) % 10 === Number(clabe[17]);
+}
+
 export const tenantSettingsSchema = z.object({
   hours: businessHoursSchema,
   remindersEnabled: z.boolean(),
   /** Hours before the appointment to send the WhatsApp reminder */
   reminderHoursBefore: z.number().int().min(1).max(72),
   onlineBookingEnabled: z.boolean(),
+  payments: paymentSettingsSchema.optional(),
 });
 export type TenantSettings = z.infer<typeof tenantSettingsSchema>;
 
@@ -102,6 +168,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   remindersEnabled: true,
   reminderHoursBefore: 24,
   onlineBookingEnabled: true,
+  payments: DEFAULT_PAYMENT_SETTINGS,
 };
 
 // ---------- Auth ----------
@@ -132,6 +199,10 @@ export const tenantUpdateSchema = z.object({
   settings: tenantSettingsSchema.optional(),
 });
 export type TenantUpdateInput = z.infer<typeof tenantUpdateSchema>;
+
+export const mercadoPagoConnectSchema = z.object({
+  accessToken: z.string().trim().min(20).max(300),
+});
 
 export const staffCreateSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -255,6 +326,8 @@ export interface TenantDto {
   currency: string;
   locale: Locale;
   settings: TenantSettings;
+  /** Never includes the token itself. */
+  mercadoPago: { connected: boolean; account: string | null };
 }
 
 export interface AuthResponse {
@@ -356,6 +429,24 @@ export interface PublicBusinessDto {
   phone: string | null;
   hours: BusinessHours;
   services: Pick<ServiceDto, 'id' | 'name' | 'durationMin' | 'priceCents'>[];
+  /** Present when the business requires a deposit to book online. */
+  deposit: { type: DepositType; value: number } | null;
+}
+
+export interface PublicBookingResult {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  serviceName: string;
+  businessName: string;
+  deposit: null | {
+    amountCents: number;
+    /** Mercado Pago checkout (card) or SPEI instructions page */
+    checkoutUrl: string | null;
+    method: PaymentMethod | null;
+    /** Bank transfer instructions when online payment is not available */
+    transfer: { bank: string; accountHolder: string; clabe: string } | null;
+  };
 }
 
 export interface ApiErrorBody {

@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import {
   DEFAULT_TENANT_SETTINGS,
   loginSchema,
+  mercadoPagoConnectSchema,
   normalizeMxPhone,
   registerSchema,
   staffCreateSchema,
@@ -13,7 +14,9 @@ import { getDb } from '../db/client.js';
 import { tenants, users } from '../db/schema.js';
 import { hashPassword, signToken, slugify, verifyPassword } from '../lib/auth.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
+import { encryptSecret } from '../lib/crypto.js';
 import { toTenantDto } from '../lib/mappers.js';
+import { getAccount } from '../integrations/mercadopago.js';
 import { requireAuth, requireOwner, type AppEnv } from '../middleware/auth.js';
 
 export const authRoutes = new Hono<AppEnv>();
@@ -110,6 +113,13 @@ authRoutes.get('/auth/me', requireAuth, async (c) => {
 authRoutes.patch('/tenant', requireAuth, requireOwner, async (c) => {
   const input = tenantUpdateSchema.parse(await c.req.json());
   const db = getDb();
+  const pay = input.settings?.payments;
+  if (pay && (pay.methods.mercadopago || pay.methods.spei)) {
+    const current = await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')) });
+    if (!current?.mpAccessTokenEnc) {
+      throw new AppError(422, 'mercadopago_not_connected', 'Connect Mercado Pago first');
+    }
+  }
   const [tenant] = await db
     .update(tenants)
     .set({
@@ -120,6 +130,35 @@ authRoutes.patch('/tenant', requireAuth, requireOwner, async (c) => {
     .returning();
   if (!tenant) throw notFound('tenant');
   return c.json(toTenantDto(tenant));
+});
+
+/** Connects the business's own Mercado Pago account (money goes directly to them). */
+authRoutes.put('/tenant/mercadopago', requireAuth, requireOwner, async (c) => {
+  const { accessToken } = mercadoPagoConnectSchema.parse(await c.req.json());
+  const account = await getAccount(accessToken);
+  const [tenant] = await getDb()
+    .update(tenants)
+    .set({ mpAccessTokenEnc: encryptSecret(accessToken), mpAccount: account.label })
+    .where(eq(tenants.id, c.get('tenantId')))
+    .returning();
+  if (!tenant) throw notFound('tenant');
+  return c.json(toTenantDto(tenant));
+});
+
+authRoutes.delete('/tenant/mercadopago', requireAuth, requireOwner, async (c) => {
+  const db = getDb();
+  const current = await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')) });
+  if (!current) throw notFound('tenant');
+  const payments = current.settings.payments;
+  const settings = payments
+    ? { ...current.settings, payments: { ...payments, methods: { ...payments.methods, mercadopago: false, spei: false } } }
+    : current.settings;
+  const [tenant] = await db
+    .update(tenants)
+    .set({ mpAccessTokenEnc: null, mpAccount: null, settings })
+    .where(eq(tenants.id, current.id))
+    .returning();
+  return c.json(toTenantDto(tenant!));
 });
 
 authRoutes.get('/users', requireAuth, async (c) => {

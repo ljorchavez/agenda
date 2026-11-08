@@ -2,15 +2,19 @@ import { Hono } from 'hono';
 import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
+  computeDepositCents,
   normalizeMxPhone,
+  paymentSettingsOf,
   publicBookingSchema,
-  type PublicBusinessDto,
   type Locale,
+  type PublicBookingResult,
+  type PublicBusinessDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { appointments, customers, services, tenants, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
+import { apiBaseUrl, createOnlinePayment, tenantMpToken } from '../lib/online-payments.js';
 
 /**
  * Unauthenticated endpoints for the public booking page (/b/:slug).
@@ -46,6 +50,10 @@ publicRoutes.get('/public/:slug', async (c) => {
       durationMin: s.durationMin,
       priceCents: s.priceCents,
     })),
+    deposit: (() => {
+      const d = paymentSettingsOf(tenant.settings).deposit;
+      return d.enabled ? { type: d.type, value: d.value } : null;
+    })(),
   };
   return c.json(body);
 });
@@ -154,17 +162,47 @@ publicRoutes.post('/public/:slug/bookings', async (c) => {
         notes: input.notes ?? null,
       })
       .returning();
-    return appt!;
+    return { appt: appt!, customer: customer! };
   });
 
-  return c.json(
-    {
-      id: result.id,
-      startsAt: result.startsAt.toISOString(),
-      endsAt: result.endsAt.toISOString(),
-      serviceName: service.name,
-      businessName: tenant.name,
-    },
-    201,
-  );
+  const body: PublicBookingResult = {
+    id: result.appt.id,
+    startsAt: result.appt.startsAt.toISOString(),
+    endsAt: result.appt.endsAt.toISOString(),
+    serviceName: service.name,
+    businessName: tenant.name,
+    deposit: null,
+  };
+
+  // Optional deposit: pay online with the business's Mercado Pago, or by bank transfer.
+  const pay = paymentSettingsOf(tenant.settings);
+  const amountCents = computeDepositCents(service.priceCents, pay);
+  if (amountCents > 0) {
+    body.deposit = { amountCents, checkoutUrl: null, method: null, transfer: null };
+    const online = pay.methods.mercadopago ? 'mercadopago' : pay.methods.spei ? 'spei' : null;
+    if (online && tenantMpToken(tenant) && amountCents >= 100) {
+      try {
+        const payment = await createOnlinePayment(db, tenant, {
+          appointmentId: result.appt.id,
+          customerId: result.customer.id,
+          customerEmail: result.customer.email,
+          title: `Anticipo: ${service.name}`,
+          amountCents,
+          method: online,
+          apiBase: apiBaseUrl(c.req.url),
+        });
+        body.deposit.checkoutUrl = payment.checkoutUrl;
+        body.deposit.method = online;
+      } catch (err) {
+        // The booking stands; the business can request the deposit later.
+        console.error('deposit checkout failed', err);
+      }
+    }
+    if (!body.deposit.checkoutUrl && pay.methods.transfer && pay.transfer.clabe) {
+      body.deposit.method = 'transfer';
+      body.deposit.transfer = { ...pay.transfer };
+    }
+  }
+
+  return c.json(body, 201);
 });

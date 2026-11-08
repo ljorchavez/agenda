@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
-import { appointments, customers, messageLogs, payments } from '../db/schema.js';
+import { appointments, customers, messageLogs, payments, tenants } from '../db/schema.js';
+import { tenantMpToken } from '../lib/online-payments.js';
 import {
   fetchStatus,
   verifyMercadoPagoSignature,
@@ -86,25 +87,43 @@ webhookRoutes.post('/webhooks/mercadopago', async (c) => {
   const type = body.type ?? body.topic ?? c.req.query('type');
   if (!dataId || (type !== 'payment' && type !== 'order')) return c.text('ignored');
 
-  const valid = verifyMercadoPagoSignature({
-    signature: c.req.header('x-signature'),
-    requestId: c.req.header('x-request-id'),
-    dataId,
-  });
-  if (!valid) return c.text('invalid signature', 401);
+  const db = getDb();
+  // Payments created with a business's own account carry ?tenant=<id>. We don't have that
+  // account's webhook secret, but we never trust the body: the status is fetched from
+  // Mercado Pago with the business's token and must match one of that business's payments.
+  const tenantId = c.req.query('tenant');
+  let accessToken: string | null = null;
+  if (tenantId) {
+    if (!z.string().uuid().safeParse(tenantId).success) return c.text('ignored');
+    const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+    accessToken = tenant ? tenantMpToken(tenant) : null;
+    if (!accessToken) return c.text('ignored');
+  } else {
+    const valid = verifyMercadoPagoSignature({
+      signature: c.req.header('x-signature'),
+      requestId: c.req.header('x-request-id'),
+      dataId,
+    });
+    if (!valid) return c.text('invalid signature', 401);
+  }
 
   // Never trust the webhook body for status: ask Mercado Pago directly.
-  const { externalReference, status } = await fetchStatus(type, dataId);
+  const { externalReference, status } = await fetchStatus(type, dataId, accessToken);
   // Our external_reference is always a payments.id (uuid); ignore anything else.
   if (!externalReference || !z.string().uuid().safeParse(externalReference).success) {
     return c.text('ignored');
   }
 
-  const db = getDb();
   const [payment] = await db
     .update(payments)
     .set({ status, paidAt: status === 'paid' ? new Date() : null })
-    .where(and(eq(payments.id, externalReference), eq(payments.provider, 'mercadopago')))
+    .where(
+      and(
+        eq(payments.id, externalReference),
+        eq(payments.provider, 'mercadopago'),
+        ...(tenantId ? [eq(payments.tenantId, tenantId)] : []),
+      ),
+    )
     .returning();
 
   // A paid deposit confirms the appointment.

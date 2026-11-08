@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BUSINESS_TYPES, type SessionUser, type TenantDto, type TenantSettings } from '@agenda/shared';
+import {
+  BUSINESS_TYPES,
+  isValidClabe,
+  paymentSettingsOf,
+  type SessionUser,
+  type TenantDto,
+  type TenantSettings,
+} from '@agenda/shared';
+import { PaymentSettingsSection } from '../components/PaymentSettings';
 import { ErrorText, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -13,7 +21,12 @@ export function SettingsPage() {
   const [name, setName] = useState(tenant?.name ?? '');
   const [businessType, setBusinessType] = useState(tenant?.businessType ?? 'other');
   const [phone, setPhone] = useState(tenant?.phone ?? '');
-  const [settings, setSettings] = useState<TenantSettings>(tenant!.settings);
+  const [settings, setSettings] = useState<TenantSettings>({
+    ...tenant!.settings,
+    payments: paymentSettingsOf(tenant!.settings),
+  });
+  const payments = settings.payments!;
+  const invalid = payments.transfer.clabe !== '' && !isValidClabe(payments.transfer.clabe);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -144,13 +157,19 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+
+        <PaymentSettingsSection
+          value={payments}
+          disabled={!isOwner}
+          onChange={(p) => setSettings((s) => ({ ...s, payments: p }))}
+        />
       </div>
 
       {isOwner && (
         <div className="mt-6 flex items-center gap-3">
-          <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+          <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
           {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
-          <ErrorText error={save.error} />
+          <ErrorText error={save.error} ns="paymentSettings" />
         </div>
       )}
 
