@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
+import { sendDueReminders } from './jobs/reminders.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, type AppEnv } from './middleware/auth.js';
 import { appointmentRoutes } from './routes/appointments.js';
@@ -23,6 +24,15 @@ export function createApp() {
   app.onError(errorHandler);
 
   app.get('/health', (c) => c.json({ ok: true }));
+
+  // Scheduled job endpoint (Vercel Cron sends `Authorization: Bearer $CRON_SECRET`).
+  app.get('/cron/reminders', async (c) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret || c.req.header('authorization') !== `Bearer ${secret}`) {
+      return c.json({ error: 'unauthorized' }, 401);
+    }
+    return c.json(await sendDueReminders());
+  });
 
   // Public (no auth)
   app.route('/', publicRoutes);

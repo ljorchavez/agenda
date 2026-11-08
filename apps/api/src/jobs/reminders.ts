@@ -22,7 +22,11 @@ type DueRow = {
  * Rows are claimed atomically (UPDATE ... FOR UPDATE SKIP LOCKED) so two concurrent
  * runs never send the same reminder twice.
  */
-export async function sendDueReminders(limit = 200): Promise<{ processed: number; sent: number }> {
+export async function sendDueReminders(
+  limit = 200,
+  /** Minimum look-ahead window in hours (useful when the job runs only once a day). */
+  lookaheadHours = Number(process.env.REMINDER_LOOKAHEAD_HOURS ?? 0),
+): Promise<{ processed: number; sent: number }> {
   const db = getDb();
   const due = await db.execute<DueRow>(sql`
     with due as (
@@ -34,7 +38,7 @@ export async function sendDueReminders(limit = 200): Promise<{ processed: number
         and c.phone is not null
         and (t.settings->>'remindersEnabled')::boolean = true
         and a.starts_at > now()
-        and a.starts_at <= now() + ((t.settings->>'reminderHoursBefore')::int * interval '1 hour')
+        and a.starts_at <= now() + (greatest((t.settings->>'reminderHoursBefore')::int, ${lookaheadHours}::int) * interval '1 hour')
       order by a.starts_at
       limit ${limit}
       for update of a skip locked
