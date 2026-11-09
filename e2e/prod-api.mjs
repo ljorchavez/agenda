@@ -376,7 +376,11 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
     slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&resourceId=${pro.id}`)).body?.slots ?? [];
   }
   check('availability for a specific barber', slots.length > 0, day);
-  const slot = slots[1] ?? slots[0];
+  // Prefer a slot where another barber of the same location is also free (seed data is random)
+  const others = pub.body.resources.filter((r) => r.id !== pro.id && r.locationId === pro.locationId);
+  const otherSlots = new Set();
+  for (const r of others) for (const x of (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&resourceId=${r.id}`)).body?.slots ?? []) otherSlots.add(x);
+  const slot = slots.find((x) => otherSlots.has(x)) ?? slots[1] ?? slots[0];
   const b = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, resourceId: pro.id, startsAt: slot, name: 'Corte QA', phone: '5512120001' });
   check('book with a chosen barber', b.status === 201 && b.body.resourceName === pro.name, b.text);
   const again = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, resourceId: pro.id, startsAt: slot, name: 'Corte QA 2', phone: '5512120002' });
