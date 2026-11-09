@@ -10,7 +10,7 @@ import { CustomerDetailPage } from './pages/CustomerDetail';
 import { CustomersPage } from './pages/Customers';
 import { DashboardPage } from './pages/Dashboard';
 import { DirectoryPage } from './pages/Directory';
-import { RegisterPage } from './pages/Auth';
+import { RegisterPage, ResetPasswordPage } from './pages/Auth';
 import { ManagePage } from './pages/Manage';
 import { PaymentsPage } from './pages/Payments';
 import { ReportsPage } from './pages/Reports';
@@ -45,6 +45,7 @@ export function App() {
       <Route path="/login" element={<Redirect to="/?login=1" />} />
       <Route path="/registro" element={<RegisterPage />} />
       <Route path="/register" element={<Redirect to="/registro" />} />
+      <Route path="/restablecer" element={<ResetPasswordPage />} />
       {/* Public booking page for end customers */}
       <Route path="/b/:slug" element={<BookingPage />} />
       {/* Private link for a customer to reschedule/cancel their appointment */}

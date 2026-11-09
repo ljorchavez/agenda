@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { and, eq } from 'drizzle-orm';
 import { isManager, type Role } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { memberships } from '../db/schema.js';
+import { memberships, users } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { verifyToken } from '../lib/auth.js';
 
@@ -28,11 +28,17 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   } catch {
     throw new AppError(401, 'unauthorized', 'Invalid or expired token');
   }
-  const m = await getDb().query.memberships.findFirst({
-    where: and(eq(memberships.userId, claims.sub), eq(memberships.tenantId, claims.tid)),
-    columns: { role: true, locationId: true },
-  });
+  const [m] = await getDb()
+    .select({ role: memberships.role, locationId: memberships.locationId, passwordChangedAt: users.passwordChangedAt })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.userId, claims.sub), eq(memberships.tenantId, claims.tid)))
+    .limit(1);
   if (!m) throw new AppError(401, 'unauthorized', 'No access to this business');
+  // A password reset signs out every session opened before it.
+  if (m.passwordChangedAt && (claims.iat ?? 0) < Math.floor(m.passwordChangedAt.getTime() / 1000)) {
+    throw new AppError(401, 'unauthorized', 'Session ended after a password change');
+  }
   c.set('userId', claims.sub);
   c.set('tenantId', claims.tid);
   c.set('role', m.role);

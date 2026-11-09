@@ -87,9 +87,35 @@ export const users = pgTable(
     email: text('email').notNull(),
     passwordHash: text('password_hash').notNull(),
     name: text('name').notNull(),
+    /** Sessions issued before this moment are rejected (set when the password is reset). */
+    passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [uniqueIndex('users_email_idx').on(t.email)],
+);
+
+/** One-time "reset your password" links. Only a SHA-256 of the token is stored. */
+export const passwordResets = pgTable(
+  'password_resets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('password_resets_token_idx').on(t.tokenHash), index('password_resets_user_idx').on(t.userId)],
+);
+
+/** Failed logins and reset requests, counted per key (ip, email, ip+email) in a time window. */
+export const authAttempts = pgTable(
+  'auth_attempts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    key: text('key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('auth_attempts_key_idx').on(t.key, t.createdAt)],
 );
 
 /** A person's access to a business: role and, optionally, a single location. */

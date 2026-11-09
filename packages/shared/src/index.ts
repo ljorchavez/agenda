@@ -365,6 +365,20 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
+/** "Forgot my password": always answers ok, whether or not the email has an account. */
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  locale: z.enum(LOCALES).default('es'),
+});
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+/** New password from the link sent by email. */
+export const resetPasswordSchema = z.object({
+  token: z.string().min(20).max(200),
+  password: z.string().min(8).max(200),
+});
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
 export const tenantUpdateSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   businessType: z.enum(BUSINESS_TYPES).optional(),

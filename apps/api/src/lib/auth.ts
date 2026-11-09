@@ -6,6 +6,8 @@ export interface TokenClaims {
   sub: string; // user id
   tid: string; // tenant id
   role: Role;
+  /** Issued at (seconds), set when verifying */
+  iat?: number;
 }
 
 const TOKEN_TTL = '7d';
@@ -33,7 +35,7 @@ export async function verifyToken(token: string): Promise<TokenClaims> {
   if (typeof payload.sub !== 'string' || typeof payload.tid !== 'string') {
     throw new Error('invalid token claims');
   }
-  return { sub: payload.sub, tid: payload.tid, role: payload.role as Role };
+  return { sub: payload.sub, tid: payload.tid, role: payload.role as Role, iat: payload.iat };
 }
 
 /** Turns "Clínica Nutrición Sana" into "clinica-nutricion-sana". */

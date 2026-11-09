@@ -10,7 +10,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 /** Sign-in form; lives in a floating window over the home page. */
-export function LoginForm({ onDone }: { onDone?: () => void }) {
+export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?: () => void }) {
   const { t } = useTranslation();
   const { setSession } = useAuth();
   const navigate = useNavigate();
@@ -40,6 +40,11 @@ export function LoginForm({ onDone }: { onDone?: () => void }) {
       <div>
         <label className="label" htmlFor="password">{t('auth.password')}</label>
         <input id="password" type="password" required autoComplete="current-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
+        {onForgot && (
+          <button type="button" className="mt-1 text-sm font-medium text-brand-700 hover:underline" onClick={onForgot}>
+            {t('auth.forgot')}
+          </button>
+        )}
       </div>
       <ErrorText error={login.error} ns="auth" />
       <button type="submit" className="btn-primary w-full" disabled={login.isPending}>
@@ -53,12 +58,115 @@ export function LoginForm({ onDone }: { onDone?: () => void }) {
   );
 }
 
+/** "Forgot my password": asks for the email and always says the same thing afterwards. */
+export function ForgotForm({ onBack }: { onBack: () => void }) {
+  const { t, i18n } = useTranslation();
+  const [email, setEmail] = useState('');
+  const forgot = useMutation({
+    mutationFn: () =>
+      api<{ ok: true }>('/auth/forgot-password', {
+        method: 'POST',
+        body: { email, locale: i18n.language.startsWith('en') ? 'en' : 'es' },
+      }),
+  });
+
+  if (forgot.isSuccess) {
+    return (
+      <div className="space-y-4">
+        <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{t('auth.forgotSent', { email })}</p>
+        <button type="button" className="btn-secondary w-full" onClick={onBack}>{t('auth.backToLogin')}</button>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        forgot.mutate();
+      }}
+    >
+      <p className="text-sm text-slate-600">{t('auth.forgotHelp')}</p>
+      <div>
+        <label className="label" htmlFor="forgot-email">{t('auth.email')}</label>
+        <input id="forgot-email" type="email" required autoFocus autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
+      </div>
+      <ErrorText error={forgot.error} ns="auth" />
+      <button type="submit" className="btn-primary w-full" disabled={forgot.isPending}>
+        {forgot.isPending ? t('common.loading') : t('auth.forgotSend')}
+      </button>
+      <button type="button" className="w-full text-center text-sm font-medium text-brand-700 hover:underline" onClick={onBack}>
+        {t('auth.backToLogin')}
+      </button>
+    </form>
+  );
+}
+
 export function LoginModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  const [forgot, setForgot] = useState(false);
   return (
-    <Modal open title={t('auth.login')} onClose={onClose}>
-      <LoginForm onDone={onClose} />
+    <Modal open title={forgot ? t('auth.forgotTitle') : t('auth.login')} onClose={onClose}>
+      {forgot ? <ForgotForm onBack={() => setForgot(false)} /> : <LoginForm onDone={onClose} onForgot={() => setForgot(true)} />}
     </Modal>
+  );
+}
+
+/** Page opened from the email link: /restablecer?token=… */
+export function ResetPasswordPage() {
+  const { t } = useTranslation();
+  const [params] = useSearchParams();
+  const token = params.get('token') ?? '';
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const reset = useMutation({
+    mutationFn: () => api<{ ok: true }>('/auth/reset-password', { method: 'POST', body: { token, password } }),
+  });
+  const mismatch = confirm.length > 0 && confirm !== password;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-6">
+      <div className="mx-auto max-w-md">
+        <div className="mb-6 flex items-center justify-between">
+          <Link to="/" className="text-2xl font-bold text-brand-700">Agenda</Link>
+          <LanguageSwitch />
+        </div>
+        <div className="card">
+          <h1 className="mb-4 text-xl font-semibold">{t('auth.resetTitle')}</h1>
+          {!token ? (
+            <p className="text-sm text-slate-600">{t('auth.invalid_reset_token')}</p>
+          ) : reset.isSuccess ? (
+            <div className="space-y-4">
+              <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{t('auth.resetDone')}</p>
+              <Link to="/?login=1" className="btn-primary block w-full text-center">{t('auth.login')}</Link>
+            </div>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!mismatch) reset.mutate();
+              }}
+            >
+              <div>
+                <label className="label" htmlFor="new-pass">{t('auth.newPassword')}</label>
+                <input id="new-pass" type="password" required minLength={8} autoFocus autoComplete="new-password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <p className="mt-1 text-xs text-slate-500">{t('auth.passwordHint')}</p>
+              </div>
+              <div>
+                <label className="label" htmlFor="new-pass2">{t('auth.confirmPassword')}</label>
+                <input id="new-pass2" type="password" required minLength={8} autoComplete="new-password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+                {mismatch && <p className="mt-1 text-xs text-rose-600">{t('auth.passwordMismatch')}</p>}
+              </div>
+              <ErrorText error={reset.error} ns="auth" />
+              <button type="submit" className="btn-primary w-full" disabled={reset.isPending || mismatch}>
+                {reset.isPending ? t('common.loading') : t('auth.resetSave')}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

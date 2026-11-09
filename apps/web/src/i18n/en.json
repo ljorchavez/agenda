@@ -42,7 +42,21 @@
     "noAccount": "Don't have an account?",
     "haveAccount": "Already have an account?",
     "invalid_credentials": "Wrong email or password",
-    "email_taken": "That email is already registered"
+    "email_taken": "That email is already registered",
+    "forgot": "Forgot your password?",
+    "forgotTitle": "Reset password",
+    "forgotHelp": "Enter your account email and we'll send you a link to choose a new password.",
+    "forgotSend": "Send link",
+    "forgotSent": "If {{email}} has an account, you'll get an email with the link in a few minutes. Check your spam folder too.",
+    "backToLogin": "Back to sign in",
+    "resetTitle": "Choose a new password",
+    "newPassword": "New password",
+    "confirmPassword": "Repeat the password",
+    "passwordMismatch": "Passwords don't match",
+    "resetSave": "Save password",
+    "resetDone": "Done, your password changed. For safety we signed out your other sessions; please sign in again.",
+    "invalid_reset_token": "This link is invalid or has expired. Request a new one from \"Forgot your password?\".",
+    "too_many_attempts": "Too many attempts. Wait a few minutes and try again."
   },
   "businessTypes": {
     "nutrition": "Nutrition",
@@ -621,7 +635,9 @@
     "plan_limit_bookings": "You reached your plan’s monthly booking limit. Change plan in Settings.",
     "plan_limit_locations": "Your plan includes one location. Move to Standard to add more.",
     "plan_limit_businesses": "The Free plan includes one business. Move your business to Standard to open another.",
-    "plan_unavailable": "That plan is not available yet."
+    "plan_unavailable": "That plan is not available yet.",
+    "too_many_attempts": "Too many attempts. Wait a few minutes and try again.",
+    "invalid_reset_token": "This link is invalid or has expired. Request a new one from \"Forgot your password?\"."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",

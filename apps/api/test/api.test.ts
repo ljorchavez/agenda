@@ -841,4 +841,53 @@ d('API (integration)', () => {
     expect((await call('DELETE', `/users/${shared.body.id}`, undefined, tok)).status).toBe(204);
     expect((await call('POST', '/auth/login', { email: 'owner-b@test.mx', password: 'password123' })).body.businesses).toHaveLength(1);
   });
+
+  it('password reset by email and login throttling', async () => {
+    const { sentInTests } = await import('../src/lib/email.js');
+    const reg = await call('POST', '/auth/register', {
+      businessName: 'Reset Prueba', businessType: 'nutrition', name: 'Rita', email: 'rita@test.mx', password: 'password123',
+    });
+    expect(reg.status).toBe(201);
+    const oldTok = reg.body.token;
+
+    // Same answer for known and unknown emails; only the real account gets a link
+    sentInTests.length = 0;
+    expect((await call('POST', '/auth/forgot-password', { email: 'nadie@test.mx' })).body).toEqual({ ok: true });
+    expect(sentInTests).toHaveLength(0);
+    expect((await call('POST', '/auth/forgot-password', { email: 'RITA@test.mx' })).body).toEqual({ ok: true });
+    expect(sentInTests).toHaveLength(1);
+    expect(sentInTests[0]!.to).toBe('rita@test.mx');
+    const token = /token=([A-Za-z0-9_-]+)/.exec(sentInTests[0]!.text)![1]!;
+    // Demo logins never get a reset email
+    await call('POST', '/auth/forgot-password', { email: 'demo@agenda.mx' });
+    expect(sentInTests).toHaveLength(1);
+
+    expect((await call('POST', '/auth/reset-password', { token: 'x'.repeat(43), password: 'nueva-clave-1' })).body.error).toBe('invalid_reset_token');
+    expect((await call('POST', '/auth/reset-password', { token, password: 'corta' })).status).toBe(422);
+    // Tokens carry whole seconds: wait so the old session is clearly older than the change
+    await new Promise((r) => setTimeout(r, 1100));
+    expect((await call('POST', '/auth/reset-password', { token, password: 'nueva-clave-1' })).status).toBe(200);
+    // One use only; old sessions are signed out; old password stops working
+    expect((await call('POST', '/auth/reset-password', { token, password: 'otra-clave-22' })).body.error).toBe('invalid_reset_token');
+    expect((await call('GET', '/auth/me', undefined, oldTok)).status).toBe(401);
+    expect((await call('POST', '/auth/login', { email: 'rita@test.mx', password: 'password123' })).status).toBe(401);
+    const fresh = await call('POST', '/auth/login', { email: 'rita@test.mx', password: 'nueva-clave-1' });
+    expect(fresh.status).toBe(200);
+    expect((await call('GET', '/auth/me', undefined, fresh.body.token)).status).toBe(200);
+
+    // Three requests per hour per email
+    await call('POST', '/auth/forgot-password', { email: 'rita@test.mx' });
+    await call('POST', '/auth/forgot-password', { email: 'rita@test.mx' });
+    expect((await call('POST', '/auth/forgot-password', { email: 'rita@test.mx' })).status).toBe(429);
+
+    // Five wrong passwords lock that email from this device for 15 minutes, even with the right one
+    for (let i = 0; i < 5; i++) {
+      expect((await call('POST', '/auth/login', { email: 'rita@test.mx', password: `mal-${i}` })).status).toBe(401);
+    }
+    const locked = await call('POST', '/auth/login', { email: 'rita@test.mx', password: 'nueva-clave-1' });
+    expect(locked.status).toBe(429);
+    expect(locked.body.error).toBe('too_many_attempts');
+    // Other people keep signing in normally
+    expect((await call('POST', '/auth/login', { email: 'equipo@test.mx', password: 'password123' })).status).toBe(200);
+  });
 });

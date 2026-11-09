@@ -567,6 +567,20 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('rentals show price per hour', padel?.priceUnit === 'hour' && padel.priceFromCents > 0, JSON.stringify(padel));
 }
 
+// ---- Password reset and login throttling (random email, so real accounts are never locked)
+{
+  const ghost = `e2e-${Date.now()}@example.com`;
+  const f = await call('POST', '/api/auth/forgot-password', { email: ghost });
+  check('forgot password answers ok for any email', f.status === 200 && f.body?.ok === true, f.text);
+  const bad = await call('POST', '/api/auth/reset-password', { token: 'x'.repeat(43), password: 'nueva-clave-1' });
+  check('reset with a bad link -> 422', bad.status === 422 && bad.body?.error === 'invalid_reset_token', bad.text);
+  let last;
+  for (let i = 0; i < 6; i++) last = await call('POST', '/api/auth/login', { email: ghost, password: `wrong-${i}` });
+  check('6th wrong login in a row -> 429', last.status === 429 && last.body?.error === 'too_many_attempts', last.text);
+  const demo = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  check('demo login unaffected by someone else being locked', demo.status === 200);
+}
+
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed  (${mx(Date.now())})`);
 process.exit(fail ? 1 : 0);

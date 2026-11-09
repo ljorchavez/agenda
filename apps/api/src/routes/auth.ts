@@ -26,6 +26,7 @@ import {
   type UserDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
+import { assertNotLimited, clearAttempts, clientIp, loginLimits, recordAttempt } from '../lib/throttle.js';
 import { memberships, resources, services, tenants, users, type Tenant, type User } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { starterResources } from '../lib/resources.js';
@@ -164,11 +165,15 @@ authRoutes.post('/auth/register', async (c) => {
 authRoutes.post('/auth/login', async (c) => {
   const input = loginSchema.parse(await c.req.json());
   const db = getDb();
+  const limits = loginLimits(clientIp(c), input.email);
+  await assertNotLimited(db, limits);
   const user = await db.query.users.findFirst({ where: eq(users.email, input.email) });
   // Same error for unknown email and wrong password to avoid account enumeration.
   if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
+    await recordAttempt(db, limits);
     throw new AppError(401, 'invalid_credentials', 'Invalid email or password');
   }
+  await clearAttempts(db, [limits[0]!.key]);
   const [last] = await businessesFor(db, user.id);
   if (!last) throw new AppError(401, 'no_business', 'This login has no business');
   return c.json(await issueSession(db, user, last.id));
@@ -460,7 +465,10 @@ authRoutes.patch('/users/:id', requireAuth, requireManager, async (c) => {
     }
     const patch: Partial<typeof users.$inferInsert> = {};
     if (input.name) patch.name = input.name;
-    if (input.password) patch.passwordHash = await hashPassword(input.password);
+    if (input.password) {
+      patch.passwordHash = await hashPassword(input.password);
+      patch.passwordChangedAt = new Date(); // signs that person out everywhere
+    }
     if (Object.keys(patch).length) await tx.update(users).set(patch).where(eq(users.id, id));
     const mPatch: Partial<typeof memberships.$inferInsert> = {};
     if (input.role) mPatch.role = input.role;

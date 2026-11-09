@@ -20,6 +20,9 @@ import { resourceRoutes } from './routes/resources.js';
 import { classRoutes } from './routes/classes.js';
 import { locationRoutes } from './routes/locations.js';
 import { webhookRoutes } from './routes/webhooks.js';
+import { passwordRoutes } from './routes/password.js';
+import { pruneAuthTables } from './lib/throttle.js';
+import { getDb } from './db/client.js';
 
 export function createApp() {
   const app = new Hono().basePath('/api');
@@ -46,6 +49,7 @@ export function createApp() {
     if (!isCron(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
     const started = Date.now();
     await seedDemo();
+    await pruneAuthTables(getDb());
     return c.json({ ok: true, ms: Date.now() - started });
   });
 
@@ -54,6 +58,7 @@ export function createApp() {
   app.route('/', manageRoutes);
   app.route('/', publicRoutes);
   app.route('/', webhookRoutes);
+  app.route('/', passwordRoutes);
   app.route('/', authRoutes); // register/login are public; the rest apply requireAuth per route
 
   // Authenticated, tenant-scoped
