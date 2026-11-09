@@ -9,11 +9,13 @@ import {
   type ManageAppointmentDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, services, tenants, type Appointment, type Service, type Tenant } from '../db/schema.js';
+import { appointments, customers, professionals, services, spaces, tenants, type Appointment, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
+import { assertRoom, lockSession } from '../lib/classes.js';
 import { verifyManageToken } from '../lib/crypto.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { computeSlots, computeTableSlots } from './public.js';
+import { activeProfessionals, assignProfessional, assignSpace } from '../lib/resources.js';
+import { computeClassSlots, computeSlots, computeSpaceSlots, computeTableSlots } from './public.js';
 import { assignTable } from '../lib/tables.js';
 
 /**
@@ -23,8 +25,29 @@ import { assignTable } from '../lib/tables.js';
  */
 export const manageRoutes = new Hono();
 
-type Loaded = { appt: Appointment; tenant: Tenant; service: Service; customerName: string };
+type Loaded = { appt: Appointment; tenant: Tenant; service: Service; customerName: string; resourceName: string | null };
 const isTables = (l: Loaded) => businessKind(l.tenant.businessType) === 'reservations';
+const durationOf = (a: Appointment) => Math.round((a.endsAt.getTime() - a.startsAt.getTime()) / 60000);
+
+/** Free start times for moving this booking, following the rules of its kind. */
+async function slotsFor(l: Loaded, date: string, minStart: DateTime): Promise<string[]> {
+  const { appt, tenant } = l;
+  if (appt.classSessionId) {
+    const list = await computeClassSlots(tenant, date, minStart, {
+      serviceId: appt.serviceId,
+      spots: appt.partySize ?? 1,
+      excludeSessionId: appt.classSessionId,
+    });
+    return list.map((s) => s.startsAt);
+  }
+  if (appt.spaceId) return computeSpaceSlots(tenant, durationOf(appt), date, minStart, { excludeId: appt.id, spaceId: appt.spaceId });
+  if (isTables(l)) return computeTableSlots(tenant, appt.partySize ?? 2, date, minStart, { excludeId: appt.id, durationMin: durationOf(appt) });
+  return computeSlots(tenant, durationOf(appt), date, minStart, {
+    excludeId: appt.id,
+    serviceId: appt.serviceId,
+    professionalId: appt.professionalId,
+  });
+}
 
 async function load(token: string): Promise<Loaded> {
   const id = verifyManageToken(token);
@@ -38,7 +61,12 @@ async function load(token: string): Promise<Loaded> {
     db.query.customers.findFirst({ where: and(eq(customers.id, appt.customerId), eq(customers.tenantId, appt.tenantId)) }),
   ]);
   if (!tenant || !service || !customer) throw notFound('appointment');
-  return { appt, tenant, service, customerName: customer.name };
+  const resource = appt.professionalId
+    ? await db.query.professionals.findFirst({ where: and(eq(professionals.id, appt.professionalId), eq(professionals.tenantId, appt.tenantId)) })
+    : appt.spaceId
+      ? await db.query.spaces.findFirst({ where: and(eq(spaces.id, appt.spaceId), eq(spaces.tenantId, appt.tenantId)) })
+      : null;
+  return { appt, tenant, service, customerName: customer.name, resourceName: resource?.name ?? null };
 }
 
 /** Business rules for what the customer may change right now. */
@@ -61,7 +89,7 @@ export function policy(appt: Pick<Appointment, 'status' | 'startsAt'>, tenant: P
   };
 }
 
-function toDto({ appt, tenant, service, customerName }: Loaded): ManageAppointmentDto {
+function toDto({ appt, tenant, service, customerName, resourceName }: Loaded): ManageAppointmentDto {
   const p = policy(appt, tenant);
   return {
     business: {
@@ -71,6 +99,7 @@ function toDto({ appt, tenant, service, customerName }: Loaded): ManageAppointme
       locale: tenant.locale as Locale,
       phone: tenant.phone,
       hours: tenant.settings.hours,
+      kind: businessKind(tenant.businessType),
     },
     appointment: {
       id: appt.id,
@@ -80,6 +109,7 @@ function toDto({ appt, tenant, service, customerName }: Loaded): ManageAppointme
       status: appt.status,
       customerFirstName: customerName.trim().split(/\s+/)[0] ?? '',
       partySize: appt.partySize,
+      resourceName,
     },
     canReschedule: p.canReschedule,
     canCancel: p.canCancel,
@@ -101,10 +131,7 @@ manageRoutes.get('/public/manage/:token/availability', async (c) => {
   if (!date) throw new AppError(400, 'missing_params', 'date required');
   if (!policy(l.appt, l.tenant).canReschedule) return c.json({ slots: [] });
   const minStart = DateTime.now().plus({ hours: selfServiceOf(l.tenant.settings).minHoursNotice });
-  const durationMin = Math.round((l.appt.endsAt.getTime() - l.appt.startsAt.getTime()) / 60000);
-  const slots = isTables(l)
-    ? await computeTableSlots(l.tenant, l.appt.partySize ?? 2, date, minStart, { excludeId: l.appt.id, durationMin })
-    : await computeSlots(l.tenant, durationMin, date, minStart, { excludeId: l.appt.id });
+  const slots = await slotsFor(l, date, minStart);
   return c.json({ slots: slots.filter((s) => DateTime.fromISO(s).toMillis() !== l.appt.startsAt.getTime()) });
 });
 
@@ -115,22 +142,59 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
   const input = manageRescheduleSchema.parse(await c.req.json());
 
   const start = DateTime.fromISO(input.startsAt).setZone(l.tenant.timezone);
-  const durationMin = Math.round((l.appt.endsAt.getTime() - l.appt.startsAt.getTime()) / 60000);
   const minStart = DateTime.now().plus({ hours: p.ss.minHoursNotice });
-  const slots = isTables(l)
-    ? await computeTableSlots(l.tenant, l.appt.partySize ?? 2, start.toISODate()!, minStart, { excludeId: l.appt.id, durationMin })
-    : await computeSlots(l.tenant, durationMin, start.toISODate()!, minStart, { excludeId: l.appt.id });
-  if (!slots.some((s) => DateTime.fromISO(s).toMillis() === start.toMillis())) {
-    throw conflict('slot_unavailable', 'This time is no longer available');
+  let targetSession: string | null = null;
+  if (l.appt.classSessionId) {
+    const list = await computeClassSlots(l.tenant, start.toISODate()!, minStart, {
+      serviceId: l.appt.serviceId,
+      spots: l.appt.partySize ?? 1,
+      excludeSessionId: l.appt.classSessionId,
+    });
+    targetSession = list.find((s) => DateTime.fromISO(s.startsAt).toMillis() === start.toMillis())?.sessionId ?? null;
+    if (!targetSession) throw conflict('slot_unavailable', 'This time is no longer available');
+  } else {
+    const slots = await slotsFor(l, start.toISODate()!, minStart);
+    if (!slots.some((s) => DateTime.fromISO(s).toMillis() === start.toMillis())) {
+      throw conflict('slot_unavailable', 'This time is no longer available');
+    }
   }
-  const startsAt = start.toJSDate();
-  const endsAt = start.plus({ minutes: durationMin }).toJSDate();
+  let startsAt = start.toJSDate();
+  let endsAt = start.plus({ minutes: durationOf(l.appt) }).toJSDate();
   const previous = DateTime.fromJSDate(l.appt.startsAt).setZone(l.tenant.timezone).toFormat('yyyy-MM-dd HH:mm');
 
   await getDb().transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${l.tenant.id} for update`);
     let tableId = l.appt.tableId;
-    if (isTables(l)) {
+    let professionalId = l.appt.professionalId;
+    let classSessionId = l.appt.classSessionId;
+    if (targetSession) {
+      const { session, booked } = await lockSession(tx, l.tenant.id, targetSession);
+      if (session.status !== 'scheduled') throw conflict('slot_unavailable', 'This class is no longer available');
+      try {
+        assertRoom(session.capacity, booked, l.appt.partySize ?? 1);
+      } catch {
+        throw conflict('slot_unavailable', 'This class is full');
+      }
+      classSessionId = session.id;
+      professionalId = session.professionalId;
+      startsAt = session.startsAt;
+      endsAt = session.endsAt;
+    } else if (l.appt.spaceId) {
+      try {
+        await assignSpace(tx, l.tenant.id, startsAt, endsAt, { spaceId: l.appt.spaceId, excludeId: l.appt.id });
+      } catch {
+        throw conflict('slot_unavailable', 'This time is no longer available');
+      }
+    } else if (!isTables(l) && (await activeProfessionals(tx, l.tenant.id)).length) {
+      try {
+        professionalId = (await assignProfessional(tx, l.tenant.id, l.appt.serviceId, startsAt, endsAt, {
+          professionalId: l.appt.professionalId,
+          excludeId: l.appt.id,
+        })).id;
+      } catch {
+        throw conflict('slot_unavailable', 'This time is no longer available');
+      }
+    } else if (isTables(l)) {
       try {
         tableId = (await assignTable(tx, l.tenant.id, l.appt.partySize ?? 2, startsAt, endsAt, { excludeId: l.appt.id })).id;
       } catch {
@@ -148,6 +212,8 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
         status: 'scheduled',
         reminderSentAt: null,
         tableId,
+        professionalId,
+        classSessionId,
         notes: appendNote(l.appt.notes, stamp(l.tenant, `Reagendada por el cliente (antes: ${previous})`)),
       })
       .where(

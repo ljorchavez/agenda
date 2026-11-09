@@ -13,7 +13,8 @@ import {
   type AuthResponse,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { diningTables, services, tenants, users } from '../db/schema.js';
+import { diningTables, services, spaces, tenants, users } from '../db/schema.js';
+import { defaultSpaces, RENTAL_SERVICE_NAME } from '../lib/resources.js';
 import { DEFAULT_TABLES } from '../lib/tables.js';
 import { hashPassword, signToken, slugify, verifyPassword } from '../lib/auth.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
@@ -80,6 +81,13 @@ authRoutes.post('/auth/register', async (c) => {
         priceCents: 0,
       });
       await tx.insert(diningTables).values(DEFAULT_TABLES.map((t) => ({ ...t, tenantId: tenant!.id })));
+    } else if (businessKind(input.businessType) === 'rentals') {
+      // Spaces can be booked right away; the owner sets names and prices.
+      await tx.insert(services).values({ tenantId: tenant!.id, name: RENTAL_SERVICE_NAME, durationMin: 60, priceCents: 0 });
+      await tx.insert(spaces).values(defaultSpaces(input.businessType).map((x) => ({ ...x, tenantId: tenant!.id })));
+    } else if (businessKind(input.businessType) === 'classes') {
+      // A first class type so the owner can schedule sessions immediately.
+      await tx.insert(services).values({ tenantId: tenant!.id, name: 'Clase grupal', durationMin: 60, priceCents: 0 });
     }
     return { tenant: tenant!, user: user! };
   });

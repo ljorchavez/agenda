@@ -1,4 +1,4 @@
-import { businessKind, paymentSettingsOf, reservationSettingsOf, selfServiceOf } from '@agenda/shared';
+import { businessKind, paymentSettingsOf, rentalSettingsOf, reservationSettingsOf, selfServiceOf } from '@agenda/shared';
 import { manageToken } from './crypto.js';
 import type {
   AppointmentDto,
@@ -8,7 +8,37 @@ import type {
   ServiceDto,
   TenantDto,
 } from '@agenda/shared';
-import type { Customer, Payment, Service, Tenant } from '../db/schema.js';
+import type { ClassSession, Customer, Payment, Professional, Service, Space, Tenant } from '../db/schema.js';
+import type { ClassSessionDto, ProfessionalDto, SpaceDto } from '@agenda/shared';
+
+export function toProfessionalDto(p: Professional): ProfessionalDto {
+  return { id: p.id, name: p.name, color: p.color, active: p.active, serviceIds: p.serviceIds ?? [], userId: p.userId };
+}
+
+export function toSpaceDto(s: Space): SpaceDto {
+  return { id: s.id, name: s.name, description: s.description, pricePerHourCents: s.pricePerHourCents, active: s.active };
+}
+
+export function toClassSessionDto(
+  s: ClassSession,
+  extra: { serviceName: string; priceCents: number; professionalName: string | null; professionalColor: string | null; booked: number },
+): ClassSessionDto {
+  return {
+    id: s.id,
+    serviceId: s.serviceId,
+    serviceName: extra.serviceName,
+    professionalId: s.professionalId,
+    professionalName: extra.professionalName,
+    professionalColor: extra.professionalColor,
+    startsAt: s.startsAt.toISOString(),
+    endsAt: s.endsAt.toISOString(),
+    capacity: s.capacity,
+    booked: extra.booked,
+    status: s.status as ClassSessionDto['status'],
+    priceCents: extra.priceCents,
+    notes: s.notes,
+  };
+}
 
 const iso = (d: Date | string | null | undefined): string | null =>
   d == null ? null : new Date(d).toISOString();
@@ -28,6 +58,7 @@ export function toTenantDto(t: Tenant): TenantDto {
       payments: paymentSettingsOf(t.settings),
       selfService: selfServiceOf(t.settings),
       reservations: reservationSettingsOf(t.settings),
+      rentals: rentalSettingsOf(t.settings),
     },
     kind: businessKind(t.businessType),
     profile: {
@@ -103,6 +134,12 @@ export type AppointmentRow = {
   party_size: number | null;
   table_id: string | null;
   table_name: string | null;
+  professional_id: string | null;
+  professional_name: string | null;
+  professional_color: string | null;
+  space_id: string | null;
+  space_name: string | null;
+  class_session_id: string | null;
 };
 
 export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
@@ -125,5 +162,11 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     partySize: r.party_size == null ? null : Number(r.party_size),
     tableId: r.table_id,
     tableName: r.table_name,
+    professionalId: r.professional_id,
+    professionalName: r.professional_name,
+    professionalColor: r.professional_color,
+    spaceId: r.space_id,
+    spaceName: r.space_name,
+    classSessionId: r.class_session_id,
   };
 }

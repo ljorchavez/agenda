@@ -28,7 +28,13 @@
     "logout": "Cerrar sesión",
     "reports": "Reportes",
     "reservations": "Reservaciones",
-    "tables": "Mesas"
+    "tables": "Mesas",
+    "team": "Equipo",
+    "bookings": "Reservas",
+    "spaces": "Espacios",
+    "classes": "Clases",
+    "classTypes": "Tipos de clase",
+    "instructors": "Instructores"
   },
   "auth": {
     "tagline": "Agenda, recordatorios por WhatsApp y cobros para tu negocio.",
@@ -60,7 +66,13 @@
     "veterinary": "Veterinaria",
     "restaurant": "Restaurante",
     "cafe": "Cafetería",
-    "bar": "Bar"
+    "bar": "Bar",
+    "fitness": "Gimnasio / fitness",
+    "yoga": "Yoga / pilates",
+    "dance": "Escuela de baile",
+    "sports": "Canchas deportivas",
+    "coworking": "Coworking / salas",
+    "studio": "Estudio (foto, grabación, ensayo)"
   },
   "status": {
     "scheduled": "Agendada",
@@ -146,7 +158,9 @@
     "method_disabled": "Ese método de pago está desactivado en Configuración",
     "manageLink": "Enlace para que el cliente reagende o cancele",
     "manageLinkHelp": "Hasta {{hours}} h antes de la cita (cámbialo en Configuración).",
-    "manageMessage": "Hola {{name}}, tu cita en {{business}} es el {{date}}. Si necesitas cambiarla o cancelarla, hazlo aquí: {{url}}"
+    "manageMessage": "Hola {{name}}, tu cita en {{business}} es el {{date}}. Si necesitas cambiarla o cancelarla, hazlo aquí: {{url}}",
+    "filter": "Filtrar por profesional o espacio",
+    "everyone": "Todos"
   },
   "customers": {
     "title": "Clientes",
@@ -229,15 +243,19 @@
     "selfServiceHelp": "Tus clientes reciben un enlace privado para administrar su cita.",
     "rescheduleEnabled": "Permitir que reagenden solos",
     "cancelEnabled": "Permitir que cancelen solos",
-    "minHoursNotice": "Hasta cuántas horas antes"
+    "minHoursNotice": "Hasta cuántas horas antes",
+    "logins": "Usuarios con acceso",
+    "loginsHelp": "Personas que pueden entrar al sistema de tu negocio.",
+    "loginsHelpTeam": "Personas que pueden entrar al sistema. Puedes vincular cada usuario con alguien de tu equipo en la sección Equipo.",
+    "teamLinkHelp": "Agrega a tu equipo, sus servicios y su color en la agenda."
   },
   "booking": {
     "title": "Agenda tu cita",
-    "chooseService": "1. Elige un servicio",
-    "chooseDate": "2. Elige el día",
-    "chooseTime": "3. Elige la hora",
+    "chooseService": "Elige un servicio",
+    "chooseDate": "Elige el día",
+    "chooseTime": "Elige la hora",
     "noSlots": "No hay horarios disponibles ese día",
-    "yourData": "4. Tus datos",
+    "yourData": "Tus datos",
     "confirm": "Confirmar cita",
     "success": "¡Listo! Tu cita está agendada",
     "successDetail": "{{service}} el {{date}}. Te enviaremos un recordatorio por WhatsApp.",
@@ -256,13 +274,43 @@
     "confirmTable": "Confirmar reservación",
     "successTitleTable": "¡Listo! Tu mesa está reservada",
     "directions": "Cómo llegar",
-    "choosePeople": "1. ¿Cuántas personas?",
+    "choosePeople": "¿Cuántas personas?",
     "largerGroups": "Para grupos más grandes, contáctanos directamente.",
     "successTable_one": "Mesa para {{count}} persona el {{date}}. Te enviaremos un recordatorio por WhatsApp.",
     "successTable_other": "Mesa para {{count}} personas el {{date}}. Te enviaremos un recordatorio por WhatsApp.",
     "tableFor_one": "Mesa para {{count}} persona",
     "tableFor_other": "Mesa para {{count}} personas",
-    "party_too_large": "Para ese número de personas, contacta directamente al negocio."
+    "party_too_large": "Para ese número de personas, contacta directamente al negocio.",
+    "chooseProfessional": "¿Con quién?",
+    "anyProfessional": "Cualquiera disponible",
+    "chooseSpace": "Elige el espacio",
+    "anySpace": "Cualquiera disponible",
+    "fromPerHour": "desde {{price}} / hora",
+    "chooseDuration": "¿Cuánto tiempo?",
+    "chooseStart": "Hora de inicio",
+    "hoursN_one": "{{count}} hora",
+    "hoursN_other": "{{count}} horas",
+    "confirmRental": "Confirmar renta",
+    "noSpaces": "Este negocio todavía no tiene espacios para rentar.",
+    "titleRentals": "Renta un espacio",
+    "titleClasses": "Reserva tu lugar en clase",
+    "chooseClass": "Elige la clase",
+    "noClasses": "No hay clases ese día.",
+    "classesN_one": "{{count}} clase",
+    "classesN_other": "{{count}} clases",
+    "withInstructor": "con {{name}}",
+    "classFull": "Llena",
+    "spotsLeft_one": "Queda {{count}} lugar",
+    "spotsLeft_other": "Quedan {{count}} lugares",
+    "howManySpots": "¿Cuántos lugares?",
+    "confirmClass": "Reservar lugar",
+    "total": "Total",
+    "successClassTitle": "¡Listo! Tu lugar está reservado",
+    "successClass_one": "{{service}} el {{date}} ({{count}} lugar). Te enviaremos un recordatorio por WhatsApp.",
+    "successClass_other": "{{service}} el {{date}} ({{count}} lugares). Te enviaremos un recordatorio por WhatsApp.",
+    "successRentalTitle": "¡Listo! Tu espacio está reservado",
+    "successRental": "{{space}} el {{date}} por {{minutes}} min. Te enviaremos un recordatorio por WhatsApp.",
+    "successDetailWith": "{{service}} con {{name}} el {{date}}. Te enviaremos un recordatorio por WhatsApp."
   },
   "paymentSettings": {
     "title": "Métodos de pago",
@@ -304,7 +352,13 @@
     "reports": "Reportes",
     "settings": "Ajustes",
     "reservations": "Reservas",
-    "tables": "Mesas"
+    "tables": "Mesas",
+    "team": "Equipo",
+    "bookings": "Reservas",
+    "spaces": "Espacios",
+    "classes": "Clases",
+    "classTypes": "Clases",
+    "instructors": "Equipo"
   },
   "reports": {
     "title": "Reportes",
@@ -363,7 +417,9 @@
       "services": "Citas completadas por servicio",
       "methods": "Ingresos por método de pago",
       "sources": "Origen de las citas",
-      "heatmap": "Horarios más ocupados"
+      "heatmap": "Horarios más ocupados",
+      "professionals": "Por profesional",
+      "spaces": "Por espacio"
     },
     "current": "Periodo actual",
     "previous": "Periodo anterior",
@@ -383,7 +439,9 @@
     },
     "range_too_long": "El periodo es demasiado largo; agrupa por semana o mes.",
     "invalid_range": "Fechas no válidas.",
-    "validation_error": "Revisa las fechas del filtro."
+    "validation_error": "Revisa las fechas del filtro.",
+    "bookingsN_one": "{{count}} reserva",
+    "bookingsN_other": "{{count}} reservas"
   },
   "manage": {
     "title": "Tu cita",
@@ -409,7 +467,8 @@
     "slot_unavailable": "Ese horario se acaba de ocupar. Elige otro.",
     "too_late": "Ya no es posible hacer cambios en línea para esta cita.",
     "reschedule_not_allowed": "Esta cita ya no se puede cambiar en línea.",
-    "cancel_not_allowed": "Esta cita ya no se puede cancelar en línea."
+    "cancel_not_allowed": "Esta cita ya no se puede cancelar en línea.",
+    "with": "con {{name}}"
   },
   "tables": {
     "title": "Mesas",
@@ -471,7 +530,13 @@
     "ctaTitle": "¿Tienes un negocio?",
     "ctaText": "Recibe reservas en línea, recordatorios por WhatsApp y aparece en este mapa.",
     "ctaButton": "Crear cuenta",
-    "lookingForBusiness": "¿Buscas dónde reservar? Ver directorio"
+    "lookingForBusiness": "¿Buscas dónde reservar? Ver directorio",
+    "cta": {
+      "appointments": "Agendar cita",
+      "reservations": "Reservar mesa",
+      "classes": "Ver clases",
+      "rentals": "Rentar espacio"
+    }
   },
   "profile": {
     "title": "Perfil público y directorio",
@@ -493,5 +558,94 @@
     "listMeHelp": "Nombre, giro, descripción, dirección y teléfono serán públicos. Nunca se muestran datos de tus clientes.",
     "listMeNeeds": "Para aparecer, marca tu ubicación en el mapa y escribe tu ciudad.",
     "validation_error": "Revisa los datos (para aparecer en el directorio necesitas ubicación y ciudad)."
+  },
+  "classes": {
+    "title": "Clases",
+    "new": "Nueva clase",
+    "empty": "No hay clases programadas esta semana.",
+    "classType": "Tipo de clase",
+    "capacity": "Cupo",
+    "booked": "Inscritos",
+    "left": "Disponibles",
+    "instructor": "Instructor",
+    "noInstructor": "Sin instructor",
+    "cancelled": "Cancelada",
+    "cancelledHelp": "Esta clase está cancelada. Los inscritos ya no la verán como activa.",
+    "cancelClass": "Cancelar clase",
+    "cancelConfirm": "¿Cancelar esta clase? También se cancelarán los lugares reservados.",
+    "deleteConfirm": "¿Eliminar esta clase?",
+    "copyNextWeek": "Copiar a la próxima semana",
+    "attendees": "Inscritos",
+    "noAttendees": "Nadie se ha inscrito todavía.",
+    "addAttendee": "Agregar inscrito",
+    "spots": "Lugares",
+    "spotsN_one": "{{count}} lugar",
+    "spotsN_other": "{{count}} lugares",
+    "overbook": "Permitir sobrecupo",
+    "attended": "Asistió",
+    "remove": "Quitar"
+  },
+  "team": {
+    "title": "Equipo",
+    "instructorsTitle": "Instructores",
+    "add": "Agregar persona",
+    "edit": "Editar persona",
+    "name": "Nombre",
+    "color": "Color en la agenda",
+    "services": "Servicios que realiza",
+    "servicesHelp": "Si no marcas ninguno, puede hacer todos.",
+    "allServices": "Todos los servicios",
+    "login": "Usuario vinculado",
+    "noLogin": "Sin usuario",
+    "activeLabel": "Activo (recibe reservas)",
+    "deleteConfirm": "¿Eliminar a esta persona?",
+    "deactivated": "Tiene citas próximas, así que lo desactivamos en lugar de eliminarlo.",
+    "empty": "Todavía no agregas a tu equipo. Mientras tanto, todo funciona como una sola agenda.",
+    "emptyInstructors": "Todavía no agregas instructores.",
+    "help": "Cada persona tiene su propia agenda. Tus clientes pueden elegir con quién o dejar que el sistema asigne a quien esté libre.",
+    "instructorsHelp": "Asigna un instructor a cada clase para que no le toquen dos clases a la misma hora.",
+    "professional": "Profesional",
+    "auto": "Asignar automáticamente"
+  },
+  "spaces": {
+    "title": "Espacios",
+    "space": "Espacio",
+    "name": "Nombre (ej. Cancha 1)",
+    "description": "Descripción",
+    "pricePerHour": "Precio por hora",
+    "perHour": "{{price}} / hora",
+    "add": "Agregar espacio",
+    "empty": "Agrega tus canchas, salas o estudios para empezar a rentarlos.",
+    "help": "Cada espacio tiene su precio por hora. Tus clientes eligen el espacio, el día, la hora de inicio y cuánto tiempo.",
+    "deleteConfirm": "¿Eliminar este espacio?",
+    "deactivated": "Tiene reservas próximas, así que lo desactivamos en lugar de eliminarlo.",
+    "auto": "Cualquiera libre",
+    "noSpace": "Sin espacio",
+    "settingsTitle": "Renta de espacios",
+    "durationsHelp": "Duraciones que tus clientes pueden elegir al reservar."
+  },
+  "errors": {
+    "class_full": "Ya no hay lugares suficientes en esta clase.",
+    "class_cancelled": "Esta clase fue cancelada.",
+    "capacity_below_booked": "El cupo no puede ser menor que los lugares ya reservados.",
+    "no_professional_available": "No hay nadie disponible a esa hora. Elige otro horario.",
+    "professional_busy": "Esa persona ya tiene una cita a esa hora.",
+    "professional_not_found": "Esa persona no existe o está inactiva.",
+    "professional_service": "Esa persona no realiza este servicio.",
+    "space_not_found": "Ese espacio no existe o está inactivo.",
+    "invalid_duration": "Esa duración no está disponible.",
+    "service_required": "Elige un servicio.",
+    "slot_unavailable": "Ese horario ya no está disponible. Elige otro.",
+    "no_table_available": "No hay mesa disponible para ese tamaño de grupo y horario.",
+    "table_taken": "Esa mesa ya está reservada a esa hora.",
+    "table_too_small": "Esa mesa está inactiva o es muy pequeña para el grupo.",
+    "party_too_large": "Para grupos más grandes, contacta al negocio.",
+    "forbidden": "Solo el dueño puede hacer esto.",
+    "not_found": "No encontrado.",
+    "invalid_credentials": "Correo o contraseña incorrectos.",
+    "range_too_long": "Elige un periodo más corto.",
+    "reschedule_not_allowed": "Ya no se puede cambiar esta reserva.",
+    "method_disabled": "Ese método de pago está desactivado.",
+    "overlap": "Ya hay una cita a esa hora."
   }
 }

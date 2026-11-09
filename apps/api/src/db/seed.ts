@@ -3,6 +3,8 @@
  * Creates a nutrition clinic with services, customers and ~14 months of appointments/payments and two team members.
  * Also a restaurant (restaurante@agenda.mx / demo1234) and a set of clearly-labelled demo
  * businesses (slug `demo-*`) so the public directory map has content.
+ * Also a barbershop with 3 barbers (barberia@agenda.mx), a yoga studio with classes (clases@agenda.mx)
+ * and a padel club renting courts (padel@agenda.mx). Same password.
  * Login: demo@agenda.mx / demo1234
  */
 import { eq, like } from 'drizzle-orm';
@@ -10,7 +12,7 @@ import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { closeDb, getDb } from './client.js';
-import { appointments, customers, diningTables, payments, services, tenants, users } from './schema.js';
+import { appointments, classSessions, customers, diningTables, payments, professionals, services, spaces, tenants, users } from './schema.js';
 
 const TZ = 'America/Mexico_City';
 
@@ -172,6 +174,9 @@ async function main() {
   console.log('Login: demo@agenda.mx / demo1234 — public page: /b/nutricion-demo');
 
   await seedRestaurant();
+  await seedBarbershop();
+  await seedClasses();
+  await seedPadel();
   await seedDirectory();
 }
 
@@ -303,6 +308,305 @@ async function seedRestaurant() {
     }));
   await insertChunked(payments, pays);
   console.log(`Seeded restaurant with ${tables.length} tables, ${inserted.length} reservations — login restaurante@agenda.mx / demo1234`);
+}
+
+/** Shared helpers for the extra demos. */
+async function resetTenant(slug: string) {
+  const db = getDb();
+  const existing = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
+  if (existing) await db.delete(tenants).where(eq(tenants.id, existing.id));
+}
+
+async function demoCustomers(tenantId: string, count: number, phonePrefix: string, sinceDays: number) {
+  const first = ['Alejandro', 'Brenda', 'César', 'Daniela', 'Emilio', 'Fátima', 'Gerardo', 'Hilda', 'Iker', 'Jimena', 'Kevin', 'Lorena', 'Mauricio', 'Nadia', 'Óscar', 'Patricia', 'Quique', 'Rocío', 'Samuel', 'Tere', 'Uriel', 'Vanessa', 'Wendy', 'Ximena', 'Yahir', 'Zaira'];
+  const last = ['Aguilar', 'Bautista', 'Cervantes', 'Delgado', 'Espinoza', 'Fuentes', 'Guerrero', 'Ibarra', 'Juárez', 'Lara', 'Montes', 'Núñez', 'Osorio', 'Ponce', 'Quiroz', 'Rosales'];
+  return (await insertChunked(
+    customers,
+    Array.from({ length: count }, (_, i) => ({
+      tenantId,
+      name: `${first[i % first.length]} ${last[(i * 5) % last.length]}`,
+      phone: `+52${phonePrefix}${String(10000 + i).slice(-5)}`,
+      createdAt: DateTime.now().minus({ days: sinceDays - Math.floor((i * sinceDays) / count) }).toJSDate(),
+    })),
+  )) as unknown as (typeof customers.$inferSelect)[];
+}
+
+async function payCompleted(tenantId: string, rows: (typeof appointments.$inferSelect)[]) {
+  const pays = rows
+    .filter((a) => a.status === 'completed' && a.priceCents > 0)
+    .map((a) => ({
+      tenantId,
+      customerId: a.customerId,
+      appointmentId: a.id,
+      amountCents: a.priceCents,
+      method: pick(['cash', 'card', 'card', 'transfer'] as const),
+      status: 'paid' as const,
+      paidAt: a.endsAt,
+    }));
+  await insertChunked(payments, pays);
+  return pays.length;
+}
+
+const pastStatus = () => {
+  const r = rand();
+  return r < 0.06 ? 'no_show' : r < 0.11 ? 'cancelled' : 'completed';
+};
+
+/** Barbershop with three barbers, each with their own agenda. */
+async function seedBarbershop() {
+  const db = getDb();
+  await resetTenant('barberia-demo');
+  const [tenant] = await db
+    .insert(tenants)
+    .values({
+      name: 'Barbería Demo',
+      slug: 'barberia-demo',
+      businessType: 'barbershop',
+      phone: '+525544332211',
+      timezone: TZ,
+      description: 'Tres barberos, agenda con quien prefieras. Cuenta de demostración.',
+      address: 'Calle Pitágoras 900',
+      neighborhood: 'Narvarte Poniente',
+      city: 'Ciudad de México',
+      state: 'Ciudad de México',
+      lat: 19.3962,
+      lng: -99.1588,
+      directoryListed: true,
+      settings: { ...DEFAULT_TENANT_SETTINGS, hours: { days: [1, 2, 3, 4, 5, 6], open: '10:00', close: '20:00', slotMinutes: 30 } },
+    })
+    .returning();
+  const tenantId = tenant!.id;
+  await db.insert(users).values({ tenantId, email: 'barberia@agenda.mx', name: 'Toño Ramírez', role: 'owner', passwordHash: await hashPassword('demo1234') });
+  const svc = await db
+    .insert(services)
+    .values([
+      { tenantId, name: 'Corte', durationMin: 30, priceCents: 25000 },
+      { tenantId, name: 'Corte + barba', durationMin: 60, priceCents: 38000 },
+      { tenantId, name: 'Arreglo de barba', durationMin: 30, priceCents: 18000 },
+      { tenantId, name: 'Corte niño', durationMin: 30, priceCents: 20000 },
+    ])
+    .returning();
+  const pros = await db
+    .insert(professionals)
+    .values([
+      { tenantId, name: 'Toño', color: '#2563eb', serviceIds: [] },
+      { tenantId, name: 'Memo', color: '#ea580c', serviceIds: [] },
+      // Luis doesn't do kids' cuts
+      { tenantId, name: 'Luis', color: '#16a34a', serviceIds: [svc[0]!.id, svc[1]!.id, svc[2]!.id] },
+    ])
+    .returning();
+  const custs = await demoCustomers(tenantId, 90, '55233', 200);
+  const now = DateTime.now().setZone(TZ);
+  const rows: (typeof appointments.$inferInsert)[] = [];
+  for (let d = -180; d <= 10; d++) {
+    const day = now.plus({ days: d }).startOf('day');
+    if (day.weekday === 7) continue;
+    for (const p of pros) {
+      // Each barber fills 40-75% of their day
+      let t = day.set({ hour: 10 });
+      const close = day.set({ hour: 20 });
+      while (t < close) {
+        const service = p.name === 'Luis' ? pick(svc.slice(0, 3)) : pick([svc[0]!, svc[0]!, svc[1]!, svc[2]!, svc[3]!]);
+        const end = t.plus({ minutes: service.durationMin });
+        if (end > close) break;
+        if (rand() < (day.weekday >= 5 ? 0.75 : 0.45) && !(d >= 0 && t < now)) {
+          rows.push({
+            tenantId,
+            customerId: pick(custs).id,
+            serviceId: service.id,
+            professionalId: p.id,
+            startsAt: t.toJSDate(),
+            endsAt: end.toJSDate(),
+            status: d < 0 || t < now ? pastStatus() : rand() > 0.5 ? 'confirmed' : 'scheduled',
+            priceCents: service.priceCents,
+            source: rand() > 0.5 ? 'online' : 'staff',
+            reminderSentAt: d < 0 ? t.minus({ hours: 24 }).toJSDate() : null,
+          });
+          t = end;
+        } else {
+          t = t.plus({ minutes: 30 });
+        }
+      }
+    }
+  }
+  const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
+  const paid = await payCompleted(tenantId, inserted);
+  console.log(`Seeded barbershop with ${pros.length} barbers, ${inserted.length} appointments, ${paid} payments — login barberia@agenda.mx / demo1234`);
+}
+
+/** Yoga studio: class types, two instructors, sessions with limited spots. */
+async function seedClasses() {
+  const db = getDb();
+  await resetTenant('yoga-demo');
+  const [tenant] = await db
+    .insert(tenants)
+    .values({
+      name: 'Estudio Yoga Demo',
+      slug: 'yoga-demo',
+      businessType: 'yoga',
+      phone: '+525577889900',
+      timezone: TZ,
+      description: 'Vinyasa, yin y pilates en grupos pequeños. Aparta tu lugar en línea. Cuenta de demostración.',
+      address: 'Calle Higuera 40',
+      neighborhood: 'Del Carmen, Coyoacán',
+      city: 'Ciudad de México',
+      state: 'Ciudad de México',
+      lat: 19.3467,
+      lng: -99.159,
+      directoryListed: true,
+      settings: { ...DEFAULT_TENANT_SETTINGS, hours: { days: [1, 2, 3, 4, 5, 6], open: '07:00', close: '21:30', slotMinutes: 30 }, selfService: { rescheduleEnabled: true, cancelEnabled: true, minHoursNotice: 4 } },
+    })
+    .returning();
+  const tenantId = tenant!.id;
+  await db.insert(users).values({ tenantId, email: 'clases@agenda.mx', name: 'Laura Méndez', role: 'owner', passwordHash: await hashPassword('demo1234') });
+  const [vinyasa, yin, pilates] = await db
+    .insert(services)
+    .values([
+      { tenantId, name: 'Vinyasa', durationMin: 60, priceCents: 18000 },
+      { tenantId, name: 'Yin yoga', durationMin: 75, priceCents: 20000 },
+      { tenantId, name: 'Pilates mat', durationMin: 50, priceCents: 20000 },
+    ])
+    .returning();
+  const [laura, diego] = await db
+    .insert(professionals)
+    .values([
+      { tenantId, name: 'Laura', color: '#7c3aed', serviceIds: [] },
+      { tenantId, name: 'Diego', color: '#0f766e', serviceIds: [] },
+    ])
+    .returning();
+  // Weekly timetable (created session by session, like a studio would with "copy to next week")
+  const timetable: { days: number[]; h: number; m: number; svc: typeof vinyasa; pro: typeof laura; cap: number }[] = [
+    { days: [1, 3, 5], h: 7, m: 0, svc: vinyasa, pro: laura, cap: 14 },
+    { days: [2, 4], h: 7, m: 0, svc: pilates, pro: diego, cap: 12 },
+    { days: [1, 2, 3, 4], h: 19, m: 0, svc: vinyasa, pro: diego, cap: 15 },
+    { days: [2, 4], h: 20, m: 15, svc: yin, pro: laura, cap: 12 },
+    { days: [6], h: 9, m: 0, svc: vinyasa, pro: laura, cap: 18 },
+    { days: [6], h: 10, m: 30, svc: pilates, pro: diego, cap: 12 },
+  ];
+  const now = DateTime.now().setZone(TZ);
+  const sessionRows: (typeof classSessions.$inferInsert)[] = [];
+  for (let d = -120; d <= 21; d++) {
+    const day = now.plus({ days: d }).startOf('day');
+    for (const slot of timetable) {
+      if (!slot.days.includes(day.weekday)) continue;
+      const start = day.set({ hour: slot.h, minute: slot.m });
+      sessionRows.push({
+        tenantId,
+        serviceId: slot.svc!.id,
+        professionalId: slot.pro!.id,
+        startsAt: start.toJSDate(),
+        endsAt: start.plus({ minutes: slot.svc!.durationMin }).toJSDate(),
+        capacity: slot.cap,
+      });
+    }
+  }
+  const sessions = (await insertChunked(classSessions, sessionRows)) as unknown as (typeof classSessions.$inferSelect)[];
+  const custs = await demoCustomers(tenantId, 70, '55344', 150);
+  const price = new Map([vinyasa!, yin!, pilates!].map((s) => [s.id, s.priceCents]));
+  const rows: (typeof appointments.$inferInsert)[] = [];
+  for (const s of sessions) {
+    const past = s.startsAt < now.toJSDate();
+    const daysAhead = (s.startsAt.getTime() - now.toMillis()) / 86400e3;
+    const fill = past ? 0.45 + rand() * 0.5 : Math.max(0.1, 0.8 - daysAhead * 0.04) * (0.6 + rand() * 0.4);
+    const n = Math.min(s.capacity, Math.round(s.capacity * fill));
+    const used = new Set<string>();
+    for (let k = 0; k < n; k++) {
+      const cu = pick(custs);
+      if (used.has(cu.id)) continue;
+      used.add(cu.id);
+      rows.push({
+        tenantId,
+        customerId: cu.id,
+        serviceId: s.serviceId,
+        classSessionId: s.id,
+        professionalId: s.professionalId,
+        startsAt: s.startsAt,
+        endsAt: s.endsAt,
+        partySize: 1,
+        status: past ? pastStatus() : rand() > 0.6 ? 'confirmed' : 'scheduled',
+        priceCents: price.get(s.serviceId) ?? 0,
+        source: rand() > 0.3 ? 'online' : 'staff',
+        reminderSentAt: past ? new Date(s.startsAt.getTime() - 24 * 3600e3) : null,
+      });
+    }
+  }
+  const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
+  const paid = await payCompleted(tenantId, inserted);
+  console.log(`Seeded yoga studio with ${sessions.length} classes, ${inserted.length} bookings, ${paid} payments — login clases@agenda.mx / demo1234`);
+}
+
+/** Padel club renting four courts by the hour. */
+async function seedPadel() {
+  const db = getDb();
+  await resetTenant('padel-demo');
+  const [tenant] = await db
+    .insert(tenants)
+    .values({
+      name: 'Pádel Club Demo',
+      slug: 'padel-demo',
+      businessType: 'sports',
+      phone: '+523311223344',
+      timezone: TZ,
+      description: 'Cuatro canchas de pádel techadas. Reserva por hora en línea. Cuenta de demostración.',
+      address: 'Av. Patria 1500',
+      neighborhood: 'Puerta de Hierro, Zapopan',
+      city: 'Guadalajara',
+      state: 'Jalisco',
+      lat: 20.7101,
+      lng: -103.4106,
+      directoryListed: true,
+      settings: { ...DEFAULT_TENANT_SETTINGS, hours: { days: [1, 2, 3, 4, 5, 6, 7], open: '07:00', close: '23:00', slotMinutes: 30 }, rentals: { durations: [60, 90, 120] } },
+    })
+    .returning();
+  const tenantId = tenant!.id;
+  await db.insert(users).values({ tenantId, email: 'padel@agenda.mx', name: 'Rodrigo Salas', role: 'owner', passwordHash: await hashPassword('demo1234') });
+  const [svc] = await db.insert(services).values({ tenantId, name: 'Renta de espacio', durationMin: 60, priceCents: 0 }).returning();
+  const courts = await db
+    .insert(spaces)
+    .values([
+      { tenantId, name: 'Cancha 1', pricePerHourCents: 45000, description: 'Techada, cristal' },
+      { tenantId, name: 'Cancha 2', pricePerHourCents: 45000, description: 'Techada, cristal' },
+      { tenantId, name: 'Cancha 3', pricePerHourCents: 45000, description: 'Techada' },
+      { tenantId, name: 'Cancha Central', pricePerHourCents: 55000, description: 'Gradas y mejor iluminación' },
+    ])
+    .returning();
+  const custs = await demoCustomers(tenantId, 80, '33455', 160);
+  const now = DateTime.now().setZone(TZ);
+  const rows: (typeof appointments.$inferInsert)[] = [];
+  for (let d = -150; d <= 14; d++) {
+    const day = now.plus({ days: d }).startOf('day');
+    const weekend = day.weekday >= 6;
+    for (const c of courts) {
+      let t = day.set({ hour: 7 });
+      const close = day.set({ hour: 23 });
+      while (t < close) {
+        const dur = pick([60, 90, 90, 120]);
+        const end = t.plus({ minutes: dur });
+        if (end > close) break;
+        const peak = t.hour >= 18 || t.hour < 9 || weekend;
+        if (rand() < (peak ? 0.7 : 0.25) && !(d >= 0 && t < now)) {
+          rows.push({
+            tenantId,
+            customerId: pick(custs).id,
+            serviceId: svc!.id,
+            spaceId: c.id,
+            startsAt: t.toJSDate(),
+            endsAt: end.toJSDate(),
+            status: d < 0 || t < now ? pastStatus() : rand() > 0.5 ? 'confirmed' : 'scheduled',
+            priceCents: Math.round((c.pricePerHourCents * dur) / 60),
+            source: rand() > 0.35 ? 'online' : 'staff',
+            reminderSentAt: d < 0 ? t.minus({ hours: 24 }).toJSDate() : null,
+          });
+          t = end;
+        } else {
+          t = t.plus({ minutes: 30 });
+        }
+      }
+    }
+  }
+  const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
+  const paid = await payCompleted(tenantId, inserted);
+  console.log(`Seeded padel club with ${courts.length} courts, ${inserted.length} bookings, ${paid} payments — login padel@agenda.mx / demo1234`);
 }
 
 /** Demo listings for the public directory (clearly labelled "Demo"). */

@@ -6,15 +6,17 @@ import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { money, toCents } from '../lib/format';
 import { useServices } from '../lib/queries';
+import { useAuth } from '../lib/auth';
 
 export function ServicesPage() {
   const { t } = useTranslation();
+  const { tenant } = useAuth();
   const { data, isLoading } = useServices();
   const [editing, setEditing] = useState<ServiceDto | 'new' | null>(null);
 
   return (
     <>
-      <PageHeader title={t('services.title')} actions={<button className="btn-primary" onClick={() => setEditing('new')}>{t('services.new')}</button>} />
+      <PageHeader title={tenant?.kind === 'classes' ? t('nav.classTypes') : t('services.title')} actions={<button className="btn-primary" onClick={() => setEditing('new')}>{t('services.new')}</button>} />
       {isLoading ? (
         <Loading />
       ) : !data?.length ? (

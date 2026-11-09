@@ -228,8 +228,123 @@ async function publicPages(viewport, label) {
 
 await run({ width: 1366, height: 900 }, 'desktop');
 await run({ width: 390, height: 844 }, 'mobile');
+async function newKinds(viewport, label) {
+  const open = async () => {
+    const ctx = await browser.newContext({ viewport, locale: 'es-MX', timezoneId: 'America/Mexico_City' });
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push(`${label}: ${e.message}`));
+    page.on('console', (m) => m.type() === 'error' && !/tile\.openstreetmap/.test(m.text()) && errors.push(`${label} console: ${m.text()}`));
+    return { ctx, page };
+  };
+  const section = (page, title) => page.locator(`section:has(h2:has-text("${title}"))`);
+  const pickDayAndTime = async (page, timeTitle) => {
+    const days = section(page, 'Elige el día').locator('button');
+    for (let i = 4; i < 12; i++) {
+      await days.nth(i).click();
+      await page.waitForTimeout(900);
+      const times = section(page, timeTitle).locator('.grid button');
+      if ((await times.count()) > 2) {
+        await times.nth(1).click();
+        return true;
+      }
+    }
+    return false;
+  };
+  const fill = async (page, name, phone) => {
+    await page.getByPlaceholder('Nombre', { exact: true }).fill(name);
+    await page.getByPlaceholder('WhatsApp').fill(phone);
+  };
+  const backOffice = async (page, email) => {
+    await page.goto(`${BASE}/login`);
+    await page.fill('#email', email);
+    await page.fill('#password', 'demo1234');
+    await page.click('button[type=submit], form button');
+    await page.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
+  };
+
+  // Barbershop: choose a barber
+  {
+    const { ctx, page } = await open();
+    await page.goto(`${BASE}/b/barberia-demo`);
+    await section(page, 'Elige un servicio').locator('button').first().click();
+    const chips = section(page, '¿Con quién?').locator('button');
+    await chips.first().waitFor({ timeout: 15000 });
+    check(`[${label}] barbershop offers "any" + 3 barbers`, (await chips.count()) === 4);
+    const barber = (await chips.nth(2).innerText()).trim();
+    await chips.nth(2).click();
+    check(`[${label}] barber slots`, await pickDayAndTime(page, 'Elige la hora'));
+    await fill(page, `Barbería UI ${label}`, '551515000' + (label === 'mobile' ? '2' : '1'));
+    await page.screenshot({ path: `${out}/${label}-barber-booking.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Confirmar cita' }).click();
+    await page.getByText('Tu cita está agendada').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] booked with the chosen barber`, await page.getByText(`con ${barber}`).first().isVisible().catch(() => false), barber);
+    await backOffice(page, 'barberia@agenda.mx');
+    await page.goto(`${BASE}/team`);
+    await page.getByRole('heading', { name: 'Equipo' }).waitFor({ timeout: 15000 }).catch(() => {});
+    await page.getByText(barber, { exact: true }).first().waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] team page lists barbers`, await page.getByText(barber, { exact: true }).first().isVisible().catch(() => false));
+    await page.screenshot({ path: `${out}/${label}-team.png`, fullPage: true });
+    await page.goto(`${BASE}/agenda`);
+    await page.getByRole('button', { name: 'Todos' }).first().waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] agenda filter by barber`, await page.getByRole('button', { name: 'Todos' }).first().isVisible().catch(() => false));
+    await page.screenshot({ path: `${out}/${label}-barber-agenda.png`, fullPage: true });
+    await ctx.close();
+  }
+
+  // Yoga studio: book a spot in class
+  {
+    const { ctx, page } = await open();
+    await page.goto(`${BASE}/b/yoga-demo`);
+    await section(page, 'Elige la clase').waitFor({ timeout: 15000 });
+    const days = section(page, 'Elige el día').locator('button');
+    await days.nth(Math.min(3, (await days.count()) - 1)).click();
+    const cls = section(page, 'Elige la clase').locator('button:not([disabled])').first();
+    await cls.waitFor({ timeout: 10000 }).catch(() => {});
+    check(`[${label}] class list shows spots left`, /lugar/.test(await cls.innerText().catch(() => '')));
+    await cls.click();
+    await fill(page, `Yoga UI ${label}`, '551616000' + (label === 'mobile' ? '2' : '1'));
+    await page.screenshot({ path: `${out}/${label}-class-booking.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Reservar lugar' }).click();
+    await page.getByText('Tu lugar está reservado').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] guest books a class spot`, await page.getByText('Tu lugar está reservado').isVisible());
+    await backOffice(page, 'clases@agenda.mx');
+    await page.goto(`${BASE}/classes`);
+    await page.getByRole('heading', { name: 'Clases' }).waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] studio classes page`, await page.getByRole('heading', { name: 'Clases' }).isVisible().catch(() => false));
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: `${out}/${label}-classes.png`, fullPage: true });
+    await ctx.close();
+  }
+
+  // Padel club: rent a court for 90 minutes
+  {
+    const { ctx, page } = await open();
+    await page.goto(`${BASE}/b/padel-demo`);
+    await section(page, 'Elige el espacio').waitFor({ timeout: 15000 });
+    check(`[${label}] courts listed with price per hour`, (await section(page, 'Elige el espacio').getByText('/ hora').count()) >= 4);
+    await section(page, '¿Cuánto tiempo?').locator('button').nth(1).click();
+    check(`[${label}] court start times`, await pickDayAndTime(page, 'Hora de inicio'));
+    await fill(page, `Pádel UI ${label}`, '551717000' + (label === 'mobile' ? '2' : '1'));
+    await page.screenshot({ path: `${out}/${label}-rental-booking.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Confirmar renta' }).click();
+    await page.getByText('Tu espacio está reservado').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] guest rents a court`, await page.getByText('Tu espacio está reservado').isVisible());
+    await backOffice(page, 'padel@agenda.mx');
+    await page.goto(`${BASE}/spaces`);
+    await page.getByRole('heading', { name: 'Espacios' }).waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] club spaces page`, await page.getByRole('heading', { name: 'Espacios' }).isVisible().catch(() => false));
+    await page.goto(`${BASE}/agenda`);
+    await page.getByRole('heading', { name: 'Reservas' }).waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] club agenda is "Reservas"`, await page.getByRole('heading', { name: 'Reservas' }).isVisible().catch(() => false));
+    await page.screenshot({ path: `${out}/${label}-padel-agenda.png`, fullPage: true });
+    await ctx.close();
+  }
+}
+
 await publicPages({ width: 1366, height: 900 }, 'desktop');
 await publicPages({ width: 390, height: 844 }, 'mobile');
+await newKinds({ width: 1366, height: 900 }, 'desktop');
+await newKinds({ width: 390, height: 844 }, 'mobile');
 await browser.close();
 check('no JS errors in browser', errors.length === 0, errors.slice(0, 5).join(' | '));
 console.log(results.join('\n'));

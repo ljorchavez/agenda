@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
-import { computeDepositCents, paymentSettingsOf, selfServiceOf, type AppointmentDto, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
+import { computeDepositCents, eligibleProfessionals, paymentSettingsOf, rentalSettingsOf, selfServiceOf, spacePriceCents, type AppointmentDto, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
-import { useCustomers, useServices } from '../lib/queries';
+import { useCustomers, useProfessionals, useServices, useSpaces } from '../lib/queries';
 
 const useTables = (enabled: boolean) =>
   useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables'), enabled });
@@ -16,6 +16,14 @@ export function AgendaPage() {
   const { t } = useTranslation();
   const { tenant } = useAuth();
   const isRestaurant = tenant?.kind === 'reservations';
+  const isRentals = tenant?.kind === 'rentals';
+  const pros = useProfessionals(tenant?.kind === 'appointments');
+  const spaces = useSpaces(isRentals);
+  // Filter chips: one per professional (team) or space (rentals)
+  const resources = isRentals
+    ? (spaces.data ?? []).filter((x) => x.active).map((x) => ({ id: x.id, name: x.name, color: '#64748b' }))
+    : (pros.data ?? []).filter((x) => x.active).map((x) => ({ id: x.id, name: x.name, color: x.color }));
+  const [filter, setFilter] = useState('');
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [creating, setCreating] = useState<Date | null>(null);
   const [selected, setSelected] = useState<AppointmentDto | null>(null);
@@ -40,7 +48,7 @@ export function AgendaPage() {
   return (
     <>
       <PageHeader
-        title={isRestaurant ? t('nav.reservations') : t('agenda.title')}
+        title={isRestaurant ? t('nav.reservations') : isRentals ? t('nav.bookings') : t('agenda.title')}
         actions={
           <>
             <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="prev">‹</button>
@@ -55,13 +63,37 @@ export function AgendaPage() {
       <p className="-mt-4 mb-4 text-sm text-slate-500">
         {format(weekStart, 'd MMM', { locale: dateLocale() })} – {format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}
       </p>
+      {resources.length > 1 && (
+        <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.filter')}>
+          <button
+            onClick={() => setFilter('')}
+            aria-pressed={!filter}
+            className={`whitespace-nowrap rounded-full border px-3 py-1 text-sm ${!filter ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+          >
+            {t('agenda.everyone')}
+          </button>
+          {resources.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setFilter(filter === r.id ? '' : r.id)}
+              aria-pressed={filter === r.id}
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-sm ${filter === r.id ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+            >
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: r.color }} />
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <Loading />
       ) : (
         <div className="grid gap-3 lg:grid-cols-7">
           {days.map((d) => {
-            const items = (data ?? []).filter((a) => isSameDay(new Date(a.startsAt), d));
+            const items = (data ?? []).filter(
+              (a) => isSameDay(new Date(a.startsAt), d) && (!filter || a.professionalId === filter || a.spaceId === filter),
+            );
             const isToday = isSameDay(d, today);
             return (
               <div key={d.toISOString()} className={`rounded-xl border bg-white p-2 ${isToday ? 'border-brand-500' : 'border-slate-200'}`}>
@@ -82,6 +114,7 @@ export function AgendaPage() {
                       key={a.id}
                       onClick={() => setSelected(a)}
                       className="w-full rounded-lg border border-slate-200 p-2 text-left text-xs hover:border-brand-500"
+                      style={a.professionalColor ? { borderLeft: `4px solid ${a.professionalColor}` } : undefined}
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span className="font-semibold text-slate-800">{timeOnly(a.startsAt)}</span>
@@ -89,8 +122,13 @@ export function AgendaPage() {
                       </div>
                       <div className="mt-1 truncate font-medium text-slate-700">{a.customerName}</div>
                       <div className="truncate text-slate-500">
-                        {a.partySize ? `${t('tables.people', { count: a.partySize })}${a.tableName ? ` · ${a.tableName}` : ''}` : a.serviceName}
+                        {a.tableId || (isRestaurant && a.partySize)
+                          ? `${t('tables.people', { count: a.partySize ?? 0 })}${a.tableName ? ` · ${a.tableName}` : ''}`
+                          : a.spaceName
+                            ? `${a.spaceName} · ${Math.round((new Date(a.endsAt).getTime() - new Date(a.startsAt).getTime()) / 60000)} ${t('common.minutes')}`
+                            : a.serviceName}
                       </div>
+                      {a.professionalName && <div className="truncate text-slate-400">{a.professionalName}</div>}
                     </button>
                   ))}
                 </div>
@@ -111,7 +149,13 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
   const qc = useQueryClient();
   const { tenant } = useAuth();
   const isRestaurant = tenant?.kind === 'reservations';
+  const isRentals = tenant?.kind === 'rentals';
   const tables = useTables(isRestaurant);
+  const pros = useProfessionals(tenant?.kind === 'appointments');
+  const spaces = useSpaces(isRentals);
+  const durations = rentalSettingsOf(tenant!.settings).durations;
+  const [professionalId, setProfessionalId] = useState('');
+  const [spaceId, setSpaceId] = useState('');
   const [partySize, setPartySize] = useState('2');
   const [tableId, setTableId] = useState('');
   const services = useServices();
@@ -121,7 +165,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
   const [serviceId, setServiceId] = useState('');
   const [startsAt, setStartsAt] = useState(toLocalInput(initial));
-  const [duration, setDuration] = useState('');
+  const [duration, setDuration] = useState(isRentals ? String(durations[0]) : '');
   const [price, setPrice] = useState('');
   const [notes, setNotes] = useState('');
   const [allowOverlap, setAllowOverlap] = useState(false);
@@ -142,13 +186,15 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
         method: 'POST',
         body: {
           customerId: cid,
-          serviceId: serviceId || active[0]?.id,
+          serviceId: isRentals ? undefined : serviceId || active[0]?.id,
           startsAt: new Date(startsAt).toISOString(),
           durationMin: duration ? Number(duration) : undefined,
           priceCents: isRestaurant ? 0 : price !== '' ? toCents(price) : undefined,
           notes: notes || null,
           allowOverlap,
           ...(isRestaurant ? { partySize: Number(partySize), tableId: tableId || null } : {}),
+          ...(isRentals ? { spaceId: spaceId || null } : {}),
+          ...(teamPros.length ? { professionalId: professionalId || null } : {}),
         },
       });
     },
@@ -160,6 +206,9 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
     },
   });
 
+  const teamPros = (pros.data ?? []).filter((p) => p.active);
+  const eligible = eligibleProfessionals(teamPros, serviceId || active[0]?.id);
+  const space = (spaces.data ?? []).find((x) => x.id === spaceId);
   const pickService = (id: string) => {
     setServiceId(id);
     const s = active.find((x) => x.id === id);
@@ -221,6 +270,24 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
               </select>
             </div>
           </div>
+        ) : isRentals ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">{t('spaces.space')}</label>
+              <select className="input" value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>
+                <option value="">{t('spaces.auto')}</option>
+                {(spaces.data ?? []).filter((x) => x.active).map((x) => (
+                  <option key={x.id} value={x.id}>{x.name} · {t('spaces.perHour', { price: money(x.pricePerHourCents) })}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">{t('agenda.duration')}</label>
+              <select className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
+                {durations.map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
+              </select>
+            </div>
+          </div>
         ) : (
         <div>
           <label className="label">{t('agenda.service')}</label>
@@ -230,6 +297,15 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
               <option key={s.id} value={s.id}>{s.name} · {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</option>
             ))}
           </select>
+          {teamPros.length > 0 && (
+            <div className="mt-4">
+              <label className="label">{t('team.professional')}</label>
+              <select className="input" value={professionalId} onChange={(e) => setProfessionalId(e.target.value)}>
+                <option value="">{t('team.auto')}</option>
+                {eligible.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         )}
         <div className="grid gap-4 sm:grid-cols-3">
@@ -237,14 +313,24 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
             <label className="label">{t('agenda.startsAt')}</label>
             <input type="datetime-local" required className="input" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
           </div>
+          {!isRentals && (
           <div>
             <label className="label">{t('agenda.duration')}</label>
             <input type="number" min={5} className="input" value={duration} onChange={(e) => setDuration(e.target.value)} />
           </div>
+          )}
           {!isRestaurant && (
           <div>
             <label className="label">{t('agenda.price')}</label>
-            <input type="number" min={0} step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} />
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              className="input"
+              placeholder={isRentals && space ? String(spacePriceCents(space.pricePerHourCents, Number(duration)) / 100) : ''}
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
           </div>
           )}
         </div>
@@ -254,7 +340,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
-          {isRestaurant ? t('tables.noTable') : t('agenda.allowOverlap')}
+          {isRestaurant ? t('tables.noTable') : isRentals ? t('spaces.noSpace') : t('agenda.allowOverlap')}
         </label>
         <ErrorText error={create.error} ns={isRestaurant ? 'tables' : 'agenda'} />
         <div className="flex justify-end gap-2">
@@ -283,7 +369,13 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const outstanding = Math.max(appt.priceCents - appt.paidCents, 0);
   const selfService = selfServiceOf(tenant!.settings);
   const [copied, setCopied] = useState(false);
-  const tablesQ = useTables(appt.partySize != null);
+  const tablesQ = useTables(appt.tableId != null || tenant?.kind === 'reservations');
+  const prosQ = useProfessionals(tenant?.kind === 'appointments');
+  const spacesQ = useSpaces(tenant?.kind === 'rentals');
+  const teamPros = eligibleProfessionals((prosQ.data ?? []).filter((p) => p.active), appt.serviceId);
+  const [pro, setPro] = useState(appt.professionalId ?? '');
+  const [spc, setSpc] = useState(appt.spaceId ?? '');
+  const isTableBooking = tenant?.kind === 'reservations' && !appt.classSessionId;
   const [party, setParty] = useState(String(appt.partySize ?? 2));
   const [table, setTable] = useState(appt.tableId ?? '');
   const [bill, setBill] = useState('');
@@ -343,9 +435,15 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
         <div className="text-slate-600">{appt.serviceName}</div>
         <div className="text-sm text-slate-500">{dateTime(appt.startsAt)} – {timeOnly(appt.endsAt)} · {t(`source.${appt.source}`)}</div>
-        {appt.partySize != null && (
+        {isTableBooking && appt.partySize != null && (
           <div className="text-sm font-medium text-slate-700">
             {t('tables.people', { count: appt.partySize })} · {appt.tableName ?? t('tables.unassigned')}
+          </div>
+        )}
+        {(appt.professionalName || appt.spaceName) && (
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            {appt.professionalColor && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: appt.professionalColor }} />}
+            {appt.professionalName ?? appt.spaceName}
           </div>
         )}
         {appt.customerPhone && <div className="text-sm text-slate-500">{appt.customerPhone}</div>}
@@ -367,7 +465,33 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <button className="btn-secondary text-rose-700" onClick={() => update.mutate({ status: 'cancelled' })}>{t('agenda.cancelAppt')}</button>
           </div>
 
-          {appt.partySize != null && (
+          {teamPros.length > 0 && !appt.classSessionId && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <label className="label">{t('team.professional')}</label>
+              <div className="flex flex-wrap gap-2">
+                <select className="input w-auto" value={pro} onChange={(e) => setPro(e.target.value)}>
+                  <option value="">{t('team.auto')}</option>
+                  {teamPros.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <button className="btn-secondary" onClick={() => update.mutate({ professionalId: pro || null })}>{t('common.save')}</button>
+              </div>
+            </div>
+          )}
+
+          {tenant?.kind === 'rentals' && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <label className="label">{t('spaces.space')}</label>
+              <div className="flex flex-wrap gap-2">
+                <select className="input w-auto" value={spc} onChange={(e) => setSpc(e.target.value)}>
+                  <option value="">{t('spaces.auto')}</option>
+                  {(spacesQ.data ?? []).filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+                <button className="btn-secondary" onClick={() => update.mutate({ spaceId: spc || null })}>{t('common.save')}</button>
+              </div>
+            </div>
+          )}
+
+          {isTableBooking && appt.partySize != null && (
             <div className="rounded-lg border border-slate-200 p-3">
               <label className="label">{t('tables.table')}</label>
               <div className="flex flex-wrap gap-2">
@@ -391,16 +515,16 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                   <option key={m} value={m}>{t(`methods.${m}`)}</option>
                 ))}
               </select>
-              {appt.partySize != null && (
+              {isTableBooking && appt.partySize != null && (
                 <input type="number" min={0} step="0.01" className="input w-32" placeholder={t('tables.bill')} value={bill} onChange={(e) => setBill(e.target.value)} aria-label={t('tables.bill')} />
               )}
-              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method, ...(appt.partySize != null && bill !== '' ? { priceCents: toCents(bill) } : {}) })}>
+              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method, ...(isTableBooking && bill !== '' ? { priceCents: toCents(bill) } : {}) })}>
                 {t('agenda.complete')}
               </button>
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 p-3">
+          {!appt.classSessionId && <div className="rounded-lg border border-slate-200 p-3">
             <label className="label">{t('agenda.startsAt')}</label>
             <div className="flex flex-wrap gap-2">
               <input type="datetime-local" className="input w-auto" value={reschedule} onChange={(e) => setReschedule(e.target.value)} />
@@ -408,7 +532,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                 {t('common.save')}
               </button>
             </div>
-          </div>
+          </div>}
 
           {(selfService.rescheduleEnabled || selfService.cancelEnabled) && (
             <div className="rounded-lg border border-slate-200 p-3 text-sm">
@@ -465,7 +589,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
       )}
 
-      <ErrorText error={update.error} ns={appt.partySize != null ? 'tables' : 'agenda'} />
+      <ErrorText error={update.error} ns={isTableBooking ? 'tables' : 'agenda'} />
       <div className="mt-6 flex justify-between">
         <button
           className="text-sm text-rose-700 hover:underline"

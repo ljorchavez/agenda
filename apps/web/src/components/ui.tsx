@@ -65,6 +65,7 @@ export function ErrorText({ error, ns }: { error: unknown; ns?: string }) {
   if (error instanceof ApiError) {
     const key = ns ? `${ns}.${error.code}` : '';
     if (key && i18n.exists(key)) msg = t(key);
+    else if (i18n.exists(`errors.${error.code}`)) msg = t(`errors.${error.code}`);
     else if (error.message && error.message !== error.code) msg = error.message;
   }
   return <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{msg}</p>;

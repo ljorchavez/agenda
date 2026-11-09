@@ -16,6 +16,9 @@ import { ReportsPage } from './pages/Reports';
 import { ServicesPage } from './pages/Services';
 import { SettingsPage } from './pages/Settings';
 import { TablesPage } from './pages/Tables';
+import { TeamPage } from './pages/Team';
+import { SpacesPage } from './pages/Spaces';
+import { ClassesPage } from './pages/Classes';
 
 function Protected({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -52,6 +55,9 @@ export function App() {
         <Route path="payments" element={<PaymentsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="tables" element={<TablesPage />} />
+        <Route path="team" element={<TeamPage />} />
+        <Route path="spaces" element={<SpacesPage />} />
+        <Route path="classes" element={<ClassesPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -27,6 +27,8 @@ import {
 import type { ReportDto, ReportGranularity, ReportKpis, ServiceDto } from '@agenda/shared';
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { useProfessionals, useSpaces } from '../lib/queries';
 import { dateLocale, money, percent } from '../lib/format';
 
 const PRESETS = [
@@ -153,13 +155,15 @@ export function ReportsPage() {
   const [widgets, setWidgets] = useState<Widget[]>(loadWidgets);
   const [customizing, setCustomizing] = useState(false);
 
+  const { tenant } = useAuth();
+  const isRentals = tenant?.kind === 'rentals';
   const preset = (PRESETS as readonly string[]).includes(params.get('p') ?? '') ? (params.get('p') as Preset) : 'last3Months';
   const range = preset === 'custom'
     ? { from: params.get('from') ?? presetRange('thisMonth').from, to: params.get('to') ?? presetRange('thisMonth').to }
     : presetRange(preset);
   const granularity = (params.get('g') ?? '') as ReportGranularity | '';
   const serviceId = params.get('service') ?? '';
-  const staffUserId = params.get('staff') ?? '';
+  const who = params.get('who') ?? '';
   const source = params.get('source') ?? '';
   const compare = params.get('compare') !== '0';
 
@@ -175,7 +179,7 @@ export function ReportsPage() {
   const qs = new URLSearchParams({ from: range.from, to: range.to });
   if (granularity) qs.set('granularity', granularity);
   if (serviceId) qs.set('serviceId', serviceId);
-  if (staffUserId) qs.set('staffUserId', staffUserId);
+  if (who) qs.set(isRentals ? 'spaceId' : 'professionalId', who);
   if (source) qs.set('source', source);
 
   const report = useQuery({
@@ -185,10 +189,9 @@ export function ReportsPage() {
     enabled: range.from <= range.to,
   });
   const services = useQuery({ queryKey: ['services'], queryFn: () => api<ServiceDto[]>('/services') });
-  const users = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api<{ id: string; name: string }[]>('/users'),
-  });
+  const pros = useProfessionals(!isRentals);
+  const spaces = useSpaces(isRentals);
+  const resources: { id: string; name: string; active: boolean }[] = (isRentals ? spaces.data : pros.data) ?? [];
 
   const intl = i18n.language.startsWith('en') ? 'en-US' : 'es-MX';
   const data = report.data;
@@ -340,13 +343,13 @@ export function ReportsPage() {
             ))}
           </select>
         </label>
-        {(users.data?.length ?? 0) > 1 && (
+        {resources.length > 1 && (
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t('reports.staff')}</span>
-            <select className="input" value={staffUserId} onChange={(e) => set({ staff: e.target.value })}>
+            <span className="mb-1 block text-slate-600">{isRentals ? t('spaces.space') : t('team.professional')}</span>
+            <select className="input" value={who} onChange={(e) => set({ who: e.target.value })}>
               <option value="">{t('reports.all')}</option>
-              {users.data?.map((u) => (
-                <option key={u.id} value={u.id}>{u.name}</option>
+              {resources.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}{u.active ? '' : ` (${t('services.inactive')})`}</option>
               ))}
             </select>
           </label>
@@ -363,8 +366,8 @@ export function ReportsPage() {
           <input type="checkbox" checked={compare} onChange={(e) => set({ compare: e.target.checked ? null : '0' })} />
           {t('reports.compare')}
         </label>
-        {(serviceId || staffUserId || source || granularity) && (
-          <button className="self-end pb-2 text-left text-sm text-brand-700" onClick={() => set({ service: null, staff: null, source: null, g: null })}>
+        {(serviceId || who || source || granularity) && (
+          <button className="self-end pb-2 text-left text-sm text-brand-700" onClick={() => set({ service: null, who: null, source: null, g: null })}>
             {t('reports.clear')}
           </button>
         )}
@@ -475,6 +478,27 @@ export function ReportsPage() {
                     </ResponsiveContainer>
                   </div>
                 )}
+              </Card>
+            )}
+
+            {(data.byProfessional.length > 0 || data.bySpace.length > 0) && (
+              <Card title={data.bySpace.length ? t('reports.charts.spaces') : t('reports.charts.professionals')}>
+                <ul className="space-y-3">
+                  {(data.bySpace.length ? data.bySpace.map((x) => ({ ...x, color: BRAND })) : data.byProfessional).map((r) => {
+                    const top = Math.max(...(data.bySpace.length ? data.bySpace : data.byProfessional).map((x) => x.revenueCents), 1);
+                    return (
+                      <li key={r.id}>
+                        <div className="mb-1 flex justify-between text-sm">
+                          <span>{r.name} <span className="text-slate-400">· {t('reports.bookingsN', { count: r.count })}</span></span>
+                          <span className="font-medium">{money(r.revenueCents)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100">
+                          <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: r.color }} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               </Card>
             )}
 

@@ -340,6 +340,106 @@ if (process.env.CRON_SECRET) {
   check('restaurant reports have history', rep.status === 200 && (rep.body?.summary?.appointments ?? rep.body?.totals?.appointments ?? 1) > 0, rep.text.slice(0, 200));
 }
 
+const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+
+// ---- Team: per-professional agendas (barbershop demo)
+{
+  const pub = await call('GET', '/api/public/barberia-demo');
+  check('barbershop exposes its team', pub.status === 200 && pub.body.kind === 'appointments' && pub.body.professionals?.length === 3, pub.text.slice(0, 200));
+  const svc = pub.body.services[0];
+  const pro = pub.body.professionals.find((p) => !p.serviceIds.length || p.serviceIds.includes(svc.id));
+  let day = null;
+  let slots = [];
+  for (let i = 9; i < 20 && slots.length < 3; i++) {
+    day = mxDay(i);
+    slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&professionalId=${pro.id}`)).body?.slots ?? [];
+  }
+  check('availability for a specific barber', slots.length > 0, day);
+  const slot = slots[1] ?? slots[0];
+  const b = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, professionalId: pro.id, startsAt: slot, name: 'Corte QA', phone: '5512120001' });
+  check('book with a chosen barber', b.status === 201 && b.body.resourceName === pro.name, b.text);
+  const again = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, professionalId: pro.id, startsAt: slot, name: 'Corte QA 2', phone: '5512120002' });
+  check('same barber same time -> 409', again.status === 409, again.text);
+  const proSlots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&professionalId=${pro.id}`)).body.slots;
+  check("barber's taken slot disappears for that barber", !proSlots.includes(slot));
+  const anySlots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}`)).body.slots;
+  if (anySlots.includes(slot)) {
+    const any = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, professionalId: null, startsAt: slot, name: 'Corte QA 3', phone: '5512120003' });
+    check('"any barber" gets assigned to someone free', any.status === 201 && any.body.resourceName && any.body.resourceName !== pro.name, any.text);
+    await call('POST', `/api/public/manage/${any.body.managePath?.slice(3)}/cancel`);
+  } else check('slot still offered with another barber', false, 'all barbers busy at slot');
+  const login = await call('POST', '/api/auth/login', { email: 'barberia@agenda.mx', password: 'demo1234' });
+  const team = await call('GET', '/api/professionals', null, login.body?.token);
+  check('barbershop team list (private)', team.status === 200 && team.body.length === 3 && (await call('GET', '/api/professionals')).status === 401);
+  const m = await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`);
+  check('customer cancels barber booking', m.status === 200);
+}
+
+// ---- Group classes (yoga demo)
+{
+  const pub = await call('GET', '/api/public/yoga-demo');
+  check('yoga studio is a classes business', pub.status === 200 && pub.body.kind === 'classes', pub.text.slice(0, 160));
+  const list = (await call('GET', '/api/public/yoga-demo/classes?days=14')).body ?? [];
+  check('upcoming classes listed with spots', list.length > 5 && list.every((c) => c.capacity > 0 && c.spotsLeft >= 0 && c.serviceName));
+  const later = list.filter((c) => new Date(c.startsAt) > new Date(Date.now() + 3 * 864e5) && c.spotsLeft >= 2);
+  const cls = later[0];
+  check('a class with room exists', !!cls);
+  if (cls) {
+    const b = await call('POST', '/api/public/yoga-demo/bookings', { classSessionId: cls.id, spots: 1, name: 'Alumna QA', phone: '5513130001' });
+    check('book a spot in class', b.status === 201 && b.body.partySize === 1 && b.body.priceCents === cls.priceCents, b.text);
+    const after = (await call('GET', '/api/public/yoga-demo/classes?days=14')).body.find((c) => c.id === cls.id);
+    check('spots left goes down', after.spotsLeft === cls.spotsLeft - 1, `${cls.spotsLeft} -> ${after.spotsLeft}`);
+    const dup = await call('POST', '/api/public/yoga-demo/bookings', { classSessionId: cls.id, spots: 1, name: 'Alumna QA', phone: '5513130001' });
+    check('same person twice -> already_booked', dup.body?.error === 'already_booked', dup.text);
+    if (after.spotsLeft < 10) {
+      const over = await call('POST', '/api/public/yoga-demo/bookings', { classSessionId: cls.id, spots: after.spotsLeft + 1, name: 'Grupo QA', phone: '5513130002' });
+      check('more spots than left -> class_full', over.status === 409 && over.body.error === 'class_full', over.text);
+    }
+    const c = await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`);
+    const back = (await call('GET', '/api/public/yoga-demo/classes?days=14')).body.find((x) => x.id === cls.id);
+    check('cancelling frees the spot', c.status === 200 && back.spotsLeft === cls.spotsLeft);
+  }
+  const login = await call('POST', '/api/auth/login', { email: 'clases@agenda.mx', password: 'demo1234' });
+  const from = new Date().toISOString();
+  const to = new Date(Date.now() + 7 * 864e5).toISOString();
+  const sessions = await call('GET', `/api/class-sessions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, null, login.body?.token);
+  check('studio sees its class schedule', sessions.status === 200 && sessions.body.length > 3 && sessions.body.every((s) => s.booked <= s.capacity || s.booked >= 0), sessions.text.slice(0, 160));
+}
+
+// ---- Space rentals (padel demo)
+{
+  const pub = await call('GET', '/api/public/padel-demo');
+  check('padel club rents spaces', pub.status === 200 && pub.body.kind === 'rentals' && pub.body.spaces.length === 4 && pub.body.rentalDurations?.includes(90), pub.text.slice(0, 200));
+  let day = null;
+  let slots = [];
+  for (let i = 9; i < 20 && slots.length < 3; i++) {
+    day = mxDay(i);
+    slots = (await call('GET', `/api/public/padel-demo/availability?durationMin=90&date=${day}`)).body?.slots ?? [];
+  }
+  check('court availability for 90 min', slots.length > 0, day);
+  const slot = slots[Math.floor(slots.length / 2)];
+  const b = await call('POST', '/api/public/padel-demo/bookings', { spaceId: null, durationMin: 90, startsAt: slot, name: 'Pádel QA', phone: '5514140001' });
+  const sp = pub.body.spaces.find((s) => s.name === b.body?.resourceName);
+  check('any free court assigned, priced by the hour', b.status === 201 && !!sp && b.body.priceCents === Math.round(sp.pricePerHourCents * 1.5), b.text);
+  const same = await call('POST', '/api/public/padel-demo/bookings', { spaceId: sp?.id, durationMin: 90, startsAt: slot, name: 'Pádel QA 2', phone: '5514140002' });
+  check('same court same time -> 409', same.status === 409, same.text);
+  const bad = await call('POST', '/api/public/padel-demo/bookings', { spaceId: null, durationMin: 45, startsAt: slot, name: 'Pádel QA 3', phone: '5514140003' });
+  check('duration not offered -> 422', bad.status === 422 && bad.body.error === 'invalid_duration', bad.text);
+  const login = await call('POST', '/api/auth/login', { email: 'padel@agenda.mx', password: 'demo1234' });
+  const spaces = await call('GET', '/api/spaces', null, login.body?.token);
+  check('club sees its courts', spaces.status === 200 && spaces.body.length === 4);
+  check('customer cancels court', (await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`)).status === 200);
+}
+
+// ---- Directory shows the new kinds
+{
+  const d = await call('GET', '/api/public-directory');
+  const kinds = new Set(d.body.entries.map((e) => e.kind));
+  check('directory has all four kinds', ['appointments', 'reservations', 'classes', 'rentals'].every((k) => kinds.has(k)), [...kinds].join(','));
+  const padel = d.body.entries.find((e) => e.slug === 'padel-demo');
+  check('rentals show price per hour', padel?.priceUnit === 'hour' && padel.priceFromCents > 0, JSON.stringify(padel));
+}
+
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed  (${mx(Date.now())})`);
 process.exit(fail ? 1 : 0);

@@ -2,15 +2,40 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../lib/auth';
 
-const NAV = [
+type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
+
+const NAV: NavItem[] = [
   { to: '/', key: 'dashboard', icon: '◧', end: true },
   { to: '/agenda', key: 'agenda', icon: '▦' },
   { to: '/customers', key: 'customers', icon: '☺' },
   { to: '/services', key: 'services', icon: '✂' },
+  { to: '/team', key: 'team', icon: '♟', desktopOnly: true },
   { to: '/payments', key: 'payments', icon: '$' },
   { to: '/reports', key: 'reports', icon: '▤' },
   { to: '/settings', key: 'settings', icon: '⚙' },
-] as const;
+];
+
+/** Each kind of business names and shows its sections differently. */
+function navFor(kind: string | undefined): NavItem[] {
+  return NAV.flatMap((n): NavItem[] => {
+    if (kind === 'reservations') {
+      if (n.key === 'services') return [{ ...n, to: '/tables', key: 'tables', icon: '▣' }];
+      if (n.key === 'agenda') return [{ ...n, key: 'reservations' }];
+      if (n.key === 'team') return [];
+    }
+    if (kind === 'rentals') {
+      if (n.key === 'services') return [{ ...n, to: '/spaces', key: 'spaces', icon: '▣' }];
+      if (n.key === 'agenda') return [{ ...n, key: 'bookings' }];
+      if (n.key === 'team') return [];
+    }
+    if (kind === 'classes') {
+      if (n.key === 'agenda') return [{ ...n, to: '/classes', key: 'classes', icon: '▦' }];
+      if (n.key === 'services') return [{ ...n, key: 'classTypes' }];
+      if (n.key === 'team') return [{ ...n, key: 'instructors' }];
+    }
+    return [n];
+  });
+}
 
 export function LanguageSwitch({ className = '' }: { className?: string }) {
   const { i18n } = useTranslation();
@@ -35,15 +60,8 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
 export function Layout() {
   const { t } = useTranslation();
   const { tenant, user, logout } = useAuth();
-  const isRestaurant = tenant?.kind === 'reservations';
-  // Restaurants manage tables instead of services, and call the calendar "Reservations".
-  const nav = NAV.map((n) =>
-    isRestaurant && n.key === 'services'
-      ? { ...n, to: '/tables', key: 'tables' as const, icon: '▣' }
-      : isRestaurant && n.key === 'agenda'
-        ? { ...n, key: 'reservations' as const }
-        : n,
-  );
+  const nav = navFor(tenant?.kind);
+  const mobileNav = nav.filter((n) => !n.desktopOnly);
   const navigate = useNavigate();
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -61,7 +79,7 @@ export function Layout() {
         </div>
         <nav className="flex flex-1 flex-col gap-1">
           {nav.map((n) => (
-            <NavLink key={n.to} to={n.to} end={'end' in n} className={linkClass}>
+            <NavLink key={n.to} to={n.to} end={n.end} className={linkClass}>
               <span className="w-5 text-center">{n.icon}</span>
               {t(`nav.${n.key}`)}
             </NavLink>
@@ -99,11 +117,11 @@ export function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-slate-200 bg-white md:hidden">
-        {nav.map((n) => (
+        {mobileNav.map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
-            end={'end' in n}
+            end={n.end}
             className={({ isActive }) =>
               `flex min-w-0 flex-col items-center py-2 text-[10px] ${isActive ? 'text-brand-700' : 'text-slate-500'}`
             }

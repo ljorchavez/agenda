@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { computeDepositCents, DEFAULT_PAYMENT_SETTINGS, isValidClabe, normalizeMxPhone } from '@agenda/shared';
+import { businessKind, computeDepositCents, DEFAULT_PAYMENT_SETTINGS, isValidClabe, normalizeMxPhone, rentalSettingsOf, spacePriceCents } from '@agenda/shared';
 import { decryptSecret, encryptSecret, manageToken, verifyManageToken } from '../src/lib/crypto.js';
 import { DateTime } from 'luxon';
 import { defaultGranularity, previousRange } from '../src/routes/reports.js';
 import { policy } from '../src/routes/manage.js';
 import { pickTable } from '../src/lib/tables.js';
+import { eligibleFor, pickProfessional, pickSpace } from '../src/lib/resources.js';
 import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 
@@ -143,5 +144,60 @@ describe('restaurant table assignment', () => {
     ];
     expect(pickTable(tables, busy, 2, at(20), at(21))?.id).toBe('t4');
     expect(pickTable(tables, busy, 2, at(21), at(22))?.id).toBe('t2');
+  });
+});
+
+describe('business kinds', () => {
+  it('maps business types to how they book', () => {
+    expect(businessKind('barbershop')).toBe('appointments');
+    expect(businessKind('restaurant')).toBe('reservations');
+    expect(businessKind('yoga')).toBe('classes');
+    expect(businessKind('sports')).toBe('rentals');
+    expect(rentalSettingsOf({}).durations).toEqual([60, 90, 120]);
+    expect(rentalSettingsOf({ rentals: { durations: [120, 60] } }).durations).toEqual([60, 120]);
+  });
+});
+
+describe('pickProfessional', () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 0, 10, h));
+  const pros = [
+    { id: 'p1', name: 'Ana', serviceIds: [] as string[] },
+    { id: 'p2', name: 'Beto', serviceIds: ['s1'] },
+  ];
+  it('filters by service (empty list = all services)', () => {
+    expect(eligibleFor(pros, 's1').map((p) => p.id)).toEqual(['p1', 'p2']);
+    expect(eligibleFor(pros, 's2').map((p) => p.id)).toEqual(['p1']);
+  });
+  it('picks a free person, spreading the load', () => {
+    expect(pickProfessional(pros, [], at(10), at(11))?.id).toBe('p1');
+    const busy = [{ pid: 'p1', s: at(8), e: at(9) }];
+    expect(pickProfessional(pros, busy, at(10), at(11))?.id).toBe('p2');
+    expect(pickProfessional(pros, [{ pid: 'p1', s: at(10), e: at(11) }], at(10), at(11))?.id).toBe('p2');
+    const both = [{ pid: 'p1', s: at(10), e: at(11) }, { pid: 'p2', s: at(10), e: at(12) }];
+    expect(pickProfessional(pros, both, at(10), at(11))).toBeNull();
+  });
+  it('treats appointments without a professional as blocking everyone', () => {
+    expect(pickProfessional(pros, [{ pid: null, s: at(10), e: at(11) }], at(10), at(11))).toBeNull();
+    expect(pickProfessional(pros, [{ pid: null, s: at(10), e: at(11) }], at(11), at(12))?.id).toBe('p1');
+  });
+});
+
+describe('spaces', () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 0, 10, h));
+  const list = [
+    { id: 'c2', name: 'Cancha 2', pricePerHourCents: 40000 },
+    { id: 'c10', name: 'Cancha 10', pricePerHourCents: 40000 },
+    { id: 'c1', name: 'Cancha 1', pricePerHourCents: 50000 },
+  ];
+  it('picks the first free space by natural name order, or the requested one', () => {
+    expect(pickSpace(list, [], at(10), at(11))?.id).toBe('c1');
+    expect(pickSpace(list, [{ sid: 'c1', s: at(9), e: at(11) }], at(10), at(11))?.id).toBe('c2');
+    expect(pickSpace(list, [{ sid: 'c10', s: at(10), e: at(11) }], at(10), at(11), 'c10')).toBeNull();
+    expect(pickSpace(list, [{ sid: 'c10', s: at(10), e: at(11) }], at(11), at(12), 'c10')?.id).toBe('c10');
+  });
+  it('prices by the hour', () => {
+    expect(spacePriceCents(40000, 60)).toBe(40000);
+    expect(spacePriceCents(40000, 90)).toBe(60000);
+    expect(spacePriceCents(45000, 45)).toBe(33750);
   });
 });

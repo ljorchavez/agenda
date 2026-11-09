@@ -393,6 +393,198 @@ d('API (integration)', () => {
     expect(moved.body.appointment.partySize).toBe(2);
   });
 
+  it('team: per-professional agendas, any/specific booking and service limits', async () => {
+    const reg = await call('POST', '/auth/register', {
+      businessName: 'Barberia Equipo', businessType: 'barbershop', name: 'Dueño', email: 'equipo@test.mx', password: 'password123',
+    });
+    const tok = reg.body.token;
+    const corte = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const barba = (await call('POST', '/services', { name: 'Barba', durationMin: 30, priceCents: 15000 }, tok)).body;
+    const cust = (await call('POST', '/customers', { name: 'Cliente Equipo', phone: '5533330000' }, tok)).body;
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 5 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const at = (h: number, m = 0) => day.set({ hour: h, minute: m, second: 0, millisecond: 0 }).toISO()!;
+
+    // A single-agenda appointment made before the team existed...
+    const pre = (await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, startsAt: at(10) }, tok)).body;
+    const p1 = await call('POST', '/professionals', { name: 'Toño', color: '#2563eb' }, tok);
+    expect(p1.status).toBe(201);
+    // ...goes to the first professional
+    expect((await call('GET', `/appointments/${pre.id}`, undefined, tok)).body.professionalName).toBe('Toño');
+    const p2 = (await call('POST', '/professionals', { name: 'Memo', serviceIds: [corte.id] }, tok)).body;
+    expect(p2.serviceIds).toEqual([corte.id]);
+    expect((await call('GET', '/professionals', undefined, b.token)).body).toHaveLength(0);
+    expect((await call('PUT', `/professionals/${p2.id}`, { name: 'x' }, b.token)).status).toBe(404);
+    expect((await call('POST', '/professionals', { name: 'Raro', serviceIds: [corte.id] }, b.token)).status).toBe(404);
+
+    const pub = await call('GET', '/public/barberia-equipo');
+    expect(pub.body.professionals.map((p: { name: string }) => p.name)).toEqual(['Memo', 'Toño']);
+    expect(JSON.stringify(pub.body.professionals)).not.toContain('userId');
+    const avail = async (svc: string, pro?: string) =>
+      (await call('GET', `/public/barberia-equipo/availability?serviceId=${svc}&date=${day.toISODate()}${pro ? `&professionalId=${pro}` : ''}`)).body.slots as string[];
+    expect(await avail(corte.id)).toContain(at(10)); // Memo is free
+    expect(await avail(corte.id, p1.body.id)).not.toContain(at(10));
+    expect(await avail(barba.id)).not.toContain(at(10)); // only Toño does beards
+    expect(await avail(barba.id)).toContain(at(11));
+
+    const any = await call('POST', '/public/barberia-equipo/bookings', { serviceId: corte.id, startsAt: at(10), name: 'Ana', phone: '5533330001' });
+    expect(any.status).toBe(201);
+    expect(any.body.resourceName).toBe('Memo');
+    expect((await call('POST', '/public/barberia-equipo/bookings', { serviceId: corte.id, startsAt: at(10), name: 'Beto', phone: '5533330002' })).status).toBe(409);
+    const specific = await call('POST', '/public/barberia-equipo/bookings', { serviceId: corte.id, professionalId: p2.id, startsAt: at(10, 30), name: 'Caro', phone: '5533330003' });
+    expect(specific.body.resourceName).toBe('Memo');
+
+    // Staff: busy professional -> 409; allowOverlap -> saved; wrong service -> 422
+    const busy = await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, professionalId: p1.body.id, startsAt: at(10) }, tok);
+    expect(busy.status).toBe(409);
+    expect(busy.body.error).toBe('professional_busy');
+    expect((await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, professionalId: p1.body.id, startsAt: at(10), allowOverlap: true }, tok)).status).toBe(201);
+    const wrong = await call('POST', '/appointments', { customerId: cust.id, serviceId: barba.id, professionalId: p2.id, startsAt: at(12) }, tok);
+    expect(wrong.status).toBe(422);
+    expect(wrong.body.error).toBe('professional_service');
+    const auto = await call('POST', '/appointments', { customerId: cust.id, serviceId: barba.id, startsAt: at(12) }, tok);
+    expect(auto.body.professionalName).toBe('Toño');
+    // Moving Toño's beard to a time Toño is busy fails; moving it to a free time works
+    expect((await call('PATCH', `/appointments/${auto.body.id}`, { startsAt: at(10) }, tok)).status).toBe(409);
+    expect((await call('PATCH', `/appointments/${auto.body.id}`, { startsAt: at(13) }, tok)).status).toBe(200);
+
+    // Customer reschedule keeps their professional
+    const moved = await call('POST', `/public/manage/${any.body.managePath.slice(3)}/reschedule`, { startsAt: at(11) });
+    expect(moved.status).toBe(200);
+    expect(moved.body.appointment.resourceName).toBe('Memo');
+
+    const rep = await call('GET', `/reports?from=${day.minus({ days: 30 }).toISODate()}&to=${day.toISODate()}&professionalId=${p2.id}`, undefined, tok);
+    expect(rep.status).toBe(200);
+    expect(Array.isArray(rep.body.byProfessional)).toBe(true);
+    // Professionals with history are deactivated, not deleted
+    expect((await call('DELETE', `/professionals/${p2.id}`, undefined, tok)).body.deactivated).toBe(true);
+  });
+
+  it('classes: sessions with capacity, public signup, move and cancel', async () => {
+    const reg = await call('POST', '/auth/register', {
+      businessName: 'Estudio Prueba', businessType: 'yoga', name: 'Lau', email: 'yoga@test.mx', password: 'password123',
+    });
+    const tok = reg.body.token;
+    expect(reg.body.tenant.kind).toBe('classes');
+    expect((await call('GET', '/services', undefined, tok)).body.map((s: { name: string }) => s.name)).toContain('Clase grupal');
+    const svc = (await call('POST', '/services', { name: 'Vinyasa', durationMin: 60, priceCents: 15000 }, tok)).body;
+    const inst = (await call('POST', '/professionals', { name: 'Lau' }, tok)).body;
+    const day = DateTime.now().setZone('America/Mexico_City').plus({ days: 3 }).set({ hour: 8, minute: 0, second: 0, millisecond: 0 });
+
+    const s1 = await call('POST', '/class-sessions', { serviceId: svc.id, professionalId: inst.id, startsAt: day.toISO(), capacity: 2 }, tok);
+    expect(s1.status).toBe(201);
+    expect(s1.body.booked).toBe(0);
+    expect(new Date(s1.body.endsAt).getTime() - new Date(s1.body.startsAt).getTime()).toBe(3600e3);
+    const clash = await call('POST', '/class-sessions', { serviceId: svc.id, professionalId: inst.id, startsAt: day.plus({ minutes: 30 }).toISO(), capacity: 5 }, tok);
+    expect(clash.status).toBe(409);
+    expect(clash.body.error).toBe('instructor_busy');
+    const copy = await call('POST', `/class-sessions/${s1.body.id}/copy`, { days: 1 }, tok);
+    expect(copy.status).toBe(201);
+    expect(new Date(copy.body.startsAt).getTime() - new Date(s1.body.startsAt).getTime()).toBe(86400e3);
+    expect((await call('GET', `/class-sessions/${s1.body.id}`, undefined, b.token)).status).toBe(404);
+
+    const list = (await call('GET', '/public/estudio-prueba/classes')).body;
+    const pubS1 = list.find((x: { id: string }) => x.id === s1.body.id);
+    expect(pubS1).toMatchObject({ spotsLeft: 2, priceCents: 15000, professionalName: 'Lau', serviceName: 'Vinyasa' });
+    const b1 = await call('POST', '/public/estudio-prueba/bookings', { classSessionId: s1.body.id, name: 'Alumna Uno', phone: '5544440001' });
+    expect(b1.status).toBe(201);
+    expect(b1.body).toMatchObject({ priceCents: 15000, resourceName: 'Lau', partySize: 1 });
+    const dup = await call('POST', '/public/estudio-prueba/bookings', { classSessionId: s1.body.id, name: 'Alumna Uno', phone: '5544440001' });
+    expect(dup.body.error).toBe('already_booked');
+    expect((await call('POST', '/public/estudio-prueba/bookings', { classSessionId: s1.body.id, name: 'Alumno Dos', phone: '5544440002' })).status).toBe(201);
+    const full = await call('POST', '/public/estudio-prueba/bookings', { classSessionId: s1.body.id, name: 'Alumno Tres', phone: '5544440003' });
+    expect(full.status).toBe(409);
+    expect(full.body.error).toBe('class_full');
+    expect((await call('GET', '/public/estudio-prueba/classes')).body.find((x: { id: string }) => x.id === s1.body.id).spotsLeft).toBe(0);
+
+    // Customer moves to the next day's class
+    const tokB1 = b1.body.managePath.slice(3);
+    const av = await call('GET', `/public/manage/${tokB1}/availability?date=${day.plus({ days: 1 }).toISODate()}`);
+    expect(av.body.slots.map((x: string) => new Date(x).getTime())).toContain(new Date(copy.body.startsAt).getTime());
+    const mv = await call('POST', `/public/manage/${tokB1}/reschedule`, { startsAt: copy.body.startsAt });
+    expect(mv.status).toBe(200);
+    const detail = await call('GET', `/class-sessions/${s1.body.id}`, undefined, tok);
+    expect(detail.body.session.booked).toBe(1);
+    expect(detail.body.attendees).toHaveLength(1);
+
+    // Staff adds attendees: room for one, then full, overbooking allowed explicitly
+    const cust = (await call('POST', '/customers', { name: 'En Mostrador', phone: '5544440009' }, tok)).body;
+    expect((await call('POST', '/appointments', { customerId: cust.id, classSessionId: s1.body.id }, tok)).status).toBe(201);
+    expect((await call('POST', '/appointments', { customerId: cust.id, classSessionId: s1.body.id }, tok)).body.error).toBe('class_full');
+    expect((await call('POST', '/appointments', { customerId: cust.id, classSessionId: s1.body.id, allowOverlap: true }, tok)).status).toBe(201);
+    expect((await call('PATCH', `/class-sessions/${s1.body.id}`, { capacity: 1 }, tok)).body.error).toBe('capacity_below_booked');
+    // Moving the class moves its attendees
+    const later = day.plus({ hours: 2 }).toISO()!;
+    expect((await call('PATCH', `/class-sessions/${s1.body.id}`, { startsAt: later, capacity: 5 }, tok)).status).toBe(200);
+    const after = await call('GET', `/class-sessions/${s1.body.id}`, undefined, tok);
+    expect(after.body.attendees.every((a: { startsAt: string }) => new Date(a.startsAt).getTime() === new Date(later).getTime())).toBe(true);
+
+    // Cancelling a class cancels its bookings; classes with bookings can't be deleted
+    const cancelled = await call('POST', `/class-sessions/${copy.body.id}/cancel`, undefined, tok);
+    expect(cancelled.body.status).toBe('cancelled');
+    const copyDetail = await call('GET', `/class-sessions/${copy.body.id}`, undefined, tok);
+    expect(copyDetail.body.attendees.every((a: { status: string }) => a.status === 'cancelled')).toBe(true);
+    expect((await call('DELETE', `/class-sessions/${s1.body.id}`, undefined, tok)).status).toBe(409);
+    const empty = (await call('POST', '/class-sessions', { serviceId: svc.id, startsAt: day.plus({ days: 5 }).toISO(), capacity: 3 }, tok)).body;
+    expect((await call('DELETE', `/class-sessions/${empty.id}`, undefined, tok)).status).toBe(204);
+  });
+
+  it('rentals: spaces by the hour, durations, any/specific and pricing', async () => {
+    const reg = await call('POST', '/auth/register', {
+      businessName: 'Padel Prueba', businessType: 'sports', name: 'Club', email: 'padel@test.mx', password: 'password123',
+    });
+    const tok = reg.body.token;
+    expect(reg.body.tenant.kind).toBe('rentals');
+    const list = (await call('GET', '/spaces', undefined, tok)).body;
+    expect(list.map((x: { name: string }) => x.name)).toEqual(['Cancha 1', 'Cancha 2']);
+    const [c1, c2] = list;
+    await call('PUT', `/spaces/${c1.id}`, { name: 'Cancha 1', pricePerHourCents: 40000 }, tok);
+    await call('PUT', `/spaces/${c2.id}`, { name: 'Cancha 2', pricePerHourCents: 50000 }, tok);
+    expect((await call('GET', '/spaces', undefined, b.token)).body).toHaveLength(0);
+    expect((await call('PUT', `/spaces/${c1.id}`, { name: 'x', pricePerHourCents: 1 }, b.token)).status).toBe(404);
+
+    const pub = (await call('GET', '/public/padel-prueba')).body;
+    expect(pub).toMatchObject({ kind: 'rentals', rentalDurations: [60, 90, 120], services: [] });
+    expect(pub.spaces.map((x: { pricePerHourCents: number }) => x.pricePerHourCents)).toEqual([40000, 50000]);
+
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const at = (h: number, m = 0) => day.set({ hour: h, minute: m, second: 0, millisecond: 0 }).toISO()!;
+    const avail = async (dur: number, space?: string) =>
+      (await call('GET', `/public/padel-prueba/availability?durationMin=${dur}&date=${day.toISODate()}${space ? `&spaceId=${space}` : ''}`)).body.slots as string[];
+    expect(await avail(90)).toContain(at(10));
+    expect((await call('GET', `/public/padel-prueba/availability?durationMin=45&date=${day.toISODate()}`)).status).toBe(400);
+
+    const r1 = await call('POST', '/public/padel-prueba/bookings', { spaceId: c1.id, durationMin: 90, startsAt: at(10), name: 'Jugador Uno', phone: '5566660001' });
+    expect(r1.status).toBe(201);
+    expect(r1.body).toMatchObject({ priceCents: 60000, resourceName: 'Cancha 1' });
+    const c1Slots = await avail(60, c1.id);
+    expect(c1Slots).not.toContain(at(10, 30));
+    expect(c1Slots).toContain(at(11, 30));
+    expect(await avail(60)).toContain(at(10));
+    const r2 = await call('POST', '/public/padel-prueba/bookings', { durationMin: 60, startsAt: at(10), name: 'Jugador Dos', phone: '5566660002' });
+    expect(r2.body).toMatchObject({ priceCents: 50000, resourceName: 'Cancha 2' });
+    expect((await call('POST', '/public/padel-prueba/bookings', { durationMin: 60, startsAt: at(10), name: 'Jugador Tres', phone: '5566660003' })).status).toBe(409);
+    expect((await call('POST', '/public/padel-prueba/bookings', { durationMin: 45, startsAt: at(15), name: 'Jugador Tres', phone: '5566660003' })).status).toBe(422);
+
+    const cust = (await call('POST', '/customers', { name: 'Socio', phone: '5566660009' }, tok)).body;
+    const taken = await call('POST', '/appointments', { customerId: cust.id, spaceId: c1.id, startsAt: at(10, 30), durationMin: 60 }, tok);
+    expect(taken.status).toBe(409);
+    expect(taken.body.error).toBe('space_taken');
+    const staff = await call('POST', '/appointments', { customerId: cust.id, startsAt: at(12), durationMin: 120 }, tok);
+    expect(staff.status).toBe(201);
+    expect(staff.body).toMatchObject({ spaceName: 'Cancha 1', priceCents: 80000 });
+
+    const mv = await call('POST', `/public/manage/${r1.body.managePath.slice(3)}/reschedule`, { startsAt: at(15) });
+    expect(mv.status).toBe(200);
+    expect(mv.body.appointment.resourceName).toBe('Cancha 1');
+
+    const settings = { ...reg.body.tenant.settings, rentals: { durations: [60] } };
+    expect((await call('PATCH', '/tenant', { settings }, tok)).body.settings.rentals.durations).toEqual([60]);
+    const rep = await call('GET', `/reports?from=${day.minus({ days: 1 }).toISODate()}&to=${day.toISODate()}`, undefined, tok);
+    expect(Array.isArray(rep.body.bySpace)).toBe(true);
+  });
+
   it('public directory: opt-in, location required, only public fields', async () => {
     // Not listed by default
     let dir = await call('GET', '/public-directory');

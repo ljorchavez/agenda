@@ -28,7 +28,13 @@
     "logout": "Log out",
     "reports": "Reports",
     "reservations": "Reservations",
-    "tables": "Tables"
+    "tables": "Tables",
+    "team": "Team",
+    "bookings": "Bookings",
+    "spaces": "Spaces",
+    "classes": "Classes",
+    "classTypes": "Class types",
+    "instructors": "Instructors"
   },
   "auth": {
     "tagline": "Bookings, WhatsApp reminders and payments for your business.",
@@ -60,7 +66,13 @@
     "veterinary": "Veterinary",
     "restaurant": "Restaurant",
     "cafe": "Café",
-    "bar": "Bar"
+    "bar": "Bar",
+    "fitness": "Gym / fitness",
+    "yoga": "Yoga / pilates",
+    "dance": "Dance school",
+    "sports": "Sports courts",
+    "coworking": "Coworking / rooms",
+    "studio": "Studio (photo, recording, rehearsal)"
   },
   "status": {
     "scheduled": "Scheduled",
@@ -146,7 +158,9 @@
     "method_disabled": "That payment method is disabled in Settings",
     "manageLink": "Link for the customer to reschedule or cancel",
     "manageLinkHelp": "Up to {{hours}} h before the appointment (change it in Settings).",
-    "manageMessage": "Hi {{name}}, your appointment at {{business}} is on {{date}}. If you need to change or cancel it, do it here: {{url}}"
+    "manageMessage": "Hi {{name}}, your appointment at {{business}} is on {{date}}. If you need to change or cancel it, do it here: {{url}}",
+    "filter": "Filter by professional or space",
+    "everyone": "Everyone"
   },
   "customers": {
     "title": "Customers",
@@ -229,15 +243,19 @@
     "selfServiceHelp": "Your customers get a private link to manage their appointment.",
     "rescheduleEnabled": "Let customers reschedule",
     "cancelEnabled": "Let customers cancel",
-    "minHoursNotice": "Up to how many hours before"
+    "minHoursNotice": "Up to how many hours before",
+    "logins": "Users with access",
+    "loginsHelp": "People who can sign in to your business account.",
+    "loginsHelpTeam": "People who can sign in. You can link each user to someone on your team in the Team section.",
+    "teamLinkHelp": "Add your team, their services and their calendar colour."
   },
   "booking": {
     "title": "Book your appointment",
-    "chooseService": "1. Choose a service",
-    "chooseDate": "2. Choose a day",
-    "chooseTime": "3. Choose a time",
+    "chooseService": "Choose a service",
+    "chooseDate": "Choose a day",
+    "chooseTime": "Choose a time",
     "noSlots": "No times available that day",
-    "yourData": "4. Your details",
+    "yourData": "Your details",
     "confirm": "Confirm appointment",
     "success": "Done! Your appointment is booked",
     "successDetail": "{{service}} on {{date}}. We'll send you a WhatsApp reminder.",
@@ -256,13 +274,43 @@
     "confirmTable": "Confirm reservation",
     "successTitleTable": "Done! Your table is booked",
     "directions": "Directions",
-    "choosePeople": "1. How many people?",
+    "choosePeople": "How many people?",
     "largerGroups": "For larger groups, contact us directly.",
     "successTable_one": "Table for {{count}} on {{date}}. We will send you a WhatsApp reminder.",
     "successTable_other": "Table for {{count}} on {{date}}. We will send you a WhatsApp reminder.",
     "tableFor_one": "Table for {{count}}",
     "tableFor_other": "Table for {{count}}",
-    "party_too_large": "For that party size, please contact the business directly."
+    "party_too_large": "For that party size, please contact the business directly.",
+    "chooseProfessional": "With whom?",
+    "anyProfessional": "Anyone available",
+    "chooseSpace": "Choose a space",
+    "anySpace": "Any available",
+    "fromPerHour": "from {{price}} / hour",
+    "chooseDuration": "How long?",
+    "chooseStart": "Start time",
+    "hoursN_one": "{{count}} hour",
+    "hoursN_other": "{{count}} hours",
+    "confirmRental": "Confirm rental",
+    "noSpaces": "This business has no spaces for rent yet.",
+    "titleRentals": "Rent a space",
+    "titleClasses": "Book your spot in class",
+    "chooseClass": "Choose a class",
+    "noClasses": "No classes that day.",
+    "classesN_one": "{{count}} class",
+    "classesN_other": "{{count}} classes",
+    "withInstructor": "with {{name}}",
+    "classFull": "Full",
+    "spotsLeft_one": "{{count}} spot left",
+    "spotsLeft_other": "{{count}} spots left",
+    "howManySpots": "How many spots?",
+    "confirmClass": "Book spot",
+    "total": "Total",
+    "successClassTitle": "Done! Your spot is booked",
+    "successClass_one": "{{service}} on {{date}} ({{count}} spot). We will send you a WhatsApp reminder.",
+    "successClass_other": "{{service}} on {{date}} ({{count}} spots). We will send you a WhatsApp reminder.",
+    "successRentalTitle": "Done! Your space is booked",
+    "successRental": "{{space}} on {{date}} for {{minutes}} min. We will send you a WhatsApp reminder.",
+    "successDetailWith": "{{service}} with {{name}} on {{date}}. We will send you a WhatsApp reminder."
   },
   "paymentSettings": {
     "title": "Payment methods",
@@ -304,7 +352,13 @@
     "reports": "Reports",
     "settings": "Settings",
     "reservations": "Bookings",
-    "tables": "Tables"
+    "tables": "Tables",
+    "team": "Team",
+    "bookings": "Bookings",
+    "spaces": "Spaces",
+    "classes": "Classes",
+    "classTypes": "Classes",
+    "instructors": "Team"
   },
   "reports": {
     "title": "Reports",
@@ -363,7 +417,9 @@
       "services": "Completed appointments by service",
       "methods": "Revenue by payment method",
       "sources": "Booking source",
-      "heatmap": "Busiest times"
+      "heatmap": "Busiest times",
+      "professionals": "By professional",
+      "spaces": "By space"
     },
     "current": "Current period",
     "previous": "Previous period",
@@ -383,7 +439,9 @@
     },
     "range_too_long": "Range too long; group by week or month.",
     "invalid_range": "Invalid dates.",
-    "validation_error": "Check the filter dates."
+    "validation_error": "Check the filter dates.",
+    "bookingsN_one": "{{count}} booking",
+    "bookingsN_other": "{{count}} bookings"
   },
   "manage": {
     "title": "Your appointment",
@@ -409,7 +467,8 @@
     "slot_unavailable": "That time was just taken. Please choose another.",
     "too_late": "Online changes are no longer possible for this appointment.",
     "reschedule_not_allowed": "This appointment can no longer be changed online.",
-    "cancel_not_allowed": "This appointment can no longer be cancelled online."
+    "cancel_not_allowed": "This appointment can no longer be cancelled online.",
+    "with": "with {{name}}"
   },
   "tables": {
     "title": "Tables",
@@ -471,7 +530,13 @@
     "ctaTitle": "Own a business?",
     "ctaText": "Take online bookings, send WhatsApp reminders and show up on this map.",
     "ctaButton": "Create account",
-    "lookingForBusiness": "Looking for a place to book? See the directory"
+    "lookingForBusiness": "Looking for a place to book? See the directory",
+    "cta": {
+      "appointments": "Book",
+      "reservations": "Book a table",
+      "classes": "See classes",
+      "rentals": "Rent a space"
+    }
   },
   "profile": {
     "title": "Public profile & directory",
@@ -493,5 +558,94 @@
     "listMeHelp": "Name, type, description, address and phone will be public. Customer data is never shown.",
     "listMeNeeds": "To be listed, set your map location and city.",
     "validation_error": "Check the details (the directory needs a location and city)."
+  },
+  "classes": {
+    "title": "Classes",
+    "new": "New class",
+    "empty": "No classes scheduled this week.",
+    "classType": "Class type",
+    "capacity": "Capacity",
+    "booked": "Booked",
+    "left": "Available",
+    "instructor": "Instructor",
+    "noInstructor": "No instructor",
+    "cancelled": "Cancelled",
+    "cancelledHelp": "This class is cancelled. Attendees will no longer see it as active.",
+    "cancelClass": "Cancel class",
+    "cancelConfirm": "Cancel this class? Booked spots will be cancelled too.",
+    "deleteConfirm": "Delete this class?",
+    "copyNextWeek": "Copy to next week",
+    "attendees": "Attendees",
+    "noAttendees": "Nobody has signed up yet.",
+    "addAttendee": "Add attendee",
+    "spots": "Spots",
+    "spotsN_one": "{{count}} spot",
+    "spotsN_other": "{{count}} spots",
+    "overbook": "Allow overbooking",
+    "attended": "Attended",
+    "remove": "Remove"
+  },
+  "team": {
+    "title": "Team",
+    "instructorsTitle": "Instructors",
+    "add": "Add person",
+    "edit": "Edit person",
+    "name": "Name",
+    "color": "Calendar colour",
+    "services": "Services they perform",
+    "servicesHelp": "Leave all unchecked to allow every service.",
+    "allServices": "All services",
+    "login": "Linked login",
+    "noLogin": "No login",
+    "activeLabel": "Active (takes bookings)",
+    "deleteConfirm": "Delete this person?",
+    "deactivated": "They have upcoming bookings, so we deactivated them instead of deleting.",
+    "empty": "You have not added your team yet. Until then everything works as a single calendar.",
+    "emptyInstructors": "You have not added instructors yet.",
+    "help": "Each person has their own calendar. Customers can choose who, or let the system assign whoever is free.",
+    "instructorsHelp": "Assign an instructor to each class so nobody is double-booked.",
+    "professional": "Professional",
+    "auto": "Assign automatically"
+  },
+  "spaces": {
+    "title": "Spaces",
+    "space": "Space",
+    "name": "Name (e.g. Court 1)",
+    "description": "Description",
+    "pricePerHour": "Price per hour",
+    "perHour": "{{price}} / hour",
+    "add": "Add space",
+    "empty": "Add your courts, rooms or studios to start renting them.",
+    "help": "Each space has a price per hour. Customers choose the space, day, start time and length.",
+    "deleteConfirm": "Delete this space?",
+    "deactivated": "It has upcoming bookings, so we deactivated it instead of deleting.",
+    "auto": "Any free space",
+    "noSpace": "No space",
+    "settingsTitle": "Space rentals",
+    "durationsHelp": "Lengths customers can choose when booking."
+  },
+  "errors": {
+    "class_full": "Not enough spots left in this class.",
+    "class_cancelled": "This class was cancelled.",
+    "capacity_below_booked": "Capacity cannot be lower than spots already booked.",
+    "no_professional_available": "Nobody is available at that time. Choose another time.",
+    "professional_busy": "That person already has a booking at that time.",
+    "professional_not_found": "That person does not exist or is inactive.",
+    "professional_service": "That person does not perform this service.",
+    "space_not_found": "That space does not exist or is inactive.",
+    "invalid_duration": "That length is not available.",
+    "service_required": "Choose a service.",
+    "slot_unavailable": "That time is no longer available. Choose another.",
+    "no_table_available": "No table available for that party size and time.",
+    "table_taken": "That table is already booked at that time.",
+    "table_too_small": "That table is inactive or too small for the party.",
+    "party_too_large": "For larger groups, contact the business.",
+    "forbidden": "Only the owner can do this.",
+    "not_found": "Not found.",
+    "invalid_credentials": "Wrong email or password.",
+    "range_too_long": "Choose a shorter period.",
+    "reschedule_not_allowed": "This booking can no longer be changed.",
+    "method_disabled": "That payment method is disabled.",
+    "overlap": "There is already a booking at that time."
   }
 }

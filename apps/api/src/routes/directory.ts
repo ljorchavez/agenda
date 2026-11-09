@@ -28,8 +28,11 @@ directoryRoutes.get('/public-directory', async (c) => {
     select t.slug, t.name, t.business_type, t.description, t.address, t.neighborhood, t.city, t.state,
            t.lat, t.lng, t.phone,
            coalesce((t.settings->>'onlineBookingEnabled')::boolean, false) as online,
-           (select min(s.price_cents) from services s
-             where s.tenant_id = t.id and s.active and s.price_cents > 0) as price_from
+           case when t.business_type in ('sports', 'coworking', 'studio')
+             then (select min(sp.price_per_hour_cents) from spaces sp
+                   where sp.tenant_id = t.id and sp.active and sp.price_per_hour_cents > 0)
+             else (select min(s.price_cents) from services s
+                   where s.tenant_id = t.id and s.active and s.price_cents > 0) end as price_from
     from tenants t
     where t.directory_listed and t.lat is not null and t.lng is not null and t.city is not null
     order by t.name
@@ -52,6 +55,7 @@ directoryRoutes.get('/public-directory', async (c) => {
       phone: r.phone,
       onlineBooking: Boolean(r.online),
       priceFromCents: r.price_from == null ? null : Number(r.price_from),
+      priceUnit: businessKind(r.business_type) === 'rentals' && r.price_from != null ? ('hour' as const) : null,
     }));
 
   const byState = new Map<string, Set<string>>();

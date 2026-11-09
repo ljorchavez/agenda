@@ -38,7 +38,9 @@ export function ManagePage() {
 
   const days = useMemo(() => {
     const open = q.data?.business.hours.days ?? [];
-    return Array.from({ length: 28 }, (_, i) => addDays(new Date(), i)).filter((d) => open.includes(((d.getDay() + 6) % 7) + 1));
+    const all = Array.from({ length: 28 }, (_, i) => addDays(new Date(), i));
+    // Classes can be scheduled any day; other kinds follow opening days.
+    return q.data?.business.kind === 'classes' ? all : all.filter((d) => open.includes(((d.getDay() + 6) % 7) + 1));
   }, [q.data]);
 
   const slots = useQuery({
@@ -99,7 +101,11 @@ export function ManagePage() {
             <p className="text-sm text-slate-500">{t('manage.hello', { name: a.customerFirstName })}</p>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="font-semibold text-slate-900">{a.partySize ? t('booking.tableFor', { count: a.partySize }) : a.serviceName}</div>
+                <div className="font-semibold text-slate-900">
+                  {business.kind === 'reservations' && a.partySize ? t('booking.tableFor', { count: a.partySize }) : a.serviceName}
+                  {business.kind === 'classes' && (a.partySize ?? 1) > 1 && <span className="font-normal text-slate-500"> · {t('classes.spotsN', { count: a.partySize ?? 1 })}</span>}
+                </div>
+                {a.resourceName && <div className="text-sm text-slate-600">{business.kind === 'rentals' ? a.resourceName : t('manage.with', { name: a.resourceName })}</div>}
                 <div className="text-slate-700">{dateTime(a.startsAt, tz)}</div>
               </div>
               <StatusBadge status={a.status} />

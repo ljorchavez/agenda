@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { CustomerWithStats, ServiceDto } from '@agenda/shared';
+import type { CustomerWithStats, ProfessionalDto, ServiceDto, SpaceDto } from '@agenda/shared';
 import { api } from './api';
 
 export const useServices = () =>
@@ -13,3 +13,9 @@ export const useCustomers = (q = '', sort = 'name') =>
         `/customers?limit=200&sort=${sort}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
       ),
   });
+
+export const useProfessionals = (enabled = true) =>
+  useQuery({ queryKey: ['professionals'], queryFn: () => api<ProfessionalDto[]>('/professionals'), enabled });
+
+export const useSpaces = (enabled = true) =>
+  useQuery({ queryKey: ['spaces'], queryFn: () => api<SpaceDto[]>('/spaces'), enabled });

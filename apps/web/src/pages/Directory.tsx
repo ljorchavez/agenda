@@ -71,7 +71,7 @@ export function DirectoryPage() {
         popup: {
           heading: e.name,
           lines: [t(`businessTypes.${e.businessType}`), [e.neighborhood, e.city].filter(Boolean).join(', ')],
-          link: e.onlineBooking ? { href: `/b/${e.slug}`, label: e.kind === 'reservations' ? t('directory.reserveTable') : t('directory.book') } : undefined,
+          link: e.onlineBooking ? { href: `/b/${e.slug}`, label: t(`directory.cta.${e.kind}`) } : undefined,
         },
       })),
     [results, t],
@@ -199,14 +199,14 @@ export function DirectoryPage() {
                           </div>
                           <div className="shrink-0 text-right text-xs text-slate-500">
                             {me && <div className="font-medium text-slate-700">{distanceKm(me, e).toFixed(1)} km</div>}
-                            {e.priceFromCents != null && <div>{t('directory.from', { price: money(e.priceFromCents) })}</div>}
+                            {e.priceFromCents != null && <div>{t(e.priceUnit === 'hour' ? 'directory.fromPerHour' : 'directory.from', { price: money(e.priceFromCents) })}</div>}
                           </div>
                         </div>
                         {e.description && <p className="mt-2 line-clamp-2 text-sm text-slate-600">{e.description}</p>}
                         <div className="mt-3 flex flex-wrap gap-2">
                           {e.onlineBooking ? (
                             <Link to={`/b/${e.slug}`} className="btn-primary !py-1.5 text-sm" onClick={(ev) => ev.stopPropagation()}>
-                              {e.kind === 'reservations' ? t('directory.reserveTable') : t('directory.book')}
+                              {t(`directory.cta.${e.kind}`)}
                             </Link>
                           ) : (
                             <span className="text-sm text-slate-500">{t('directory.noOnline')}</span>

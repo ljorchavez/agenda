@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BUSINESS_TYPES,
   isValidClabe,
   paymentSettingsOf,
+  rentalSettingsOf,
   reservationSettingsOf,
   selfServiceOf,
   type SessionUser,
@@ -29,7 +31,17 @@ export function SettingsPage() {
     payments: paymentSettingsOf(tenant!.settings),
     selfService: selfServiceOf(tenant!.settings),
     reservations: reservationSettingsOf(tenant!.settings),
+    rentals: rentalSettingsOf(tenant!.settings),
   });
+  const isRentals = tenant?.kind === 'rentals';
+  const hasTeam = tenant?.kind === 'appointments' || tenant?.kind === 'classes';
+  const durations = settings.rentals!.durations;
+  const toggleDuration = (m: number) =>
+    setSettings((x) => {
+      const cur = x.rentals!.durations;
+      const next = cur.includes(m) ? cur.filter((d) => d !== m) : [...cur, m].sort((a, b) => a - b);
+      return next.length ? { ...x, rentals: { durations: next } } : x;
+    });
   const isRestaurant = tenant?.kind === 'reservations';
   const rs = settings.reservations!;
   const setRs = (patch: Partial<typeof rs>) => setSettings((x) => ({ ...x, reservations: { ...x.reservations!, ...patch } }));
@@ -97,6 +109,15 @@ export function SettingsPage() {
             </select>
           </div>
           <div className="text-sm text-slate-500">{t('settings.timezone')}: {tenant?.timezone}</div>
+          {hasTeam && (
+            <Link to="/team" className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm hover:border-brand-500">
+              <span>
+                <span className="font-medium text-slate-800">{tenant?.kind === 'classes' ? t('team.instructorsTitle') : t('team.title')}</span>
+                <span className="block text-slate-500">{t('settings.teamLinkHelp')}</span>
+              </span>
+              <span className="text-brand-700">→</span>
+            </Link>
+          )}
         </section>
 
         <section className="card space-y-4">
@@ -133,6 +154,30 @@ export function SettingsPage() {
                   <label className="label">{t('tables.maxParty')}</label>
                   <input type="number" min={1} max={50} disabled={!isOwner} className="input" value={rs.maxPartySize} onChange={(e) => setRs({ maxPartySize: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} />
                 </div>
+              </div>
+            </>
+          )}
+
+          {isRentals && (
+            <>
+              <h2 className="pt-2 font-semibold">{t('spaces.settingsTitle')}</h2>
+              <p className="text-sm text-slate-500">{t('spaces.durationsHelp')}</p>
+              <div className="flex flex-wrap gap-2">
+                {[30, 60, 90, 120, 150, 180, 240].map((m) => {
+                  const on = durations.includes(m);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      disabled={!isOwner}
+                      aria-pressed={on}
+                      onClick={() => toggleDuration(m)}
+                      className={`rounded-lg border px-3 py-1.5 text-sm ${on ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 text-slate-500'}`}
+                    >
+                      {m} {t('common.minutes')}
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}
@@ -221,12 +266,12 @@ export function SettingsPage() {
         </div>
       )}
 
-      <TeamSection isOwner={isOwner} />
+      <TeamSection isOwner={isOwner} hasTeam={hasTeam} />
     </>
   );
 }
 
-function TeamSection({ isOwner }: { isOwner: boolean }) {
+function TeamSection({ isOwner, hasTeam }: { isOwner: boolean; hasTeam: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const team = useQuery({ queryKey: ['users'], queryFn: () => api<SessionUser[]>('/users') });
@@ -240,7 +285,8 @@ function TeamSection({ isOwner }: { isOwner: boolean }) {
   });
   return (
     <section className="card mt-6">
-      <h2 className="mb-3 font-semibold">{t('settings.team')}</h2>
+      <h2 className="mb-1 font-semibold">{t('settings.logins')}</h2>
+      <p className="mb-3 text-sm text-slate-500">{hasTeam ? t('settings.loginsHelpTeam') : t('settings.loginsHelp')}</p>
       <ul className="mb-4 divide-y divide-slate-100 text-sm">
         {(team.data ?? []).map((u) => (
           <li key={u.id} className="flex justify-between py-2">

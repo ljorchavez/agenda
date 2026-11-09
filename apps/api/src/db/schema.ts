@@ -90,6 +90,42 @@ export const diningTables = pgTable(
   (t) => [index('dining_tables_tenant_idx').on(t.tenantId)],
 );
 
+/** People who attend appointments (barbers, doctors, instructors). Optional per business. */
+export const professionals = pgTable(
+  'professionals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    color: text('color').notNull().default('#0f766e'),
+    active: boolean('active').notNull().default(true),
+    /** Services this person performs; empty = all */
+    serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
+    userId: uuid('user_id'),
+    ...timestamps,
+  },
+  (t) => [index('professionals_tenant_idx').on(t.tenantId)],
+);
+
+/** Spaces rented by the hour (courts, meeting rooms, studios). */
+export const spaces = pgTable(
+  'spaces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    pricePerHourCents: integer('price_per_hour_cents').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [index('spaces_tenant_idx').on(t.tenantId)],
+);
+
 export const users = pgTable(
   'users',
   {
@@ -144,6 +180,29 @@ export const services = pgTable(
   (t) => [index('services_tenant_idx').on(t.tenantId)],
 );
 
+/** One occurrence of a group class with limited spots. Attendees are appointments. */
+export const classSessions = pgTable(
+  'class_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    serviceId: uuid('service_id')
+      .notNull()
+      .references(() => services.id, { onDelete: 'restrict' }),
+    professionalId: uuid('professional_id').references(() => professionals.id, { onDelete: 'set null' }),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    capacity: integer('capacity').notNull(),
+    /** scheduled | cancelled */
+    status: text('status').notNull().default('scheduled'),
+    notes: text('notes'),
+    ...timestamps,
+  },
+  (t) => [index('class_sessions_tenant_starts_idx').on(t.tenantId, t.startsAt)],
+);
+
 export const appointments = pgTable(
   'appointments',
   {
@@ -167,6 +226,9 @@ export const appointments = pgTable(
     /** Restaurants: number of people and assigned table */
     partySize: integer('party_size'),
     tableId: uuid('table_id').references(() => diningTables.id, { onDelete: 'set null' }),
+    professionalId: uuid('professional_id').references(() => professionals.id, { onDelete: 'set null' }),
+    spaceId: uuid('space_id').references(() => spaces.id, { onDelete: 'set null' }),
+    classSessionId: uuid('class_session_id').references(() => classSessions.id, { onDelete: 'cascade' }),
     reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
     ...timestamps,
   },
@@ -174,6 +236,9 @@ export const appointments = pgTable(
     index('appointments_tenant_starts_idx').on(t.tenantId, t.startsAt),
     index('appointments_customer_idx').on(t.customerId),
     index('appointments_reminder_idx').on(t.startsAt, t.reminderSentAt),
+    index('appointments_professional_starts_idx').on(t.professionalId, t.startsAt),
+    index('appointments_space_starts_idx').on(t.spaceId, t.startsAt),
+    index('appointments_class_session_idx').on(t.classSessionId),
   ],
 );
 
@@ -243,3 +308,6 @@ export type Service = typeof services.$inferSelect;
 export type Appointment = typeof appointments.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type DiningTable = typeof diningTables.$inferSelect;
+export type Professional = typeof professionals.$inferSelect;
+export type Space = typeof spaces.$inferSelect;
+export type ClassSession = typeof classSessions.$inferSelect;
