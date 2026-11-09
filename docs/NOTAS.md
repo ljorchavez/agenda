@@ -106,6 +106,20 @@ Necesario:
 ---
 
 ## 6. Otros pendientes
+- **Iniciar sesión con Google** (recomendado; mejor con dominio propio). Requiere crear un cliente
+  OAuth gratis en Google Cloud. SSO empresarial (Okta/Entra) no por ahora.
+- **Correos del sistema:** cuenta en Resend, verificar el dominio y poner `RESEND_API_KEY` y
+  `EMAIL_FROM` en Vercel. Sin eso, "¿Olvidaste tu contraseña?" no envía el correo. Poner también `APP_URL`.
 - Dominio propio.
 - Definir Premium.
 - ~~Conectar GitHub ↔ Vercel~~ (hecho: cada push a `main` se publica solo).
+
+---
+
+## 7. Seguridad de acceso (hecho)
+- Contraseñas con hash bcrypt (no se pueden leer, solo comparar).
+- Recuperar contraseña por correo: enlace de un solo uso, vence en 1 hora; al cambiarla se cierran
+  todas las sesiones. Las cuentas demo (@agenda.mx) no se pueden recuperar.
+- Límite de intentos de inicio de sesión: 5 por persona+dispositivo, 30 por IP y 100 por correo
+  cada 15 min; 3 correos de recuperación por hora.
+
