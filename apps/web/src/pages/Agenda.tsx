@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
@@ -14,17 +14,45 @@ import { CalendarGrid, type CalColumn, type CalEvent } from '../components/Calen
 const useTables = (enabled: boolean) =>
   useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables'), enabled });
 
-type View = 'day' | 'week' | 'team';
+type View = 'day' | 'week';
 const VIEW_KEY = 'agenda.view';
-const savedView = (): View | null => {
+const ZOOM_KEY = 'agenda.zoom';
+/** Height of one hour, per zoom level */
+const ZOOMS = [72, 104, 144];
+const stored = (key: string): string | null => {
   try {
-    const v = localStorage.getItem(VIEW_KEY);
-    return v === 'day' || v === 'week' || v === 'team' ? v : null;
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 };
-const isSmallScreen = () => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767px)').matches;
+const store = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+};
+const savedView = (): View | null => {
+  const v = stored(VIEW_KEY);
+  return v === 'week' ? 'week' : v === 'day' || v === 'team' ? 'day' : null;
+};
+const savedZoom = (): number => {
+  const n = Number(stored(ZOOM_KEY));
+  return Number.isInteger(n) && n >= 0 && n < ZOOMS.length && stored(ZOOM_KEY) !== null ? n : 1;
+};
+const SMALL_QUERY = '(max-width: 767px)';
+function useSmallScreen() {
+  const [small, setSmall] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(SMALL_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(SMALL_QUERY);
+    if (!mq) return;
+    const on = () => setSmall(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return small;
+}
 const toMin = (hhmm: string) => {
   const [h, m] = hhmm.split(':').map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
@@ -43,12 +71,18 @@ const STATUS_ICON: Record<AppointmentDto['status'], string> = {
   no_show: '✕',
 };
 const BRAND = '#0f766e';
+/** "Alejandro Aguilar" -> "Alejandro A." for narrow blocks */
+const shortName = (name: string) => {
+  const [first, ...rest] = name.trim().split(/\s+/);
+  return rest.length ? `${first} ${rest[0]![0]}.` : first ?? name;
+};
 
 export function AgendaPage() {
   const { t, i18n } = useTranslation();
   const { tenant } = useAuth();
   const { scoped, unlinked, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
+  const small = useSmallScreen();
   const [loc, setLoc] = useState('');
   const isRestaurant = tenant?.kind === 'reservations';
   const isRentals = tenant?.kind === 'rentals';
@@ -57,12 +91,12 @@ export function AgendaPage() {
   const spaces = useSpaces(isRentals);
   const tables = useTables(isRestaurant && !scoped);
   const inLoc = (x: { locationId: string }) => !loc || x.locationId === loc;
-  // Filter chips: one per professional (team) or space (rentals) of the selected location
+  // Person / space filter of the selected location
   const resources = isRentals
     ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#475569' }))
     : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color }));
   const [filter, setFilter] = useState('');
-  // Columns of the "team" view: people, spaces or tables
+  // Day view columns when there are several people, tables or spaces (like Teams' schedule view)
   const teamResources = (
     isRestaurant
       ? (tables.data ?? [])
@@ -72,35 +106,28 @@ export function AgendaPage() {
         ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#475569', locationId: x.locationId, sub: '' }))
         : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color, locationId: x.locationId, sub: '' }))
   ).filter((r) => !filter || r.id === filter);
-  const teamAvailable = !scoped && !isClasses && (isRestaurant ? (tables.data ?? []).length > 1 : resources.length > 1);
+  const byResource = !scoped && !isClasses && (isRestaurant ? (tables.data ?? []).length > 1 : resources.length > 1);
 
-  // Businesses with several people/tables/spaces read best one column per resource (like Teams' schedule view).
   const [viewPref, setViewPref] = useState<View | null>(() => savedView());
-  const preferred: View = viewPref ?? (teamAvailable ? 'team' : isSmallScreen() ? 'day' : 'week');
-  const view: View = preferred === 'team' && !teamAvailable ? 'day' : preferred;
+  const view: View = viewPref ?? (small ? 'day' : byResource ? 'day' : 'week');
   const setView = (v: View) => {
     setViewPref(v);
-    try {
-      localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      /* private mode */
-    }
+    store(VIEW_KEY, v);
+  };
+  const [zoom, setZoomState] = useState(savedZoom);
+  const setZoom = (z: number) => {
+    const n = Math.max(0, Math.min(ZOOMS.length - 1, z));
+    setZoomState(n);
+    store(ZOOM_KEY, String(n));
   };
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [showCancelled, setShowCancelled] = useState(false);
   const [creating, setCreating] = useState<{ at: Date; locationId?: string; preset?: Preset } | null>(null);
   const [selected, setSelected] = useState<AppointmentDto | null>(null);
   const [classGroup, setClassGroup] = useState<AppointmentDto[] | null>(null);
+  const datePicker = useRef<HTMLInputElement>(null);
   const weekStart = startOfWeek(anchor, { weekStartsOn: 1 });
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['appointments', weekStart.toISOString()],
-    queryFn: () =>
-      api<AppointmentDto[]>(
-        `/appointments?from=${encodeURIComponent(weekStart.toISOString())}&to=${encodeURIComponent(addDays(weekStart, 7).toISOString())}`,
-      ),
-  });
 
   const today = new Date();
   const loc0 = (l: string) => locs.byId.get(l);
@@ -113,6 +140,25 @@ export function AgendaPage() {
     const rs = hs.map(range);
     return [Math.min(...rs.map((r) => r[0])), Math.max(...rs.map((r) => r[1]))];
   };
+
+  // Phones show 3 days instead of a whole week (like Teams mobile).
+  const threeDays = useMemo(() => {
+    const out: Date[] = [];
+    for (let i = 0; out.length < 3 && i < 14; i++) {
+      const d = addDays(anchor, i);
+      if (openFor(d, visibleLocIds) || i === 0) out.push(d);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor, loc, locs.list.length, tenant]);
+  const multiDay = view === 'week' ? (small ? threeDays : weekDays) : [anchor];
+  const from = new Date(Math.min(weekStart.getTime(), multiDay[0]!.getTime()));
+  const to = new Date(Math.max(addDays(weekStart, 7).getTime(), addDays(multiDay[multiDay.length - 1]!, 1).getTime()));
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['appointments', from.toISOString(), to.toISOString()],
+    queryFn: () => api<AppointmentDto[]>(`/appointments?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`),
+  });
 
   const appts = (data ?? []).filter(
     (a) => inLoc(a) && (!filter || a.professionalId === filter || a.spaceId === filter) && (showCancelled || a.status !== 'cancelled'),
@@ -134,6 +180,7 @@ export function AgendaPage() {
       end,
       color: a.professionalColor ?? (isRentals ? '#475569' : BRAND),
       title: a.customerName,
+      shortTitle: shortName(a.customerName),
       subtitle: sub,
       detail: showPerson ? a.professionalName ?? a.spaceName : null,
       icon: STATUS_ICON[a.status],
@@ -172,22 +219,27 @@ export function AgendaPage() {
   };
 
   const onDay = (d: Date) => appts.filter((a) => isSameDay(new Date(a.startsAt), d));
+  const countOn = (d: Date) => toEvents(onDay(d), false).length;
+  const openDay = (d: Date) => {
+    setAnchor(startOfDay(d));
+    setView('day');
+  };
   const dayHeader = (d: Date, clickable: boolean) => {
     const isToday = isSameDay(d, today);
-    const count = toEvents(onDay(d), false).length;
+    const count = countOn(d);
     const inner = (
       <>
-        <span className={`text-[11px] font-semibold uppercase tracking-wide ${isToday ? 'text-brand-700' : 'text-slate-500'}`}>
+        <span className={`text-xs font-semibold uppercase tracking-wide ${isToday ? 'text-brand-700' : 'text-slate-500'}`}>
           {format(d, 'EEE', { locale: dateLocale() })}
         </span>
-        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-lg font-semibold ${isToday ? 'bg-brand-700 text-white' : 'text-slate-800'}`}>
+        <span className={`flex h-9 w-9 items-center justify-center rounded-full text-xl font-semibold ${isToday ? 'bg-brand-700 text-white' : 'text-slate-800'}`}>
           {format(d, 'd')}
         </span>
-        <span className="text-[11px] text-slate-500">{count ? t('agenda.count', { count }) : ' '}</span>
+        <span className="text-xs text-slate-500">{count ? t('agenda.count', { count }) : ' '}</span>
       </>
     );
     return clickable ? (
-      <button type="button" className="flex w-full flex-col items-center rounded-md hover:bg-slate-50" onClick={() => { setAnchor(startOfDay(d)); setView('day'); }} aria-label={format(d, 'PPPP', { locale: dateLocale() })}>
+      <button type="button" className="flex w-full flex-col items-center rounded-md hover:bg-slate-50" onClick={() => openDay(d)} aria-label={format(d, 'PPPP', { locale: dateLocale() })}>
         {inner}
       </button>
     ) : (
@@ -197,51 +249,56 @@ export function AgendaPage() {
   const newAt = (at: Date, locationId?: string, preset?: Preset) => setCreating({ at, locationId: locationId ?? loc, preset });
 
   let columns: CalColumn[];
-  if (view === 'team') {
+  if (view === 'day' && byResource) {
     const day = onDay(anchor);
     const key = (a: AppointmentDto) => (isRestaurant ? a.tableId : isRentals ? a.spaceId : a.professionalId);
-    columns = teamResources.map((r) => ({
-      key: r.id,
-      date: anchor,
-      isToday: isSameDay(anchor, today),
-      open: openFor(anchor, [r.locationId]),
-      events: toEvents(day.filter((a) => key(a) === r.id), false),
-      onCreate: (at: Date) =>
-        newAt(at, r.locationId, isRestaurant ? { tableId: r.id } : isRentals ? { spaceId: r.id } : { professionalId: r.id }),
-      header: (
-        <div className="flex min-w-0 flex-col items-center px-1 text-center">
-          <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-slate-800">
-            <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
-            <span className="truncate">{r.name}</span>
-          </span>
-          <span className="truncate text-[11px] text-slate-500">
-            {[r.sub, locs.multi && !loc ? loc0(r.locationId)?.name : ''].filter(Boolean).join(' · ') || t('agenda.count', { count: toEvents(day.filter((a) => key(a) === r.id), false).length })}
-          </span>
-        </div>
-      ),
-    }));
+    columns = teamResources.map((r) => {
+      const events = toEvents(day.filter((a) => key(a) === r.id), false);
+      return {
+        key: r.id,
+        date: anchor,
+        isToday: false,
+        open: openFor(anchor, [r.locationId]),
+        events,
+        onCreate: (at: Date) =>
+          newAt(at, r.locationId, isRestaurant ? { tableId: r.id } : isRentals ? { spaceId: r.id } : { professionalId: r.id }),
+        header: (
+          <div className="flex min-w-0 flex-col items-center px-1 text-center">
+            <span className="flex max-w-full items-center gap-2 text-sm font-semibold text-slate-800">
+              <span className="inline-block h-3 w-3 shrink-0 rounded-full" style={{ background: r.color }} />
+              <span className="truncate">{r.name}</span>
+            </span>
+            <span className="truncate text-xs text-slate-500">
+              {[r.sub, locs.multi && !loc ? loc0(r.locationId)?.name : '', t('agenda.count', { count: events.length })].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        ),
+      };
+    });
     const unassigned = day.filter((a) => !key(a) || !teamResources.some((r) => r.id === key(a)));
     if (unassigned.length && !filter) {
       columns.push({
         key: 'unassigned',
         date: anchor,
-        isToday: isSameDay(anchor, today),
+        isToday: false,
         open: openFor(anchor, visibleLocIds),
         events: toEvents(unassigned, true),
         onCreate: (at) => newAt(at),
         header: (
           <div className="flex flex-col items-center text-center">
             <span className="text-sm font-semibold text-slate-600">{isRestaurant ? t('agenda.noTable') : t('agenda.unassigned')}</span>
-            <span className="text-[11px] text-slate-500">{t('agenda.count', { count: unassigned.length })}</span>
+            <span className="text-xs text-slate-500">{t('agenda.count', { count: unassigned.length })}</span>
           </div>
         ),
       });
     }
+    // The red "now" line goes across every column of today.
+    if (isSameDay(anchor, today)) columns = columns.map((c) => ({ ...c, isToday: true }));
   } else {
     // Week view shows the days the business opens (plus any day that has bookings).
     const days =
-      view === 'day'
-        ? [anchor]
+      view === 'day' || small
+        ? multiDay
         : weekDays.filter((d) => openFor(d, visibleLocIds) || onDay(d).length > 0).length
           ? weekDays.filter((d) => openFor(d, visibleLocIds) || onDay(d).length > 0)
           : weekDays;
@@ -253,10 +310,7 @@ export function AgendaPage() {
       open: openFor(d, visibleLocIds),
       events: toEvents(onDay(d), showPerson),
       onCreate: (at: Date) => newAt(at),
-      onMore: () => {
-        setAnchor(startOfDay(d));
-        setView(teamAvailable ? 'team' : 'day');
-      },
+      onMore: () => openDay(d),
       header: dayHeader(d, view === 'week'),
     }));
   }
@@ -267,13 +321,26 @@ export function AgendaPage() {
   const startMin = Math.max(0, Math.floor(Math.min(...allHours.map((r) => r[0]), ...evMins) / 60) * 60);
   const endMin = Math.min(24 * 60, Math.ceil(Math.max(...allHours.map((r) => r[1]), ...evMins, startMin + 8 * 60) / 60) * 60);
 
-  const step = view === 'week' ? 7 : 1;
+  const step = view === 'week' ? (small ? 3 : 7) : 1;
+  const first = multiDay[0]!;
+  const last = multiDay[multiDay.length - 1]!;
   const rangeLabel =
     view === 'week'
-      ? `${format(weekStart, 'd MMM', { locale: dateLocale() })} – ${format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}`
+      ? `${format(small ? first : weekStart, 'd MMM', { locale: dateLocale() })} – ${format(small ? last : addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}`
       : format(anchor, t('agenda.dayFormat'), { locale: dateLocale() });
-  const teamLabel = isRestaurant ? t('agenda.viewTables') : isRentals ? t('agenda.viewSpaces') : t('agenda.viewTeam');
-  const views: [View, string][] = [['day', t('agenda.viewDay')], ['week', t('agenda.viewWeek')], ...(teamAvailable ? [['team', teamLabel] as [View, string]] : [])];
+  const views: [View, string][] = [['day', t('agenda.viewDay')], ['week', small ? t('agenda.viewThreeDays') : t('agenda.viewWeek')]];
+  const pickDate = () => {
+    const el = datePicker.current;
+    if (!el) return;
+    try {
+      el.showPicker();
+    } catch {
+      el.focus();
+      el.click();
+    }
+  };
+  const segBtn = (active: boolean) =>
+    `rounded-md px-3 py-1 text-sm font-medium ${active ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'} disabled:opacity-40`;
 
   return (
     <>
@@ -289,88 +356,87 @@ export function AgendaPage() {
           </button>
         }
       />
-      {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
-      {scoped && !unlinked && <p className="mb-3 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
+      {unlinked && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
+      {scoped && !unlinked && <p className="mb-2 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
 
-      {/* Toolbar: today, prev/next, range, view switch */}
+      {/* Toolbar (Teams style): today, prev/next, date picker | filters, view, zoom */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button className="btn-secondary !px-3 !py-1.5" onClick={() => setAnchor(startOfDay(new Date()))}>{t('agenda.today')}</button>
         <div className="flex">
-          <button className="btn-secondary !rounded-r-none !px-3 !py-1.5" onClick={() => setAnchor(addDays(anchor, -step))} aria-label={t('agenda.prev')}>‹</button>
-          <button className="btn-secondary !-ml-px !rounded-l-none !px-3 !py-1.5" onClick={() => setAnchor(addDays(anchor, step))} aria-label={t('agenda.next')}>›</button>
+          <button className="btn-secondary !rounded-r-none !px-3 !py-1.5 text-lg leading-none" onClick={() => setAnchor(addDays(anchor, -step))} aria-label={t('agenda.prev')}>‹</button>
+          <button className="btn-secondary !-ml-px !rounded-l-none !px-3 !py-1.5 text-lg leading-none" onClick={() => setAnchor(addDays(anchor, step))} aria-label={t('agenda.next')}>›</button>
         </div>
-        <h2 className="min-w-0 text-base font-semibold text-slate-800 first-letter:uppercase sm:text-lg">{rangeLabel}</h2>
-        <div className="ml-auto flex items-center gap-3">
-          <label className="hidden items-center gap-1.5 text-sm text-slate-600 sm:flex">
+        <div className="relative min-w-0">
+          <button
+            type="button"
+            onClick={pickDate}
+            className="flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-base font-semibold text-slate-800 hover:bg-slate-100 sm:text-lg"
+            aria-label={t('agenda.pickDate')}
+          >
+            <span className="truncate first-letter:uppercase">{rangeLabel}</span>
+            <span className="text-sm text-slate-400" aria-hidden>▾</span>
+          </button>
+          <input
+            ref={datePicker}
+            type="date"
+            tabIndex={-1}
+            aria-hidden
+            className="pointer-events-none absolute bottom-0 left-2 h-0 w-0 opacity-0"
+            value={format(anchor, 'yyyy-MM-dd')}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              const [y, m, d] = e.target.value.split('-').map(Number);
+              setAnchor(new Date(y!, (m ?? 1) - 1, d ?? 1));
+            }}
+          />
+        </div>
+
+        <div className="flex w-full flex-wrap items-center gap-2 md:ml-auto md:w-auto">
+          {!scoped && locs.multi && (
+            <select className="input !w-auto !py-1.5 text-sm" aria-label={t('locations.location')} value={loc} onChange={(e) => { setLoc(e.target.value); setFilter(''); }}>
+              <option value="">{t('locations.all')}</option>
+              {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          )}
+          {!scoped && resources.length > 1 && (
+            <select className="input !w-auto !py-1.5 text-sm" aria-label={t('agenda.filter')} value={filter} onChange={(e) => setFilter(e.target.value)}>
+              <option value="">{isRentals ? t('agenda.allSpaces') : t('agenda.everyone')}</option>
+              {resources.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
+          <label className="hidden items-center gap-1.5 text-sm text-slate-600 lg:flex">
             <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} />
             {t('agenda.showCancelled')}
           </label>
-          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.view')}>
-            {views.map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={view === v}
-                onClick={() => setView(v)}
-                className={`rounded-md px-3 py-1 text-sm font-medium ${view === v ? 'bg-brand-700 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="ml-auto flex items-center gap-2">
+            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.view')}>
+              {views.map(([v, label]) => (
+                <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={segBtn(view === v)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.zoom')}>
+              <button type="button" className={segBtn(false)} onClick={() => setZoom(zoom - 1)} disabled={zoom === 0} aria-label={t('agenda.zoomOut')}>−</button>
+              <button type="button" className={segBtn(false)} onClick={() => setZoom(zoom + 1)} disabled={zoom === ZOOMS.length - 1} aria-label={t('agenda.zoomIn')}>+</button>
+            </div>
           </div>
         </div>
       </div>
 
-      {!scoped && locs.multi && (
-        <div className="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('locations.title')}>
-          {[{ id: '', name: t('locations.all') }, ...locs.list].map((l) => (
-            <button
-              key={l.id || 'all'}
-              onClick={() => { setLoc(l.id); setFilter(''); }}
-              aria-pressed={loc === l.id}
-              className={`whitespace-nowrap rounded-lg border px-3 py-1 text-sm ${loc === l.id ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
-            >
-              {l.id ? '⌂ ' : ''}{l.name}
-            </button>
-          ))}
-        </div>
-      )}
-      {!scoped && resources.length > 1 && (
-        <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.filter')}>
-          <button
-            onClick={() => setFilter('')}
-            aria-pressed={!filter}
-            className={`whitespace-nowrap rounded-full border px-3 py-1 text-sm ${!filter ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
-          >
-            {t('agenda.everyone')}
-          </button>
-          {resources.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => setFilter(filter === r.id ? '' : r.id)}
-              aria-pressed={filter === r.id}
-              className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-sm ${filter === r.id ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
-            >
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: r.color }} />
-              {r.name}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Day strip to jump within the week (day and team views) */}
-      {view !== 'week' && (
-        <div className="-mx-1 mb-3 flex gap-1 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.pickDay')}>
+      {/* Phones, day view: week strip to jump between days */}
+      {view === 'day' && small && (
+        <div className="-mx-1 mb-2 flex gap-1 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.pickDay')}>
           {weekDays.map((d) => {
             const sel = isSameDay(d, anchor);
-            const n = toEvents(onDay(d), false).length;
+            const n = countOn(d);
             return (
               <button
                 key={d.toISOString()}
                 type="button"
                 onClick={() => setAnchor(startOfDay(d))}
                 aria-pressed={sel}
-                className={`flex min-w-[3.25rem] flex-1 flex-col items-center rounded-lg border px-2 py-1 ${sel ? 'border-brand-700 bg-brand-700 text-white' : isSameDay(d, today) ? 'border-brand-500 bg-white text-brand-700' : 'border-slate-200 bg-white text-slate-700'}`}
+                className={`flex min-w-[2.75rem] flex-1 flex-col items-center rounded-lg border px-1 py-1 ${sel ? 'border-brand-700 bg-brand-700 text-white' : isSameDay(d, today) ? 'border-brand-500 bg-white text-brand-700' : 'border-slate-200 bg-white text-slate-700'}`}
               >
                 <span className="text-[11px] font-medium uppercase">{format(d, 'EEE', { locale: dateLocale() })}</span>
                 <span className="text-base font-semibold leading-tight">{format(d, 'd')}</span>
@@ -390,8 +456,10 @@ export function AgendaPage() {
           columns={columns}
           startMin={startMin}
           endMin={endMin}
-          maxLanes={view === 'week' ? 3 : view === 'team' ? 3 : 6}
-          minColWidth={view === 'week' ? 120 : view === 'team' ? 150 : 200}
+          maxLanes={view === 'week' ? 2 : 3}
+          minColWidth={view === 'week' ? (small ? 104 : 150) : columns.length > 1 ? (small ? 150 : 170) : 220}
+          pxPerHour={ZOOMS[zoom]!}
+          compact={small}
           slotMinutes={tenant?.settings.hours.slotMinutes ?? 30}
           formatHour={(h) => (i18n.language.startsWith('en') ? format(new Date(2000, 0, 1, h), 'h a') : `${String(h).padStart(2, '0')}:00`)}
           formatRange={fmtRange}
@@ -400,7 +468,7 @@ export function AgendaPage() {
           moreLabel={(n) => t('agenda.more', { count: n })}
         />
       )}
-      <p className="mt-2 text-xs text-slate-500">{t('agenda.tapToCreate')}</p>
+      <p className="mt-2 hidden text-xs text-slate-500 sm:block">{t('agenda.tapToCreate')}</p>
 
       {creating && (
         <NewAppointmentModal initial={creating.at} defaultLocation={creating.locationId ?? loc} preset={creating.preset} onClose={() => setCreating(null)} />

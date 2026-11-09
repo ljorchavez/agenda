@@ -180,7 +180,13 @@
     "pickDay": "Elegir día",
     "tapToCreate": "Toca un espacio libre del calendario para agendar a esa hora.",
     "more_one": "+{{count}} más",
-    "more_other": "+{{count}} más"
+    "more_other": "+{{count}} más",
+    "viewThreeDays": "3 días",
+    "pickDate": "Elegir fecha",
+    "zoom": "Tamaño",
+    "zoomIn": "Agrandar",
+    "zoomOut": "Achicar",
+    "allSpaces": "Todos los espacios"
   },
   "customers": {
     "title": "Clientes",

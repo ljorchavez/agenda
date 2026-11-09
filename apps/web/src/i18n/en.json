@@ -180,7 +180,13 @@
     "pickDay": "Pick a day",
     "tapToCreate": "Tap a free spot in the calendar to book at that time.",
     "more_one": "+{{count}} more",
-    "more_other": "+{{count}} more"
+    "more_other": "+{{count}} more",
+    "viewThreeDays": "3 days",
+    "pickDate": "Pick a date",
+    "zoom": "Size",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "allSpaces": "All spaces"
   },
   "customers": {
     "title": "Customers",

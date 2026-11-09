@@ -2,8 +2,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 
 /**
  * Time-grid calendar (Microsoft Teams / Outlook style): hours down the left, one column per day
- * (or per person/table/space), bookings drawn as blocks sized by their duration. Overlapping
- * bookings sit side by side; when too many overlap, the extra ones collapse into "+N".
+ * (or per person/table/space), bookings drawn as blocks sized by their duration.
+ *
+ * Readability rules:
+ * - Rows are tall (zoomable) so a 30-minute booking fits name, time and service.
+ * - At most `maxLanes` bookings sit side by side. The rest are not squeezed: they become a small
+ *   "+N" chip at their own time slot that opens the full day.
  */
 
 export interface CalEvent {
@@ -12,6 +16,8 @@ export interface CalEvent {
   end: Date;
   color: string;
   title: string;
+  /** Shorter title used when the block is narrow (e.g. "Ana G.") */
+  shortTitle?: string;
   subtitle?: string | null;
   detail?: string | null;
   /** Small status mark shown before the title (✓, ✕ …) */
@@ -40,10 +46,13 @@ interface Props {
   /** Visible range, minutes from midnight (whole hours) */
   startMin: number;
   endMin: number;
-  /** Max bookings side by side before collapsing into "+N" */
+  /** Bookings shown side by side before the rest turn into "+N" chips */
   maxLanes: number;
   minColWidth: number;
+  pxPerHour: number;
   slotMinutes: number;
+  /** Narrow screens: thinner hour column */
+  compact?: boolean;
   formatHour: (hour: number) => string;
   formatRange: (start: Date, end: Date) => string;
   formatTime: (d: Date) => string;
@@ -51,19 +60,20 @@ interface Props {
   moreLabel: (count: number) => string;
 }
 
-const PX_PER_HOUR = 80;
-const PX_PER_MIN = PX_PER_HOUR / 60;
-const MIN_EVENT_PX = 22;
-const GUTTER = 56;
+const MIN_EVENT_PX = 26;
+const CHIP_LANE_PX = 36;
 
 const minutesOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
 
 type Placed =
-  | { kind: 'event'; ev: CalEvent; lane: number; lanes: number }
-  | { kind: 'more'; key: string; count: number; start: Date; lane: number; lanes: number };
+  | { kind: 'event'; ev: CalEvent; lane: number; lanes: number; chips: boolean }
+  | { kind: 'more'; key: string; count: number; startMin: number; lanes: number };
 
-/** Assigns overlapping events to side-by-side lanes. */
-export function layoutEvents(events: CalEvent[], maxLanes: number): Placed[] {
+/**
+ * Assigns overlapping events to side-by-side lanes. Clusters wider than `maxLanes` keep the
+ * first `maxLanes` lanes and group the hidden bookings into one "+N" chip per time slot.
+ */
+export function layoutEvents(events: CalEvent[], maxLanes: number, pxPerMin: number, slotMinutes: number): Placed[] {
   const sorted = [...events].sort(
     (a, b) =>
       a.start.getTime() - b.start.getTime() ||
@@ -77,13 +87,19 @@ export function layoutEvents(events: CalEvent[], maxLanes: number): Placed[] {
     if (!cluster.length) return;
     const lanes = laneEnds.length;
     if (lanes <= maxLanes) {
-      for (const c of cluster) out.push({ kind: 'event', ev: c.ev, lane: c.lane, lanes });
+      for (const c of cluster) out.push({ kind: 'event', ev: c.ev, lane: c.lane, lanes, chips: false });
     } else {
-      const visible = Math.max(1, maxLanes - 1);
-      const hidden = cluster.filter((c) => c.lane >= visible);
-      for (const c of cluster) if (c.lane < visible) out.push({ kind: 'event', ev: c.ev, lane: c.lane, lanes: visible + 1 });
-      const first = hidden.reduce((m, c) => (c.ev.start < m ? c.ev.start : m), hidden[0]!.ev.start);
-      out.push({ kind: 'more', key: `more-${hidden[0]!.ev.id}`, count: hidden.length, start: first, lane: visible, lanes: visible + 1 });
+      const bySlot = new Map<number, number>();
+      for (const c of cluster) {
+        if (c.lane < maxLanes) out.push({ kind: 'event', ev: c.ev, lane: c.lane, lanes: maxLanes, chips: true });
+        else {
+          const slot = Math.floor(minutesOfDay(c.ev.start) / slotMinutes) * slotMinutes;
+          bySlot.set(slot, (bySlot.get(slot) ?? 0) + 1);
+        }
+      }
+      for (const [slot, count] of bySlot) {
+        out.push({ kind: 'more', key: `more-${cluster[0]!.ev.id}-${slot}`, count, startMin: slot, lanes: maxLanes });
+      }
     }
     cluster = [];
     laneEnds = [];
@@ -92,7 +108,7 @@ export function layoutEvents(events: CalEvent[], maxLanes: number): Placed[] {
   for (const ev of sorted) {
     const s = ev.start.getTime();
     // Very short bookings still take the minimum block height on screen.
-    const e = Math.max(ev.end.getTime(), s + (MIN_EVENT_PX / PX_PER_MIN) * 60000);
+    const e = Math.max(ev.end.getTime(), s + (MIN_EVENT_PX / pxPerMin) * 60000);
     if (s >= clusterEnd) flush();
     let lane = laneEnds.findIndex((end) => end <= s);
     if (lane === -1) {
@@ -110,14 +126,16 @@ export function layoutEvents(events: CalEvent[], maxLanes: number): Placed[] {
 
 const TONE: Record<NonNullable<CalEvent['tone']>, string> = {
   normal: 'text-slate-900',
-  muted: 'text-slate-600 opacity-80',
+  muted: 'text-slate-600 opacity-75',
   cancelled: 'text-slate-500 opacity-60 line-through',
   alert: 'text-rose-900',
 };
 
 export function CalendarGrid(props: Props) {
-  const { columns, startMin, endMin, maxLanes, minColWidth, slotMinutes } = props;
-  const height = ((endMin - startMin) / 60) * PX_PER_HOUR;
+  const { columns, startMin, endMin, maxLanes, minColWidth, slotMinutes, pxPerHour } = props;
+  const pxPerMin = pxPerHour / 60;
+  const gutter = props.compact ? 44 : 60;
+  const height = ((endMin - startMin) / 60) * pxPerHour;
   const scroller = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -134,9 +152,9 @@ export function CalendarGrid(props: Props) {
     const firstEvent = Math.min(...columns.flatMap((c) => c.events.map((e) => minutesOfDay(e.start))), Infinity);
     const firstOpen = Math.min(...columns.map((c) => c.open?.[0] ?? Infinity), Infinity);
     const target = today ? minutesOfDay(new Date()) - 60 : Math.min(firstEvent, firstOpen);
-    el.scrollTop = Number.isFinite(target) ? Math.max(0, (target - startMin) * PX_PER_MIN) : 0;
+    el.scrollTop = Number.isFinite(target) ? Math.max(0, (target - startMin) * pxPerMin) : 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollKey, startMin]);
+  }, [scrollKey, startMin, pxPerHour]);
 
   const hours = useMemo(() => {
     const list: number[] = [];
@@ -144,13 +162,13 @@ export function CalendarGrid(props: Props) {
     return list;
   }, [startMin, endMin]);
 
-  const template = `${GUTTER}px repeat(${columns.length}, minmax(${minColWidth}px, 1fr))`;
-  const y = (min: number) => (min - startMin) * PX_PER_MIN;
+  const template = `${gutter}px repeat(${columns.length}, minmax(${minColWidth}px, 1fr))`;
+  const y = (min: number) => (min - startMin) * pxPerMin;
 
   const createAt = (col: CalColumn, e: MouseEvent<HTMLDivElement>) => {
     if (!col.onCreate) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const min = startMin + (e.clientY - rect.top) / PX_PER_MIN;
+    const min = startMin + (e.clientY - rect.top) / pxPerMin;
     const snapped = Math.floor(min / slotMinutes) * slotMinutes;
     const at = new Date(col.date);
     at.setHours(0, 0, 0, 0);
@@ -162,13 +180,16 @@ export function CalendarGrid(props: Props) {
     <div
       ref={scroller}
       className="relative overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm"
-      style={{ maxHeight: 'max(440px, calc(100dvh - 16rem))' }}
+      style={{ maxHeight: 'max(460px, calc(100dvh - 12.5rem))' }}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: template, minWidth: GUTTER + columns.length * minColWidth }}>
+      <div style={{ display: 'grid', gridTemplateColumns: template, minWidth: gutter + columns.length * minColWidth }}>
         {/* Header row */}
         <div className="sticky left-0 top-0 z-30 border-b border-slate-200 bg-white" />
         {columns.map((c) => (
-          <div key={`h-${c.key}`} className="sticky top-0 z-20 border-b border-l border-slate-200 bg-white px-1 py-2">
+          <div
+            key={`h-${c.key}`}
+            className={`sticky top-0 z-20 border-b border-l border-slate-200 bg-white px-1 py-2 ${c.isToday ? 'shadow-[inset_0_-3px_0_0_var(--color-brand-600)]' : ''}`}
+          >
             {c.header}
           </div>
         ))}
@@ -176,15 +197,19 @@ export function CalendarGrid(props: Props) {
         {/* Hour labels */}
         <div className="sticky left-0 z-10 border-r border-slate-200 bg-white" style={{ height }} aria-hidden>
           {hours.map((h) => (
-            <div key={h} className="absolute right-2 -translate-y-1/2 text-[11px] font-medium text-slate-500" style={{ top: y(h * 60) }}>
-              {h * 60 === startMin ? '' : props.formatHour(h)}
+            <div
+              key={h}
+              className={`absolute right-2 text-xs font-medium text-slate-500 ${h * 60 === startMin ? 'translate-y-1' : '-translate-y-1/2'}`}
+              style={{ top: y(h * 60) }}
+            >
+              {props.formatHour(h)}
             </div>
           ))}
         </div>
 
         {/* Day / resource columns */}
         {columns.map((col) => {
-          const placed = layoutEvents(col.events, maxLanes);
+          const placed = layoutEvents(col.events, maxLanes, pxPerMin, slotMinutes);
           const nowMin = minutesOfDay(now);
           return (
             <div
@@ -194,8 +219,8 @@ export function CalendarGrid(props: Props) {
               style={{
                 height,
                 backgroundImage:
-                  'linear-gradient(to bottom, rgb(226 232 240) 1px, transparent 1px), linear-gradient(to bottom, rgb(241 245 249) 1px, transparent 1px)',
-                backgroundSize: `100% ${PX_PER_HOUR}px, 100% ${PX_PER_HOUR / 2}px`,
+                  'linear-gradient(to bottom, rgb(203 213 225) 1px, transparent 1px), linear-gradient(to bottom, rgb(241 245 249) 1px, transparent 1px)',
+                backgroundSize: `100% ${pxPerHour}px, 100% ${pxPerHour / 2}px`,
                 backgroundPosition: `0 ${y(Math.ceil(startMin / 60) * 60)}px, 0 ${y(Math.ceil(startMin / 30) * 30)}px`,
               }}
               onClick={(e) => createAt(col, e)}
@@ -205,40 +230,47 @@ export function CalendarGrid(props: Props) {
               {col.open ? (
                 <>
                   {col.open[0] > startMin && (
-                    <div className="pointer-events-none absolute inset-x-0 top-0 bg-slate-100/70" style={{ height: y(col.open[0]) }} />
+                    <div className="pointer-events-none absolute inset-x-0 top-0 bg-slate-100/80" style={{ height: y(col.open[0]) }} />
                   )}
                   {col.open[1] < endMin && (
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-slate-100/70" style={{ top: y(col.open[1]) }} />
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-slate-100/80" style={{ top: y(col.open[1]) }} />
                   )}
                 </>
               ) : (
-                <div className="pointer-events-none absolute inset-0 bg-slate-100/70" />
+                <div className="pointer-events-none absolute inset-0 bg-slate-100/80" />
               )}
 
               {placed.map((p) => {
-                const left = `calc(${(p.lane / p.lanes) * 100}% + 2px)`;
-                const width = `calc(${100 / p.lanes}% - 4px)`;
                 if (p.kind === 'more') {
                   return (
                     <button
                       key={p.key}
                       type="button"
-                      className="absolute z-[5] rounded-md border border-slate-300 bg-white px-1 text-left text-xs font-semibold text-brand-700 shadow-sm hover:bg-brand-50"
-                      style={{ top: y(minutesOfDay(p.start)) + 1, height: MIN_EVENT_PX, left, width }}
+                      data-testid="calendar-more"
+                      className="absolute z-[5] flex items-start justify-center rounded-md border border-slate-300 bg-white pt-0.5 text-xs font-semibold text-brand-700 shadow-sm hover:bg-brand-50"
+                      style={{ top: y(p.startMin) + 2, height: Math.max(MIN_EVENT_PX - 4, (slotMinutes * pxPerMin) - 4), right: 2, width: CHIP_LANE_PX - 4 }}
+                      aria-label={props.moreLabel(p.count)}
+                      title={props.moreLabel(p.count)}
                       onClick={(e) => {
                         e.stopPropagation();
                         col.onMore?.();
                       }}
                     >
-                      {props.moreLabel(p.count)}
+                      +{p.count}
                     </button>
                   );
                 }
                 const ev = p.ev;
+                // With a "+N" lane, events share the width left of it.
+                const avail = p.chips ? `(100% - ${CHIP_LANE_PX}px)` : '100%';
+                const left = `calc(${avail} * ${p.lane / p.lanes} + 2px)`;
+                const width = `calc(${avail} / ${p.lanes} - 4px)`;
+                const narrow = p.lanes > 1;
                 const startM = minutesOfDay(ev.start);
                 const dur = Math.max(1, (ev.end.getTime() - ev.start.getTime()) / 60000);
-                const h = Math.max(MIN_EVENT_PX, dur * PX_PER_MIN - 2);
-                const compact = h < 34;
+                const h = Math.max(MIN_EVENT_PX, dur * pxPerMin - 3);
+                const oneLine = h < 40;
+                const title = narrow && ev.shortTitle ? ev.shortTitle : ev.title;
                 return (
                   <button
                     key={ev.id}
@@ -250,27 +282,27 @@ export function CalendarGrid(props: Props) {
                       e.stopPropagation();
                       ev.onClick();
                     }}
-                    className={`absolute z-[5] overflow-hidden rounded-md px-1.5 text-left text-xs leading-tight shadow-sm ring-1 ring-black/5 transition hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-brand-500 ${compact ? 'flex items-center gap-1 py-0' : 'py-1'} ${TONE[ev.tone ?? 'normal']}`}
+                    className={`absolute z-[5] overflow-hidden rounded-md border border-white px-2 text-left leading-snug shadow-sm transition hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-brand-500 ${oneLine ? 'flex items-center' : 'py-1'} ${TONE[ev.tone ?? 'normal']}`}
                     style={{
                       top: y(startM) + 1,
                       height: h,
                       left,
                       width,
-                      background: ev.tone === 'alert' ? '#ffe4e6' : `${ev.color}1f`,
-                      borderLeft: `3px solid ${ev.tone === 'alert' ? '#e11d48' : ev.color}`,
+                      background: ev.tone === 'alert' ? '#ffe4e6' : `color-mix(in srgb, ${ev.color} 14%, white)`,
+                      borderLeft: `4px solid ${ev.tone === 'alert' ? '#e11d48' : ev.color}`,
                     }}
                   >
-                    {compact ? (
-                      <span className="truncate">
-                        <span className="font-semibold">{ev.icon ? `${ev.icon} ` : ''}{ev.title}</span>
-                        <span className="text-slate-500"> · {props.formatTime(ev.start)}</span>
+                    {oneLine ? (
+                      <span className="truncate text-[13px]">
+                        <span className="font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</span>
+                        <span className="text-xs text-slate-600"> {props.formatTime(ev.start)}</span>
                       </span>
                     ) : (
                       <>
-                        <div className="truncate font-semibold">{ev.icon ? `${ev.icon} ` : ''}{ev.title}</div>
-                        <div className="truncate text-[11px] text-slate-600">{props.formatRange(ev.start, ev.end)}</div>
-                        {h >= 50 && ev.subtitle && <div className="truncate text-[11px] text-slate-600">{ev.subtitle}</div>}
-                        {h >= 66 && ev.detail && <div className="truncate text-[11px] text-slate-500">{ev.detail}</div>}
+                        <div className="truncate text-[13px] font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</div>
+                        <div className="truncate text-xs text-slate-600">{narrow ? props.formatTime(ev.start) : props.formatRange(ev.start, ev.end)}</div>
+                        {h >= 58 && ev.subtitle && <div className="truncate text-xs text-slate-600">{ev.subtitle}</div>}
+                        {h >= 76 && ev.detail && <div className="truncate text-xs font-medium text-slate-500">{ev.detail}</div>}
                       </>
                     )}
                   </button>
