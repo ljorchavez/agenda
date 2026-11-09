@@ -97,7 +97,8 @@ r = await call('GET', '/api/services', null, token);
 check('services list (3 seeded)', r.status === 200 && r.body?.length === 3, r.body?.length);
 const services = r.body ?? [];
 r = await call('GET', '/api/customers?sort=totalSpent', null, token);
-check('customers list (28 seeded)', r.status === 200 && r.body?.total === 28, r.body?.total);
+// Demo data resets every night, so earlier runs today may have added a few customers.
+check('customers list (28+ seeded)', r.status === 200 && r.body?.total >= 28, r.body?.total);
 const top = r.body?.items?.[0];
 check('customer stats computed', top && top.visits > 0 && top.totalSpentCents > 0, JSON.stringify(top));
 check('sort by totalSpent desc', r.body?.items?.[0]?.totalSpentCents >= r.body?.items?.[1]?.totalSpentCents);
@@ -127,6 +128,11 @@ check('team list', r.status === 200 && r.body?.length >= 1);
 
 // ---- Write flow inside demo tenant
 const svc = services.find((s) => s.durationMin === 30) ?? services[0];
+// Leftovers from an earlier run today (demo data only resets at night); deleting cascades to their bookings.
+{
+  const left = await call('GET', `/api/customers?q=${encodeURIComponent('Cliente QA')}`, null, token);
+  for (const c of left.body?.items ?? []) await call('DELETE', `/api/customers/${c.id}`, null, token);
+}
 r = await call('POST', '/api/customers', { name: 'Cliente QA', phone: '55 9876 5432', email: 'qa@example.com' }, token);
 check('create customer', r.status === 201 && r.body?.phone === '+525598765432', r.text);
 const cust = r.body;
