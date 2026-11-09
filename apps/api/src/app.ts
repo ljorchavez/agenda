@@ -19,6 +19,7 @@ import { tableRoutes } from './routes/tables.js';
 import { professionalRoutes } from './routes/professionals.js';
 import { spaceRoutes } from './routes/spaces.js';
 import { classRoutes } from './routes/classes.js';
+import { locationRoutes } from './routes/locations.js';
 import { webhookRoutes } from './routes/webhooks.js';
 
 export function createApp() {
@@ -51,7 +52,7 @@ export function createApp() {
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();
   // Auth on explicit prefixes so unknown paths still return 404 instead of 401.
-  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/tables', '/professionals', '/spaces', '/class-sessions']) {
+  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/tables', '/professionals', '/spaces', '/class-sessions', '/locations']) {
     priv.use(prefix, requireAuth);
     priv.use(`${prefix}/*`, requireAuth);
   }
@@ -65,6 +66,7 @@ export function createApp() {
   priv.route('/', professionalRoutes);
   priv.route('/', spaceRoutes);
   priv.route('/', classRoutes);
+  priv.route('/', locationRoutes);
   app.route('/', priv);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));

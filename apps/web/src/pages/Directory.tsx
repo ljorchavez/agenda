@@ -12,6 +12,10 @@ import { money } from '../lib/format';
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 /** Public page (no login): map + list of businesses that opted into the directory. */
+/** Booking link; businesses with several locations open on the chosen one. */
+const bookHref = (e: { slug: string; locationId: string; locationName: string | null }) =>
+  e.locationName ? `/b/${e.slug}?l=${e.locationId}` : `/b/${e.slug}`;
+
 export function DirectoryPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
@@ -63,15 +67,15 @@ export function DirectoryPage() {
   const markers: MapMarker[] = useMemo(
     () =>
       results.map((e) => ({
-        id: e.slug,
+        id: e.locationId,
         lat: e.lat,
         lng: e.lng,
         color: TYPE_COLORS[e.businessType] ?? TYPE_COLORS.other!,
-        title: e.name,
+        title: e.locationName ? `${e.name} · ${e.locationName}` : e.name,
         popup: {
-          heading: e.name,
+          heading: e.locationName ? `${e.name} · ${e.locationName}` : e.name,
           lines: [t(`businessTypes.${e.businessType}`), [e.neighborhood, e.city].filter(Boolean).join(', ')],
-          link: e.onlineBooking ? { href: `/b/${e.slug}`, label: t(`directory.cta.${e.kind}`) } : undefined,
+          link: e.onlineBooking ? { href: bookHref(e), label: t(`directory.cta.${e.kind}`) } : undefined,
         },
       })),
     [results, t],
@@ -183,10 +187,10 @@ export function DirectoryPage() {
               ) : (
                 <ul className="space-y-3 lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto lg:pr-1">
                   {results.map((e) => (
-                    <li key={e.slug}>
+                    <li key={e.locationId}>
                       <article
-                        className={`card cursor-pointer !p-4 transition ${selected === e.slug ? 'ring-2 ring-brand-500' : 'hover:border-slate-300'}`}
-                        onClick={() => setSelected(e.slug)}
+                        className={`card cursor-pointer !p-4 transition ${selected === e.locationId ? 'ring-2 ring-brand-500' : 'hover:border-slate-300'}`}
+                        onClick={() => setSelected(e.locationId)}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -195,6 +199,7 @@ export function DirectoryPage() {
                               {t(`businessTypes.${e.businessType}`)}
                             </div>
                             <h2 className="mt-0.5 truncate font-semibold text-slate-900">{e.name}</h2>
+                            {e.locationName && <div className="truncate text-xs font-medium text-brand-700">⌂ {e.locationName}</div>}
                             <p className="truncate text-sm text-slate-500">{[e.neighborhood, e.city].filter(Boolean).join(', ')}</p>
                           </div>
                           <div className="shrink-0 text-right text-xs text-slate-500">
@@ -205,7 +210,7 @@ export function DirectoryPage() {
                         {e.description && <p className="mt-2 line-clamp-2 text-sm text-slate-600">{e.description}</p>}
                         <div className="mt-3 flex flex-wrap gap-2">
                           {e.onlineBooking ? (
-                            <Link to={`/b/${e.slug}`} className="btn-primary !py-1.5 text-sm" onClick={(ev) => ev.stopPropagation()}>
+                            <Link to={bookHref(e)} className="btn-primary !py-1.5 text-sm" onClick={(ev) => ev.stopPropagation()}>
                               {t(`directory.cta.${e.kind}`)}
                             </Link>
                           ) : (
@@ -220,7 +225,7 @@ export function DirectoryPage() {
                             className="btn-secondary !py-1.5 text-sm lg:hidden"
                             onClick={(ev) => {
                               ev.stopPropagation();
-                              setSelected(e.slug);
+                              setSelected(e.locationId);
                               setView('map');
                             }}
                           >

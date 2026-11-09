@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TableDto } from '@agenda/shared';
 import { Empty, ErrorText, Loading, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
+import { LocationSelect } from '../components/Locations';
+import { useMyLocations } from '../lib/queries';
 
 /** Restaurant tables: name, seats and area. Online reservations are assigned to the smallest free table that fits. */
 export function TablesPage() {
@@ -12,20 +14,25 @@ export function TablesPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isOwner = user?.role === 'owner' || user?.role === 'admin';
+  // Each location has its own; managers limited to a location only see theirs.
+  const { locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const [loc, setLoc] = useState('');
+  const currentLoc = loc || ownLocation || locs.list[0]?.id || '';
   const tables = useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables') });
   const [form, setForm] = useState({ name: '', seats: '4', area: '' });
   const [info, setInfo] = useState('');
   const refresh = () => void qc.invalidateQueries({ queryKey: ['tables'] });
 
   const create = useMutation({
-    mutationFn: () => api<TableDto>('/tables', { method: 'POST', body: { name: form.name, seats: Number(form.seats), area: form.area || null, active: true } }),
+    mutationFn: () => api<TableDto>('/tables', { method: 'POST', body: { name: form.name, seats: Number(form.seats), area: form.area || null, active: true, locationId: currentLoc || undefined } }),
     onSuccess: () => {
       setForm({ name: '', seats: form.seats, area: form.area });
       refresh();
     },
   });
   const update = useMutation({
-    mutationFn: (x: TableDto) => api<TableDto>(`/tables/${x.id}`, { method: 'PUT', body: { name: x.name, seats: x.seats, area: x.area, active: x.active } }),
+    mutationFn: (x: TableDto) => api<TableDto>(`/tables/${x.id}`, { method: 'PUT', body: { name: x.name, seats: x.seats, area: x.area, active: x.active, locationId: x.locationId } }),
     onSuccess: refresh,
   });
   const remove = useMutation({
@@ -36,13 +43,14 @@ export function TablesPage() {
     },
   });
 
-  const list = tables.data ?? [];
+  const list = (tables.data ?? []).filter((x) => !locs.anyMulti || x.locationId === currentLoc);
   const seats = list.filter((x) => x.active).reduce((a, x) => a + x.seats, 0);
 
   return (
     <>
       <PageHeader title={t('tables.title')} />
       <p className="-mt-4 mb-4 text-sm text-slate-500">{t('tables.help')}</p>
+      {locs.multi && <LocationSelect value={currentLoc} onChange={setLoc} list={locs.list} className="input mb-4 max-w-xs" />}
 
       {isOwner && (
         <form

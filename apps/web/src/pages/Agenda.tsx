@@ -7,7 +7,8 @@ import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
-import { useCustomers, useProfessionals, useServices, useSpaces } from '../lib/queries';
+import { useCustomers, useMyLocations, useProfessionals, useServices, useSpaces } from '../lib/queries';
+import { LocationSelect } from '../components/Locations';
 
 const useTables = (enabled: boolean) =>
   useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables'), enabled });
@@ -15,15 +16,18 @@ const useTables = (enabled: boolean) =>
 export function AgendaPage() {
   const { t } = useTranslation();
   const { tenant } = useAuth();
-  const { scoped, unlinked } = useAccess();
+  const { scoped, unlinked, locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const [loc, setLoc] = useState('');
   const isRestaurant = tenant?.kind === 'reservations';
   const isRentals = tenant?.kind === 'rentals';
   const pros = useProfessionals(tenant?.kind === 'appointments');
   const spaces = useSpaces(isRentals);
-  // Filter chips: one per professional (team) or space (rentals)
+  const inLoc = (x: { locationId: string }) => !loc || x.locationId === loc;
+  // Filter chips: one per professional (team) or space (rentals) of the selected location
   const resources = isRentals
-    ? (spaces.data ?? []).filter((x) => x.active).map((x) => ({ id: x.id, name: x.name, color: '#64748b' }))
-    : (pros.data ?? []).filter((x) => x.active).map((x) => ({ id: x.id, name: x.name, color: x.color }));
+    ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#64748b' }))
+    : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color }));
   const [filter, setFilter] = useState('');
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [creating, setCreating] = useState<Date | null>(null);
@@ -66,6 +70,20 @@ export function AgendaPage() {
       </p>
       {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
       {scoped && !unlinked && <p className="mb-4 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
+      {!scoped && locs.multi && (
+        <div className="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('locations.title')}>
+          {[{ id: '', name: t('locations.all') }, ...locs.list].map((l) => (
+            <button
+              key={l.id || 'all'}
+              onClick={() => { setLoc(l.id); setFilter(''); }}
+              aria-pressed={loc === l.id}
+              className={`whitespace-nowrap rounded-lg border px-3 py-1 text-sm ${loc === l.id ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+            >
+              {l.id ? '⌂ ' : ''}{l.name}
+            </button>
+          ))}
+        </div>
+      )}
       {!scoped && resources.length > 1 && (
         <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.filter')}>
           <button
@@ -95,7 +113,7 @@ export function AgendaPage() {
         <div className="grid gap-3 lg:grid-cols-7">
           {days.map((d) => {
             const items = (data ?? []).filter(
-              (a) => isSameDay(new Date(a.startsAt), d) && (!filter || a.professionalId === filter || a.spaceId === filter),
+              (a) => isSameDay(new Date(a.startsAt), d) && inLoc(a) && (!filter || a.professionalId === filter || a.spaceId === filter),
             );
             const isToday = isSameDay(d, today);
             return (
@@ -141,18 +159,23 @@ export function AgendaPage() {
         </div>
       )}
 
-      {creating && <NewAppointmentModal initial={creating} onClose={() => setCreating(null)} />}
+      {creating && <NewAppointmentModal initial={creating} defaultLocation={loc} onClose={() => setCreating(null)} />}
       {selected && <AppointmentModal appt={selected} onClose={() => setSelected(null)} />}
     </>
   );
 }
 
-function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () => void }) {
+function NewAppointmentModal({ initial, defaultLocation, onClose }: { initial: Date; defaultLocation: string; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { tenant, user } = useAuth();
   // Colaboradores book into their own agenda; the API enforces it too.
-  const { scoped, professionalId: ownPro } = useAccess();
+  const { scoped, professionalId: ownPro, locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const [locationId, setLocationId] = useState(defaultLocation || ownLocation || '');
+  // With one location there's nothing to choose; the API uses the main one.
+  const effectiveLoc = locationId || locs.list[0]?.id || '';
+  const atLoc = (x: { locationId: string }) => !effectiveLoc || x.locationId === effectiveLoc;
   const isRestaurant = tenant?.kind === 'reservations';
   const isRentals = tenant?.kind === 'rentals';
   const tables = useTables(isRestaurant);
@@ -200,6 +223,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
           ...(isRestaurant ? { partySize: Number(partySize), tableId: tableId || null } : {}),
           ...(isRentals ? { spaceId: spaceId || null } : {}),
           ...(scoped ? (ownPro ? { professionalId: ownPro } : {}) : teamPros.length ? { professionalId: professionalId || null } : {}),
+          ...(!scoped && effectiveLoc ? { locationId: effectiveLoc } : {}),
         },
       });
     },
@@ -211,7 +235,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
     },
   });
 
-  const teamPros = (pros.data ?? []).filter((p) => p.active);
+  const teamPros = (pros.data ?? []).filter((p) => p.active && (scoped || atLoc(p)));
   const eligible = eligibleProfessionals(teamPros, serviceId || active[0]?.id);
   const space = (spaces.data ?? []).find((x) => x.id === spaceId);
   const pickService = (id: string) => {
@@ -232,6 +256,17 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
           create.mutate();
         }}
       >
+        {!scoped && locs.multi && (
+          <div>
+            <label className="label" htmlFor="na-loc">{t('locations.location')}</label>
+            <LocationSelect
+              id="na-loc"
+              value={effectiveLoc}
+              onChange={(v) => { setLocationId(v); setProfessionalId(''); setTableId(''); setSpaceId(''); }}
+              list={locs.list}
+            />
+          </div>
+        )}
         <div>
           <div className="mb-1 flex items-center justify-between">
             <label className="label mb-0">{t('agenda.customer')}</label>
@@ -269,7 +304,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
               <label className="label">{t('tables.table')}</label>
               <select className="input" value={tableId} onChange={(e) => setTableId(e.target.value)}>
                 <option value="">{t('tables.auto')}</option>
-                {(tables.data ?? []).filter((x) => x.active && x.seats >= Number(partySize || 1)).map((x) => (
+                {(tables.data ?? []).filter((x) => x.active && atLoc(x) && x.seats >= Number(partySize || 1)).map((x) => (
                   <option key={x.id} value={x.id}>{x.name} · {t('tables.seatsN', { count: x.seats })}{x.area ? ` · ${x.area}` : ''}</option>
                 ))}
               </select>
@@ -281,7 +316,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
               <label className="label">{t('spaces.space')}</label>
               <select className="input" value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>
                 <option value="">{t('spaces.auto')}</option>
-                {(spaces.data ?? []).filter((x) => x.active).map((x) => (
+                {(spaces.data ?? []).filter((x) => x.active && atLoc(x)).map((x) => (
                   <option key={x.id} value={x.id}>{x.name} · {t('spaces.perHour', { price: money(x.pricePerHourCents) })}</option>
                 ))}
               </select>
@@ -367,6 +402,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const qc = useQueryClient();
   const { tenant } = useAuth();
   const { manager, scoped } = useAccess();
+  const apptLocs = useMyLocations(null);
   const pay = paymentSettingsOf(tenant!.settings);
   const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
   const offline = inPerson.length ? inPerson : (['cash', 'card', 'transfer'] as const);
@@ -383,7 +419,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const tablesQ = useTables(appt.tableId != null || tenant?.kind === 'reservations');
   const prosQ = useProfessionals(tenant?.kind === 'appointments');
   const spacesQ = useSpaces(tenant?.kind === 'rentals');
-  const teamPros = eligibleProfessionals((prosQ.data ?? []).filter((p) => p.active), appt.serviceId);
+  const teamPros = eligibleProfessionals((prosQ.data ?? []).filter((p) => p.active && p.locationId === appt.locationId), appt.serviceId);
   const [pro, setPro] = useState(appt.professionalId ?? '');
   const [spc, setSpc] = useState(appt.spaceId ?? '');
   const isTableBooking = tenant?.kind === 'reservations' && !appt.classSessionId;
@@ -457,6 +493,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             {appt.professionalName ?? appt.spaceName}
           </div>
         )}
+        {apptLocs.anyMulti && <div className="text-sm text-slate-500">⌂ {apptLocs.byId.get(appt.locationId)?.name}</div>}
         {appt.customerPhone && <div className="text-sm text-slate-500">{appt.customerPhone}</div>}
         {appt.notes && <p className="mt-2 rounded-lg bg-slate-50 p-2 text-sm">{appt.notes}</p>}
         <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm">
@@ -495,7 +532,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
               <div className="flex flex-wrap gap-2">
                 <select className="input w-auto" value={spc} onChange={(e) => setSpc(e.target.value)}>
                   <option value="">{t('spaces.auto')}</option>
-                  {(spacesQ.data ?? []).filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  {(spacesQ.data ?? []).filter((x) => x.active && x.locationId === appt.locationId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
                 <button className="btn-secondary" onClick={() => update.mutate({ spaceId: spc || null })}>{t('common.save')}</button>
               </div>
@@ -509,7 +546,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                 <input type="number" min={1} max={50} className="input w-24" value={party} onChange={(e) => setParty(e.target.value)} aria-label={t('tables.partySize')} />
                 <select className="input w-auto" value={table} onChange={(e) => setTable(e.target.value)}>
                   <option value="">{t('tables.auto')}</option>
-                  {(tablesQ.data ?? []).filter((x) => x.active && x.seats >= Number(party || 1)).map((x) => (
+                  {(tablesQ.data ?? []).filter((x) => x.active && x.locationId === appt.locationId && x.seats >= Number(party || 1)).map((x) => (
                     <option key={x.id} value={x.id}>{x.name} · {t('tables.seatsN', { count: x.seats })}</option>
                   ))}
                 </select>

@@ -28,7 +28,7 @@ import type { ReportDto, ReportGranularity, ReportKpis, ServiceDto } from '@agen
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
-import { useProfessionals, useSpaces } from '../lib/queries';
+import { useMyLocations, useProfessionals, useSpaces } from '../lib/queries';
 import { dateLocale, money, percent } from '../lib/format';
 
 const PRESETS = [
@@ -156,7 +156,8 @@ export function ReportsPage() {
   const [customizing, setCustomizing] = useState(false);
 
   const { tenant } = useAuth();
-  const { scoped } = useAccess();
+  const { scoped, locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
   const isRentals = tenant?.kind === 'rentals';
   const preset = (PRESETS as readonly string[]).includes(params.get('p') ?? '') ? (params.get('p') as Preset) : 'last3Months';
   const range = preset === 'custom'
@@ -165,6 +166,7 @@ export function ReportsPage() {
   const granularity = (params.get('g') ?? '') as ReportGranularity | '';
   const serviceId = params.get('service') ?? '';
   const who = params.get('who') ?? '';
+  const loc = params.get('loc') ?? '';
   const source = params.get('source') ?? '';
   const compare = params.get('compare') !== '0';
 
@@ -182,6 +184,7 @@ export function ReportsPage() {
   if (serviceId) qs.set('serviceId', serviceId);
   if (who && !scoped) qs.set(isRentals ? 'spaceId' : 'professionalId', who);
   if (source) qs.set('source', source);
+  if (loc && !ownLocation) qs.set('locationId', loc);
 
   const report = useQuery({
     queryKey: ['reports', qs.toString()],
@@ -192,7 +195,7 @@ export function ReportsPage() {
   const services = useQuery({ queryKey: ['services'], queryFn: () => api<ServiceDto[]>('/services') });
   const pros = useProfessionals(!isRentals);
   const spaces = useSpaces(isRentals);
-  const resources: { id: string; name: string; active: boolean }[] = (isRentals ? spaces.data : pros.data) ?? [];
+  const resources: { id: string; name: string; active: boolean }[] = ((isRentals ? spaces.data : pros.data) ?? []).filter((x) => !loc || x.locationId === loc);
 
   const intl = i18n.language.startsWith('en') ? 'en-US' : 'es-MX';
   const data = report.data;
@@ -344,6 +347,15 @@ export function ReportsPage() {
             ))}
           </select>
         </label>
+        {!scoped && !ownLocation && locs.multi && (
+          <label className="text-sm">
+            <span className="mb-1 block text-slate-600">{t('locations.location')}</span>
+            <select className="input" value={loc} onChange={(e) => set({ loc: e.target.value, who: null })}>
+              <option value="">{t('reports.all')}</option>
+              {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </label>
+        )}
         {!scoped && resources.length > 1 && (
           <label className="text-sm">
             <span className="mb-1 block text-slate-600">{isRentals ? t('spaces.space') : t('team.professional')}</span>
@@ -479,6 +491,27 @@ export function ReportsPage() {
                     </ResponsiveContainer>
                   </div>
                 )}
+              </Card>
+            )}
+
+            {(data.byLocation?.length ?? 0) > 1 && (
+              <Card title={t('reports.charts.locations')}>
+                <ul className="space-y-3">
+                  {data.byLocation.map((r) => {
+                    const top = Math.max(...data.byLocation.map((x) => x.revenueCents), 1);
+                    return (
+                      <li key={r.id}>
+                        <div className="mb-1 flex justify-between text-sm">
+                          <span>⌂ {r.name} <span className="text-slate-400">· {t('reports.bookingsN', { count: r.count })}</span></span>
+                          <span className="font-medium">{money(r.revenueCents)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100">
+                          <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: BRAND }} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               </Card>
             )}
 

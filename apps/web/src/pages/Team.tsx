@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PROFESSIONAL_COLORS, type ProfessionalDto, type SessionUser } from '@agenda/shared';
 import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
-import { useProfessionals, useServices } from '../lib/queries';
+import { useAccess, useAuth } from '../lib/auth';
+import { LocationSelect } from '../components/Locations';
+import { useMyLocations, useProfessionals, useServices } from '../lib/queries';
 
 /**
  * Team members who attend customers. With one or more active members each person gets
@@ -15,6 +16,9 @@ export function TeamPage() {
   const { t } = useTranslation();
   const { user, tenant } = useAuth();
   const isOwner = user?.role === 'owner' || user?.role === 'admin';
+  const { locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const canEdit = (p: { locationId: string }) => isOwner && (!ownLocation || p.locationId === ownLocation);
   const isClasses = tenant?.kind === 'classes';
   const pros = useProfessionals();
   const services = useServices();
@@ -38,9 +42,9 @@ export function TeamPage() {
           {list.map((p) => (
             <button
               key={p.id}
-              disabled={!isOwner}
+              disabled={!canEdit(p)}
               onClick={() => setEditing(p)}
-              className={`card !p-4 text-left ${p.active ? '' : 'opacity-60'} ${isOwner ? 'hover:border-brand-500' : ''}`}
+              className={`card !p-4 text-left ${p.active ? '' : 'opacity-60'} ${canEdit(p) ? 'hover:border-brand-500' : ''}`}
             >
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: p.color }}>
@@ -48,6 +52,7 @@ export function TeamPage() {
                 </span>
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{p.name}</div>
+                  {locs.anyMulti && <div className="truncate text-xs text-brand-700">⌂ {locs.byId.get(p.locationId)?.name}</div>}
                   <div className="truncate text-xs text-slate-500">
                     {!p.active
                       ? t('services.inactive')
@@ -68,6 +73,8 @@ export function TeamPage() {
 
 function ProfessionalModal({ pro, onClose }: { pro: ProfessionalDto | null; onClose: () => void }) {
   const { t } = useTranslation();
+  const { locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
   const qc = useQueryClient();
   const services = useServices();
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<SessionUser[]>('/users') });
@@ -77,6 +84,7 @@ function ProfessionalModal({ pro, onClose }: { pro: ProfessionalDto | null; onCl
     active: pro?.active ?? true,
     serviceIds: pro?.serviceIds ?? [],
     userId: pro?.userId ?? '',
+    locationId: pro?.locationId ?? ownLocation ?? '',
   });
   const [info, setInfo] = useState('');
   const refresh = () => {
@@ -87,7 +95,7 @@ function ProfessionalModal({ pro, onClose }: { pro: ProfessionalDto | null; onCl
     mutationFn: () =>
       api<ProfessionalDto>(pro ? `/professionals/${pro.id}` : '/professionals', {
         method: pro ? 'PUT' : 'POST',
-        body: { ...form, userId: form.userId || null },
+        body: { ...form, userId: form.userId || null, locationId: form.locationId || undefined },
       }),
     onSuccess: () => {
       refresh();
@@ -113,6 +121,12 @@ function ProfessionalModal({ pro, onClose }: { pro: ProfessionalDto | null; onCl
           <label className="label">{t('team.name')}</label>
           <input required maxLength={80} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
+        {locs.multi && (
+          <div>
+            <label className="label" htmlFor="pro-loc">{t('locations.location')}</label>
+            <LocationSelect id="pro-loc" value={form.locationId || locs.list[0]!.id} onChange={(v) => setForm({ ...form, locationId: v })} list={locs.list} />
+          </div>
+        )}
         <div>
           <div className="label">{t('team.color')}</div>
           <div className="flex flex-wrap gap-2">

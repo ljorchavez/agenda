@@ -283,6 +283,26 @@ export const registerSchema = z.object({
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+/** A logged-in owner opening another business (billed separately). */
+export const businessCreateSchema = z.object({
+  businessName: z.string().trim().min(2).max(120),
+  businessType: z.enum(BUSINESS_TYPES),
+  phone: phoneSchema.optional(),
+});
+export type BusinessCreateInput = z.infer<typeof businessCreateSchema>;
+
+export const switchBusinessSchema = z.object({ tenantId: z.string().uuid() });
+
+/** A business the logged-in person can open, with their role there. */
+export interface BusinessSummary {
+  id: string;
+  name: string;
+  slug: string;
+  businessType: BusinessType;
+  kind: BusinessKind;
+  role: Role;
+}
+
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
@@ -339,12 +359,77 @@ export interface DirectoryEntryDto {
   priceFromCents: number | null;
   /** 'hour' when the price is per hour (space rentals) */
   priceUnit: 'hour' | null;
+  /** One pin per location; null name when the business has a single location */
+  locationId: string;
+  locationName: string | null;
 }
 
 export interface DirectoryDto {
   entries: DirectoryEntryDto[];
   /** Zones present in the directory, for the filter */
   zones: { state: string; cities: string[] }[];
+}
+
+// ---------- Locations (sucursales) ----------
+
+/**
+ * Pricing model (see docs/billing.md): each business is billed on its own plan, which
+ * includes this many locations; every extra active location is an add-on.
+ */
+export const PLAN_INCLUDED_LOCATIONS = 1;
+
+export const locationInputSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80),
+    phone: phoneSchema.nullable().optional(),
+    address: z.string().trim().max(200).nullable().optional(),
+    neighborhood: z.string().trim().max(120).nullable().optional(),
+    city: z.string().trim().max(120).nullable().optional(),
+    state: z.string().trim().max(120).nullable().optional(),
+    lat: z.number().min(-90).max(90).nullable().optional(),
+    lng: z.number().min(-180).max(180).nullable().optional(),
+    /** Null = same hours as the business */
+    hours: businessHoursSchema.nullable().optional(),
+    active: z.boolean().default(true),
+  })
+  .refine((p) => (p.lat == null) === (p.lng == null), { message: 'lat_lng_pair', path: ['lat'] });
+export type LocationInput = z.infer<typeof locationInputSchema>;
+
+export interface LocationDto {
+  id: string;
+  name: string;
+  /** The first location; its address and hours come from the business profile/settings */
+  isPrimary: boolean;
+  phone: string | null;
+  address: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+  lat: number | null;
+  lng: number | null;
+  /** Own hours, or null when it uses the business hours */
+  hours: BusinessHours | null;
+  active: boolean;
+}
+
+/** What the customer sees when choosing a location (address/hours already resolved). */
+export interface PublicLocationDto {
+  id: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+  lat: number | null;
+  lng: number | null;
+  hours: BusinessHours;
+}
+
+export interface PlanDto {
+  includedLocations: number;
+  activeLocations: number;
+  extraLocations: number;
 }
 
 // ---------- Restaurant tables ----------
@@ -354,6 +439,8 @@ export const tableInputSchema = z.object({
   seats: z.number().int().min(1).max(50),
   area: z.string().trim().max(60).nullable().optional(),
   active: z.boolean().default(true),
+  /** Location (sucursal); defaults to the main one */
+  locationId: z.string().uuid().optional(),
 });
 export type TableInput = z.infer<typeof tableInputSchema>;
 
@@ -363,6 +450,7 @@ export interface TableDto {
   seats: number;
   area: string | null;
   active: boolean;
+  locationId: string;
 }
 
 // ---------- Professionals (per-person agendas) ----------
@@ -375,6 +463,8 @@ export const professionalInputSchema = z.object({
   serviceIds: z.array(z.string().uuid()).max(200).default([]),
   /** Optional login linked to this professional */
   userId: z.string().uuid().nullable().optional(),
+  /** Location (sucursal); defaults to the main one */
+  locationId: z.string().uuid().optional(),
 });
 export type ProfessionalInput = z.infer<typeof professionalInputSchema>;
 
@@ -385,6 +475,7 @@ export interface ProfessionalDto {
   active: boolean;
   serviceIds: string[];
   userId: string | null;
+  locationId: string;
 }
 
 // ---------- Spaces (rentals by the hour) ----------
@@ -394,6 +485,8 @@ export const spaceInputSchema = z.object({
   description: z.string().trim().max(300).nullable().optional(),
   pricePerHourCents: z.number().int().min(0).max(100_000_000),
   active: z.boolean().default(true),
+  /** Location (sucursal); defaults to the main one */
+  locationId: z.string().uuid().optional(),
 });
 export type SpaceInput = z.infer<typeof spaceInputSchema>;
 
@@ -403,9 +496,11 @@ export interface SpaceDto {
   description: string | null;
   pricePerHourCents: number;
   active: boolean;
+  locationId: string;
 }
 
 export const publicRentalSchema = z.object({
+  locationId: z.string().uuid().optional(),
   /** Omit to get any free space */
   spaceId: z.string().uuid().nullable().optional(),
   durationMin: z.number().int().min(15).max(720),
@@ -432,6 +527,8 @@ export const classSessionInputSchema = z.object({
   notes: z.string().trim().max(500).nullable().optional(),
   /** Skip the instructor double-booking check */
   allowOverlap: z.boolean().optional(),
+  /** Location (sucursal); defaults to the main one */
+  locationId: z.string().uuid().optional(),
 });
 export type ClassSessionInput = z.infer<typeof classSessionInputSchema>;
 
@@ -459,10 +556,12 @@ export interface ClassSessionDto {
   status: ClassSessionStatus;
   priceCents: number;
   notes: string | null;
+  locationId: string;
 }
 
 export interface PublicClassSessionDto {
   id: string;
+  locationId: string;
   serviceId: string;
   serviceName: string;
   professionalName: string | null;
@@ -484,6 +583,7 @@ export const publicClassBookingSchema = z.object({
 export type PublicClassBookingInput = z.infer<typeof publicClassBookingSchema>;
 
 export const publicReservationSchema = z.object({
+  locationId: z.string().uuid().optional(),
   partySize: z.number().int().min(1).max(50),
   startsAt: z.string().datetime({ offset: true }),
   name: z.string().trim().min(2).max(160),
@@ -504,6 +604,8 @@ export const staffCreateSchema = z.object({
   role: z.enum(ROLES).default('staff'),
   /** Team member this login belongs to (their agenda) */
   professionalId: z.string().uuid().nullable().optional(),
+  /** Limit this login to one location (null = all locations) */
+  locationId: z.string().uuid().nullable().optional(),
 });
 export type StaffCreateInput = z.infer<typeof staffCreateSchema>;
 
@@ -513,6 +615,7 @@ export const userUpdateSchema = z.object({
   /** Sets a new password (owners/admins resetting a team member's access) */
   password: z.string().min(8).max(200).optional(),
   professionalId: z.string().uuid().nullable().optional(),
+  locationId: z.string().uuid().nullable().optional(),
 });
 export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
 
@@ -534,6 +637,11 @@ export interface UserDto {
   /** Linked team member, if any */
   professionalId: string | null;
   professionalName: string | null;
+  /** Null = all locations */
+  locationId: string | null;
+  locationName: string | null;
+  /** Also has access to other businesses (then only they can change their name/password) */
+  sharedAccount: boolean;
 }
 
 // ---------- Customers ----------
@@ -586,6 +694,8 @@ export const appointmentCreateSchema = z.object({
   spaceId: z.string().uuid().nullable().optional(),
   /** Classes: add the customer to this session (partySize = spots) */
   classSessionId: z.string().uuid().optional(),
+  /** Location (sucursal); inferred from the professional/table/space/class, else the main one */
+  locationId: z.string().uuid().optional(),
 }).refine((x) => Boolean(x.startsAt || x.classSessionId), { path: ['startsAt'], message: 'startsAt required' });
 export type AppointmentCreateInput = z.infer<typeof appointmentCreateSchema>;
 
@@ -637,6 +747,7 @@ export type PaymentLinkInput = z.infer<typeof paymentLinkSchema>;
 // ---------- Public booking ----------
 
 export const publicBookingSchema = z.object({
+  locationId: z.string().uuid().optional(),
   serviceId: z.string().uuid(),
   /** Omit for "any available" */
   professionalId: z.string().uuid().nullable().optional(),
@@ -657,6 +768,8 @@ export interface SessionUser {
   role: Role;
   /** Team member linked to this login (staff only see this person's bookings) */
   professionalId: string | null;
+  /** Location this login is limited to in the current business (null = all) */
+  locationId: string | null;
 }
 
 export interface TenantDto {
@@ -678,6 +791,8 @@ export interface TenantDto {
 export interface AuthResponse {
   token: string;
   user: SessionUser;
+  /** Every business this person can open */
+  businesses: BusinessSummary[];
   tenant: TenantDto;
 }
 
@@ -712,6 +827,7 @@ export interface ServiceDto {
 }
 
 export interface AppointmentDto {
+  locationId: string;
   id: string;
   customerId: string;
   customerName: string;
@@ -792,6 +908,7 @@ export const reportQuerySchema = z
     staffUserId: z.string().uuid().optional(),
     professionalId: z.string().uuid().optional(),
     spaceId: z.string().uuid().optional(),
+    locationId: z.string().uuid().optional(),
     source: z.enum(APPOINTMENT_SOURCES).optional(),
   })
   .refine((q) => q.from <= q.to, { message: 'from_after_to', path: ['from'] });
@@ -837,6 +954,8 @@ export interface ReportDto {
   byProfessional: { id: string; name: string; color: string; count: number; revenueCents: number }[];
   /** Completed bookings per space (rentals) */
   bySpace: { id: string; name: string; count: number; revenueCents: number }[];
+  /** Completed bookings per location (sucursal) */
+  byLocation: { id: string; name: string; count: number; revenueCents: number }[];
   byMethod: { method: PaymentMethod; count: number; revenueCents: number }[];
   bySource: { source: AppointmentSource; count: number }[];
   byWeekday: { weekday: number; count: number }[];
@@ -893,10 +1012,12 @@ export interface PublicBusinessDto {
   /** Restaurants: largest party bookable online */
   maxPartySize: number | null;
   /** Active professionals (empty when the business works as a single agenda) */
-  professionals: { id: string; name: string; color: string; serviceIds: string[] }[];
+  professionals: { id: string; name: string; color: string; serviceIds: string[]; locationId: string }[];
   /** Rentals: bookable spaces and allowed durations */
-  spaces: { id: string; name: string; description: string | null; pricePerHourCents: number }[];
+  spaces: { id: string; name: string; description: string | null; pricePerHourCents: number; locationId: string }[];
   rentalDurations: number[] | null;
+  /** Active locations; the booking page asks which one when there are several */
+  locations: PublicLocationDto[];
 }
 
 export interface PublicBookingResult {

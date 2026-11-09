@@ -1,20 +1,52 @@
 /**
  * Demo data: `pnpm db:seed`
- * Creates a nutrition clinic with services, customers and ~14 months of appointments/payments and two team members.
- * Also a restaurant (restaurante@agenda.mx / demo1234) and a set of clearly-labelled demo
- * businesses (slug `demo-*`) so the public directory map has content.
- * Also a barbershop with 3 barbers (barberia@agenda.mx), a yoga studio with classes (clases@agenda.mx)
- * and a padel club renting courts (padel@agenda.mx). Same password.
- * Login: demo@agenda.mx / demo1234
+ * One owner login (demo@agenda.mx / demo1234) for every demo business, switchable in the app:
+ * nutrition clinic, restaurant, barbershop with two locations, yoga studio and padel club.
+ * Role demos (same password): recepcion@ (admin), polanco@ (Polanco manager), memo@ and diego@
+ * (team members), pedro@ (nutrition staff). Plus clearly-labelled `demo-*` directory listings.
  */
-import { eq, like } from 'drizzle-orm';
+import { and, eq, inArray, like } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { closeDb, getDb } from './client.js';
-import { appointments, classSessions, customers, diningTables, payments, professionals, services, spaces, tenants, users } from './schema.js';
+import { appointments, classSessions, customers, diningTables, locations, memberships, payments, professionals, services, spaces, tenants, users } from './schema.js';
 
 const TZ = 'America/Mexico_City';
+
+type DemoUser = { tenantId: string; email: string; name: string; role: 'owner' | 'admin' | 'staff'; passwordHash: string; locationId?: string | null };
+
+/** One owner for every demo business, so a single session can show them all (business switcher). */
+export const DEMO_OWNER = { email: 'demo@agenda.mx', name: 'Jorge Chávez' };
+/** Old per-business owner logins, removed in favour of DEMO_OWNER. */
+const RETIRED_DEMO_LOGINS = ['barberia@agenda.mx', 'clases@agenda.mx', 'padel@agenda.mx', 'restaurante@agenda.mx'];
+let demoOwnerId = '';
+
+async function resetDemoOwner(db: ReturnType<typeof getDb>) {
+  await db.delete(users).where(inArray(users.email, [DEMO_OWNER.email, ...RETIRED_DEMO_LOGINS]));
+  const [row] = await db
+    .insert(users)
+    .values({ email: DEMO_OWNER.email, name: DEMO_OWNER.name, passwordHash: await hashPassword('demo1234') })
+    .returning();
+  demoOwnerId = row!.id;
+  return row!;
+}
+
+async function addOwner(db: ReturnType<typeof getDb>, tenantId: string) {
+  await db.insert(memberships).values({ tenantId, userId: demoOwnerId, role: 'owner' }).onConflictDoNothing();
+}
+
+/** Demo logins: recreated on every seed (an account can belong to several businesses through memberships). */
+async function addUsers(db: ReturnType<typeof getDb>, list: DemoUser[]) {
+  const out: (typeof users.$inferSelect)[] = [];
+  for (const u of list) {
+    await db.delete(users).where(eq(users.email, u.email));
+    const [row] = await db.insert(users).values({ email: u.email, name: u.name, passwordHash: u.passwordHash }).returning();
+    await db.insert(memberships).values({ tenantId: u.tenantId, userId: row!.id, role: u.role, locationId: u.locationId ?? null });
+    out.push(row!);
+  }
+  return out;
+}
 
 // Deterministic pseudo-random so the demo looks the same every time.
 let seed = 42;
@@ -28,6 +60,7 @@ async function main() {
     await db.delete(tenants).where(eq(tenants.id, existing.id));
     console.log('Removed previous demo tenant');
   }
+  const demoOwner = await resetDemoOwner(db);
 
   const [tenant] = await db
     .insert(tenants)
@@ -57,13 +90,13 @@ async function main() {
     .returning();
   const tenantId = tenant!.id;
 
-  const team = await db
-    .insert(users)
-    .values([
-      { tenantId, email: 'demo@agenda.mx', name: 'Dra. Ana López', role: 'owner', passwordHash: await hashPassword('demo1234') },
+  await addOwner(db, tenantId);
+  const team = [
+    demoOwner,
+    ...(await addUsers(db, [
       { tenantId, email: 'pedro@agenda.mx', name: 'Nut. Pedro Salas', role: 'staff', passwordHash: await hashPassword('demo1234') },
-    ])
-    .returning();
+    ])),
+  ];
   const staffIds = team.map((u) => u.id);
 
   const svc = await db
@@ -178,6 +211,7 @@ async function main() {
   await seedClasses();
   await seedPadel();
   await seedDirectory();
+  console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
 }
 
 /** Inserts in chunks to stay under Postgres' parameter limit. */
@@ -221,13 +255,7 @@ async function seedRestaurant() {
     })
     .returning();
   const tenantId = tenant!.id;
-  await db.insert(users).values({
-    tenantId,
-    email: 'restaurante@agenda.mx',
-    name: 'Chef Luis Ortega',
-    role: 'owner',
-    passwordHash: await hashPassword('demo1234'),
-  });
+  await addOwner(db, tenantId);
   const [svc] = await db.insert(services).values({ tenantId, name: 'Reservación', durationMin: 90, priceCents: 0 }).returning();
   const tables = await db
     .insert(diningTables)
@@ -307,7 +335,7 @@ async function seedRestaurant() {
       paidAt: a.endsAt,
     }));
   await insertChunked(payments, pays);
-  console.log(`Seeded restaurant with ${tables.length} tables, ${inserted.length} reservations — login restaurante@agenda.mx / demo1234`);
+  console.log(`Seeded restaurant with ${tables.length} tables, ${inserted.length} reservations`);
 }
 
 /** Shared helpers for the extra demos. */
@@ -364,7 +392,7 @@ async function seedBarbershop() {
       businessType: 'barbershop',
       phone: '+525544332211',
       timezone: TZ,
-      description: 'Tres barberos, agenda con quien prefieras. Cuenta de demostración.',
+      description: 'Dos sucursales, agenda con el barbero que prefieras. Cuenta de demostración.',
       address: 'Calle Pitágoras 900',
       neighborhood: 'Narvarte Poniente',
       city: 'Ciudad de México',
@@ -377,14 +405,29 @@ async function seedBarbershop() {
     .returning();
   const tenantId = tenant!.id;
   const pw = await hashPassword('demo1234');
-  const [owner, , memoUser] = await db
-    .insert(users)
-    .values([
-      { tenantId, email: 'barberia@agenda.mx', name: 'Toño Ramírez', role: 'owner', passwordHash: pw },
-      { tenantId, email: 'recepcion@agenda.mx', name: 'Karla (Recepción)', role: 'admin', passwordHash: pw },
-      { tenantId, email: 'memo@agenda.mx', name: 'Memo Hernández', role: 'staff', passwordHash: pw },
-    ])
+  // Two locations: the original one (Narvarte) and Polanco, with its own barber, hours and manager.
+  await db.update(locations).set({ name: 'Narvarte' }).where(and(eq(locations.tenantId, tenantId), eq(locations.isPrimary, true)));
+  const [polanco] = await db
+    .insert(locations)
+    .values({
+      tenantId,
+      name: 'Polanco',
+      phone: '+525544332299',
+      address: 'Av. Homero 1500',
+      neighborhood: 'Polanco',
+      city: 'Ciudad de México',
+      state: 'Ciudad de México',
+      lat: 19.4335,
+      lng: -99.1997,
+      hours: { days: [1, 2, 3, 4, 5, 6], open: '11:00', close: '21:00', slotMinutes: 30 },
+    })
     .returning();
+  await addOwner(db, tenantId);
+  const [, memoUser] = await addUsers(db, [
+    { tenantId, email: 'recepcion@agenda.mx', name: 'Karla (Recepción)', role: 'admin', passwordHash: pw },
+    { tenantId, email: 'memo@agenda.mx', name: 'Memo Hernández', role: 'staff', passwordHash: pw },
+    { tenantId, email: 'polanco@agenda.mx', name: 'Andrea (Gerente Polanco)', role: 'admin', passwordHash: pw, locationId: polanco!.id },
+  ]);
   const svc = await db
     .insert(services)
     .values([
@@ -397,10 +440,11 @@ async function seedBarbershop() {
   const pros = await db
     .insert(professionals)
     .values([
-      { tenantId, name: 'Toño', color: '#2563eb', serviceIds: [], userId: owner!.id },
+      { tenantId, name: 'Toño', color: '#2563eb', serviceIds: [] },
       { tenantId, name: 'Memo', color: '#ea580c', serviceIds: [], userId: memoUser!.id },
       // Luis doesn't do kids' cuts
       { tenantId, name: 'Luis', color: '#16a34a', serviceIds: [svc[0]!.id, svc[1]!.id, svc[2]!.id] },
+      { tenantId, name: 'Rafa', color: '#9333ea', serviceIds: [], locationId: polanco!.id },
     ])
     .returning();
   const custs = await demoCustomers(tenantId, 90, '55233', 200);
@@ -410,9 +454,10 @@ async function seedBarbershop() {
     const day = now.plus({ days: d }).startOf('day');
     if (day.weekday === 7) continue;
     for (const p of pros) {
-      // Each barber fills 40-75% of their day
-      let t = day.set({ hour: 10 });
-      const close = day.set({ hour: 20 });
+      // Each barber fills 40-75% of their day (Polanco opens 11-21)
+      const atPolanco = p.locationId === polanco!.id;
+      let t = day.set({ hour: atPolanco ? 11 : 10 });
+      const close = day.set({ hour: atPolanco ? 21 : 20 });
       while (t < close) {
         const service = p.name === 'Luis' ? pick(svc.slice(0, 3)) : pick([svc[0]!, svc[0]!, svc[1]!, svc[2]!, svc[3]!]);
         const end = t.plus({ minutes: service.durationMin });
@@ -423,6 +468,7 @@ async function seedBarbershop() {
             customerId: pick(custs).id,
             serviceId: service.id,
             professionalId: p.id,
+            locationId: p.locationId,
             startsAt: t.toJSDate(),
             endsAt: end.toJSDate(),
             status: d < 0 || t < now ? pastStatus() : rand() > 0.5 ? 'confirmed' : 'scheduled',
@@ -439,7 +485,7 @@ async function seedBarbershop() {
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
   const paid = await payCompleted(tenantId, inserted);
-  console.log(`Seeded barbershop with ${pros.length} barbers, ${inserted.length} appointments, ${paid} payments — login barberia@agenda.mx / demo1234`);
+  console.log(`Seeded barbershop with ${pros.length} barbers, ${inserted.length} appointments, ${paid} payments`);
 }
 
 /** Yoga studio: class types, two instructors, sessions with limited spots. */
@@ -467,13 +513,10 @@ async function seedClasses() {
     .returning();
   const tenantId = tenant!.id;
   const pw = await hashPassword('demo1234');
-  const [lauraUser, diegoUser] = await db
-    .insert(users)
-    .values([
-      { tenantId, email: 'clases@agenda.mx', name: 'Laura Méndez', role: 'owner', passwordHash: pw },
-      { tenantId, email: 'diego@agenda.mx', name: 'Diego Ruiz', role: 'staff', passwordHash: pw },
-    ])
-    .returning();
+  await addOwner(db, tenantId);
+  const [diegoUser] = await addUsers(db, [
+    { tenantId, email: 'diego@agenda.mx', name: 'Diego Ruiz', role: 'staff', passwordHash: pw },
+  ]);
   const [vinyasa, yin, pilates] = await db
     .insert(services)
     .values([
@@ -485,7 +528,7 @@ async function seedClasses() {
   const [laura, diego] = await db
     .insert(professionals)
     .values([
-      { tenantId, name: 'Laura', color: '#7c3aed', serviceIds: [], userId: lauraUser!.id },
+      { tenantId, name: 'Laura', color: '#7c3aed', serviceIds: [] },
       { tenantId, name: 'Diego', color: '#0f766e', serviceIds: [], userId: diegoUser!.id },
     ])
     .returning();
@@ -547,7 +590,7 @@ async function seedClasses() {
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
   const paid = await payCompleted(tenantId, inserted);
-  console.log(`Seeded yoga studio with ${sessions.length} classes, ${inserted.length} bookings, ${paid} payments — login clases@agenda.mx / demo1234`);
+  console.log(`Seeded yoga studio with ${sessions.length} classes, ${inserted.length} bookings, ${paid} payments`);
 }
 
 /** Padel club renting four courts by the hour. */
@@ -574,7 +617,7 @@ async function seedPadel() {
     })
     .returning();
   const tenantId = tenant!.id;
-  await db.insert(users).values({ tenantId, email: 'padel@agenda.mx', name: 'Rodrigo Salas', role: 'owner', passwordHash: await hashPassword('demo1234') });
+  await addOwner(db, tenantId);
   const [svc] = await db.insert(services).values({ tenantId, name: 'Renta de espacio', durationMin: 60, priceCents: 0 }).returning();
   const courts = await db
     .insert(spaces)
@@ -621,7 +664,7 @@ async function seedPadel() {
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
   const paid = await payCompleted(tenantId, inserted);
-  console.log(`Seeded padel club with ${courts.length} courts, ${inserted.length} bookings, ${paid} payments — login padel@agenda.mx / demo1234`);
+  console.log(`Seeded padel club with ${courts.length} courts, ${inserted.length} bookings, ${paid} payments`);
 }
 
 /** Demo listings for the public directory (clearly labelled "Demo"). */

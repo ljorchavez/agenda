@@ -13,6 +13,7 @@ import {
   rentalSettingsOf,
   reservationSettingsOf,
   spacePriceCents,
+  type BusinessHours,
   type Locale,
   type PublicBookingResult,
   type PublicBusinessDto,
@@ -36,6 +37,7 @@ import {
   spaceBusy,
 } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
+import { hoursFor, listLocations, resolveLocation, toPublicLocation } from '../lib/locations.js';
 import { manageToken } from '../lib/crypto.js';
 import { apiBaseUrl, createOnlinePayment, tenantMpToken } from '../lib/online-payments.js';
 
@@ -53,8 +55,7 @@ async function getTenantBySlug(slug: string): Promise<Tenant> {
 }
 
 /** Opening and closing instants for a local date, or null when closed. */
-function dayWindow(tenant: Tenant, date: string) {
-  const { hours } = tenant.settings;
+function dayWindow(tenant: Tenant, date: string, hours: BusinessHours = tenant.settings.hours) {
   const day = DateTime.fromISO(date, { zone: tenant.timezone });
   if (!day.isValid || !hours.days.includes(day.weekday)) return null;
   const [oh, om] = hours.open.split(':').map(Number) as [number, number];
@@ -70,7 +71,7 @@ publicRoutes.get('/public/:slug', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
   const db = getDb();
   const kind = businessKind(tenant.businessType);
-  const [list, pros, spaceList] = await Promise.all([
+  const [list, pros, spaceList, locs] = await Promise.all([
     db
       .select()
       .from(services)
@@ -78,7 +79,10 @@ publicRoutes.get('/public/:slug', async (c) => {
       .orderBy(asc(services.name)),
     kind === 'appointments' ? activeProfessionals(db, tenant.id) : Promise.resolve([]),
     kind === 'rentals' ? activeSpaces(db, tenant.id) : Promise.resolve([]),
+    listLocations(db, tenant.id),
   ]);
+  const activeLocs = locs.filter((l) => l.active);
+  const activeIds = new Set(activeLocs.map((l) => l.id));
   spaceList.sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
   const body: PublicBusinessDto = {
     name: tenant.name,
@@ -102,9 +106,14 @@ publicRoutes.get('/public/:slug', async (c) => {
     lat: tenant.lat,
     lng: tenant.lng,
     maxPartySize: kind === 'reservations' ? reservationSettingsOf(tenant.settings).maxPartySize : null,
-    professionals: pros.map((p) => ({ id: p.id, name: p.name, color: p.color, serviceIds: p.serviceIds ?? [] })),
-    spaces: spaceList.map((s) => ({ id: s.id, name: s.name, description: s.description, pricePerHourCents: s.pricePerHourCents })),
+    professionals: pros
+      .filter((p) => activeIds.has(p.locationId))
+      .map((p) => ({ id: p.id, name: p.name, color: p.color, serviceIds: p.serviceIds ?? [], locationId: p.locationId })),
+    spaces: spaceList
+      .filter((x) => activeIds.has(x.locationId))
+      .map((x) => ({ id: x.id, name: x.name, description: x.description, pricePerHourCents: x.pricePerHourCents, locationId: x.locationId })),
     rentalDurations: kind === 'rentals' ? rentalSettingsOf(tenant.settings).durations : null,
+    locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
   };
   return c.json(body);
 });
@@ -118,18 +127,19 @@ export async function computeSlots(
   durationMin: number,
   date: string,
   now: DateTime = DateTime.now(),
-  opts: { excludeId?: string; serviceId?: string; professionalId?: string | null } = {},
+  opts: { excludeId?: string; serviceId?: string; professionalId?: string | null; locationId?: string } = {},
 ): Promise<string[]> {
-  const w = dayWindow(tenant, date);
-  if (!w) return [];
   const db = getDb();
-  const pros = await activeProfessionals(db, tenant.id);
+  const loc = await resolveLocation(db, tenant.id, opts.locationId);
+  const w = dayWindow(tenant, date, hoursFor(tenant, loc));
+  if (!w) return [];
+  const pros = await activeProfessionals(db, tenant.id, loc.id);
 
   if (pros.length) {
     let eligible = eligibleFor(pros, opts.serviceId);
     if (opts.professionalId) eligible = eligible.filter((p) => p.id === opts.professionalId);
     if (!eligible.length) return [];
-    const busy = await professionalBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId);
+    const busy = await professionalBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId, loc.id);
     const slots: string[] = [];
     for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) {
       if (t <= now) continue;
@@ -145,6 +155,7 @@ export async function computeSlots(
     .where(
       and(
         eq(appointments.tenantId, tenant.id),
+        eq(appointments.locationId, loc.id),
         inArray(appointments.status, ['scheduled', 'confirmed']),
         lt(appointments.startsAt, w.close.toJSDate()),
         gt(appointments.endsAt, w.open.toJSDate()),
@@ -168,12 +179,14 @@ export async function computeTableSlots(
   partySize: number,
   date: string,
   now: DateTime = DateTime.now(),
-  opts: { excludeId?: string; durationMin?: number } = {},
+  opts: { excludeId?: string; durationMin?: number; locationId?: string } = {},
 ): Promise<string[]> {
-  const w = dayWindow(tenant, date);
+  const db = getDb();
+  const loc = await resolveLocation(db, tenant.id, opts.locationId);
+  const w = dayWindow(tenant, date, hoursFor(tenant, loc));
   if (!w) return [];
   const durationMin = opts.durationMin ?? reservationSettingsOf(tenant.settings).durationMin;
-  const { tables, busy } = await loadTableState(getDb(), tenant.id, partySize, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId);
+  const { tables, busy } = await loadTableState(db, tenant.id, partySize, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId, loc.id);
   if (!tables.length) return [];
   const slots: string[] = [];
   for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) {
@@ -189,12 +202,13 @@ export async function computeSpaceSlots(
   durationMin: number,
   date: string,
   now: DateTime = DateTime.now(),
-  opts: { excludeId?: string; spaceId?: string | null } = {},
+  opts: { excludeId?: string; spaceId?: string | null; locationId?: string } = {},
 ): Promise<string[]> {
-  const w = dayWindow(tenant, date);
-  if (!w) return [];
   const db = getDb();
-  const list = await activeSpaces(db, tenant.id);
+  const loc = await resolveLocation(db, tenant.id, opts.locationId);
+  const w = dayWindow(tenant, date, hoursFor(tenant, loc));
+  if (!w) return [];
+  const list = await activeSpaces(db, tenant.id, loc.id);
   if (!list.length || (opts.spaceId && !list.some((s) => s.id === opts.spaceId))) return [];
   const busy = await spaceBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId);
   const slots: string[] = [];
@@ -210,7 +224,7 @@ export async function computeClassSlots(
   tenant: Tenant,
   date: string,
   now: DateTime = DateTime.now(),
-  opts: { serviceId?: string; spots?: number; excludeSessionId?: string } = {},
+  opts: { serviceId?: string; spots?: number; excludeSessionId?: string; locationId?: string } = {},
 ): Promise<{ sessionId: string; startsAt: string }[]> {
   const day = DateTime.fromISO(date, { zone: tenant.timezone });
   if (!day.isValid) return [];
@@ -220,7 +234,8 @@ export async function computeClassSlots(
     tenant.id,
     sql`cs.status = 'scheduled' and cs.starts_at > ${from.toUTC().toISO()} and cs.starts_at < ${day.endOf('day').toUTC().toISO()}
         ${opts.serviceId ? sql`and cs.service_id = ${opts.serviceId}` : sql``}
-        ${opts.excludeSessionId ? sql`and cs.id <> ${opts.excludeSessionId}` : sql``}`,
+        ${opts.excludeSessionId ? sql`and cs.id <> ${opts.excludeSessionId}` : sql``}
+        ${opts.locationId ? sql`and cs.location_id = ${opts.locationId}` : sql``}`,
   );
   return list
     .filter((s) => s.capacity - s.booked >= (opts.spots ?? 1))
@@ -234,23 +249,34 @@ publicRoutes.get('/public/:slug/availability', async (c) => {
   const date = c.req.query('date');
   const kind = businessKind(tenant.businessType);
   if (!date) throw new AppError(400, 'missing_params', 'date required');
+  // A chosen professional or space decides the location when none is given.
+  let locationId = c.req.query('locationId') || undefined;
+  const proQ = c.req.query('professionalId');
+  const spaceQ = c.req.query('spaceId');
+  if (!locationId && (proQ || spaceQ)) {
+    const db = getDb();
+    const row = proQ
+      ? (await activeProfessionals(db, tenant.id)).find((p) => p.id === proQ)
+      : (await activeSpaces(db, tenant.id)).find((x) => x.id === spaceQ);
+    locationId = row?.locationId;
+  }
 
   if (kind === 'reservations') {
     const partySize = Number(c.req.query('partySize'));
     const max = reservationSettingsOf(tenant.settings).maxPartySize;
     if (!Number.isInteger(partySize) || partySize < 1) throw new AppError(400, 'missing_params', 'partySize and date required');
     if (partySize > max) return c.json({ slots: [] });
-    return c.json({ slots: await computeTableSlots(tenant, partySize, date) });
+    return c.json({ slots: await computeTableSlots(tenant, partySize, date, DateTime.now(), { locationId }) });
   }
   if (kind === 'rentals') {
     const durationMin = Number(c.req.query('durationMin'));
     if (!rentalSettingsOf(tenant.settings).durations.includes(durationMin)) {
       throw new AppError(400, 'invalid_duration', 'durationMin must be one of the allowed durations');
     }
-    return c.json({ slots: await computeSpaceSlots(tenant, durationMin, date, DateTime.now(), { spaceId: c.req.query('spaceId') || null }) });
+    return c.json({ slots: await computeSpaceSlots(tenant, durationMin, date, DateTime.now(), { spaceId: c.req.query('spaceId') || null, locationId }) });
   }
   if (kind === 'classes') {
-    const list = await computeClassSlots(tenant, date, DateTime.now(), { serviceId: c.req.query('serviceId') || undefined });
+    const list = await computeClassSlots(tenant, date, DateTime.now(), { serviceId: c.req.query('serviceId') || undefined, locationId });
     return c.json({ slots: list.map((s) => s.startsAt) });
   }
 
@@ -264,6 +290,7 @@ publicRoutes.get('/public/:slug/availability', async (c) => {
     slots: await computeSlots(tenant, service.durationMin, date, DateTime.now(), {
       serviceId,
       professionalId: c.req.query('professionalId') || null,
+      locationId,
     }),
   });
 });
@@ -281,7 +308,9 @@ publicRoutes.get('/public/:slug/classes', async (c) => {
   const list = await querySessions(
     getDb(),
     tenant.id,
-    sql`cs.status = 'scheduled' and cs.starts_at > ${from.toUTC().toISO()} and cs.starts_at < ${to.toUTC().toISO()}`,
+    sql`cs.status = 'scheduled' and cs.starts_at > ${from.toUTC().toISO()} and cs.starts_at < ${to.toUTC().toISO()}
+        ${c.req.query('locationId') ? sql`and cs.location_id = ${c.req.query('locationId')!}` : sql``}
+        and exists (select 1 from locations l where l.id = cs.location_id and l.active)`,
     500,
   );
   return c.json(list.map(toPublicSession));
@@ -368,8 +397,9 @@ async function bookTable(tenant: Tenant, raw: unknown): Promise<PublicBookingRes
   if (input.partySize > rs.maxPartySize) {
     throw new AppError(422, 'party_too_large', `Max ${rs.maxPartySize} people online`);
   }
+  const loc = await resolveLocation(db, tenant.id, input.locationId);
   const start = DateTime.fromISO(input.startsAt).setZone(tenant.timezone);
-  if (!sameInstant(await computeTableSlots(tenant, input.partySize, start.toISODate()!), start)) {
+  if (!sameInstant(await computeTableSlots(tenant, input.partySize, start.toISODate()!, DateTime.now(), { locationId: loc.id }), start)) {
     throw conflict('slot_unavailable', 'This time is no longer available');
   }
   const startsAt = start.toJSDate();
@@ -380,7 +410,7 @@ async function bookTable(tenant: Tenant, raw: unknown): Promise<PublicBookingRes
     await lockTenant(tx, tenant.id);
     let table;
     try {
-      table = await assignTable(tx, tenant.id, input.partySize, startsAt, endsAt);
+      table = await assignTable(tx, tenant.id, input.partySize, startsAt, endsAt, { locationId: loc.id });
     } catch {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
@@ -398,6 +428,7 @@ async function bookTable(tenant: Tenant, raw: unknown): Promise<PublicBookingRes
         notes: input.notes ?? null,
         partySize: input.partySize,
         tableId: table.id,
+        locationId: loc.id,
       })
       .returning();
     return row!;
@@ -434,6 +465,7 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         endsAt: session.endsAt,
         partySize: input.spots,
         priceCents: service.priceCents * input.spots,
+        locationId: session.locationId,
         source: 'online',
         notes: input.notes ?? null,
       })
@@ -454,7 +486,11 @@ async function bookSpace(requestUrl: string, tenant: Tenant, raw: unknown): Prom
   }
   const db = getDb();
   const start = DateTime.fromISO(input.startsAt).setZone(tenant.timezone);
-  const slots = await computeSpaceSlots(tenant, input.durationMin, start.toISODate()!, DateTime.now(), { spaceId: input.spaceId });
+  // A chosen space decides the location.
+  const chosen = input.spaceId ? (await activeSpaces(db, tenant.id)).find((x) => x.id === input.spaceId) : null;
+  if (input.spaceId && !chosen) throw notFound('space');
+  const loc = await resolveLocation(db, tenant.id, chosen?.locationId ?? input.locationId);
+  const slots = await computeSpaceSlots(tenant, input.durationMin, start.toISODate()!, DateTime.now(), { spaceId: input.spaceId, locationId: loc.id });
   if (!sameInstant(slots, start)) throw conflict('slot_unavailable', 'This time is no longer available');
   const startsAt = start.toJSDate();
   const endsAt = start.plus({ minutes: input.durationMin }).toJSDate();
@@ -464,7 +500,7 @@ async function bookSpace(requestUrl: string, tenant: Tenant, raw: unknown): Prom
     await lockTenant(tx, tenant.id);
     let space;
     try {
-      space = await assignSpace(tx, tenant.id, startsAt, endsAt, { spaceId: input.spaceId });
+      space = await assignSpace(tx, tenant.id, startsAt, endsAt, { spaceId: input.spaceId, locationId: loc.id });
     } catch {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
@@ -476,6 +512,7 @@ async function bookSpace(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         customerId: customer.id,
         serviceId: service.id,
         spaceId: space.id,
+        locationId: loc.id,
         startsAt,
         endsAt,
         priceCents: spacePriceCents(space.pricePerHourCents, input.durationMin),
@@ -496,11 +533,16 @@ async function bookService(requestUrl: string, tenant: Tenant, raw: unknown): Pr
     where: and(eq(services.id, input.serviceId), eq(services.tenantId, tenant.id), eq(services.active, true)),
   });
   if (!service) throw notFound('service');
+  // A chosen professional decides the location.
+  const chosen = input.professionalId ? (await activeProfessionals(db, tenant.id)).find((p) => p.id === input.professionalId) : null;
+  if (input.professionalId && !chosen) throw notFound('professional');
+  const loc = await resolveLocation(db, tenant.id, chosen?.locationId ?? input.locationId);
 
   const start = DateTime.fromISO(input.startsAt).setZone(tenant.timezone);
   const slots = await computeSlots(tenant, service.durationMin, start.toISODate()!, DateTime.now(), {
     serviceId: service.id,
     professionalId: input.professionalId,
+    locationId: loc.id,
   });
   if (!sameInstant(slots, start)) throw conflict('slot_unavailable', 'This time is no longer available');
   const startsAt = start.toJSDate();
@@ -510,13 +552,13 @@ async function bookService(requestUrl: string, tenant: Tenant, raw: unknown): Pr
     // Lock the tenant row so two simultaneous bookings can't take the same slot.
     await lockTenant(tx, tenant.id);
     let pro = null;
-    if ((await activeProfessionals(tx, tenant.id)).length) {
+    if ((await activeProfessionals(tx, tenant.id, loc.id)).length) {
       try {
-        pro = await assignProfessional(tx, tenant.id, service.id, startsAt, endsAt, { professionalId: input.professionalId });
+        pro = await assignProfessional(tx, tenant.id, service.id, startsAt, endsAt, { professionalId: input.professionalId, locationId: loc.id });
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
-    } else if (await hasOverlap(tx, tenant.id, startsAt, endsAt)) {
+    } else if (await hasOverlap(tx, tenant.id, startsAt, endsAt, { locationId: loc.id })) {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
     const customer = await findOrCreateCustomer(tx, tenant.id, input);
@@ -527,6 +569,7 @@ async function bookService(requestUrl: string, tenant: Tenant, raw: unknown): Pr
         customerId: customer.id,
         serviceId: service.id,
         professionalId: pro?.id ?? null,
+        locationId: loc.id,
         startsAt,
         endsAt,
         priceCents: service.priceCents,

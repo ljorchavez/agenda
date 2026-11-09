@@ -275,7 +275,8 @@ d('API (integration)', () => {
   it('self-service link: view, reschedule, deadline and cancel', async () => {
     const pub = await call('GET', '/public/negocio-a');
     const svc = pub.body.services[0];
-    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 5 });
+    // Close enough that the moved booking stays within the 7-day notice used below.
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 });
     while (day.weekday === 7) day = day.plus({ days: 1 });
     const avail = await call('GET', `/public/negocio-a/availability?serviceId=${svc.id}&date=${day.toISODate()}`);
     const booking = await call('POST', '/public/negocio-a/bookings', { serviceId: svc.id, startsAt: avail.body.slots[4], name: 'Ana Reagenda', phone: '5543214321' });
@@ -724,5 +725,115 @@ d('API (integration)', () => {
     await call('PATCH', '/tenant', { profile: { ...r.body.profile, directoryListed: false } }, a.token);
     dir = await call('GET', '/public-directory');
     expect(dir.body.entries.find((e: { slug: string }) => e.slug === 'negocio-a')).toBeUndefined();
+  });
+  it('one login, several businesses; locations with their own team, hours and managers', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Multi Uno', businessType: 'barbershop', name: 'Jorge', email: 'multi@test.mx', password: 'password123',
+    })).body as AuthResponse;
+    expect(reg.businesses).toHaveLength(1);
+    // A second business for the same login (billed separately)
+    const second = await call('POST', '/businesses', { businessName: 'Multi Dos', businessType: 'restaurant' }, reg.token);
+    expect(second.status).toBe(201);
+    expect(second.body.tenant.kind).toBe('reservations');
+    expect(second.body.businesses.map((x: { name: string }) => x.name).sort()).toEqual(['Multi Dos', 'Multi Uno']);
+    expect((await call('GET', '/tables', undefined, second.body.token)).body.length).toBeGreaterThan(0);
+    // Switch back and forth; other people's businesses are off limits
+    const back = await call('POST', '/auth/switch', { tenantId: reg.tenant.id }, second.body.token);
+    expect(back.status).toBe(200);
+    expect(back.body.tenant.id).toBe(reg.tenant.id);
+    expect((await call('POST', '/auth/switch', { tenantId: b.tenant.id }, reg.token)).status).toBe(404);
+    // Login opens the last business used
+    const login = (await call('POST', '/auth/login', { email: 'multi@test.mx', password: 'password123' })).body;
+    expect(login.tenant.id).toBe(reg.tenant.id);
+    const tok = back.body.token as string;
+
+    // Locations: one included, extras counted for billing
+    const locs0 = (await call('GET', '/locations', undefined, tok)).body;
+    expect(locs0.locations).toHaveLength(1);
+    expect(locs0.locations[0].isPrimary).toBe(true);
+    expect(locs0.plan).toMatchObject({ includedLocations: 1, activeLocations: 1, extraLocations: 0 });
+    const main = locs0.locations[0];
+    const created = await call('POST', '/locations', {
+      name: 'Polanco', address: 'Homero 1', city: 'CDMX', state: 'CDMX', lat: 19.43, lng: -99.2,
+      hours: { days: [1, 2, 3, 4, 5, 6, 7], open: '15:00', close: '17:00', slotMinutes: 30 },
+    }, tok);
+    expect(created.status).toBe(201);
+    expect(created.body.plan.extraLocations).toBe(1);
+    const pol = created.body.location;
+    expect((await call('PUT', `/locations/${main.id}`, { name: main.name, active: false }, tok)).body.error).toBe('primary_location');
+    // Another business can't use this location
+    expect((await call('POST', '/professionals', { name: 'Intruso', locationId: pol.id }, b.token)).status).toBe(404);
+
+    const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const pMain = (await call('POST', '/professionals', { name: 'Centro Uno' }, tok)).body;
+    const pPol = (await call('POST', '/professionals', { name: 'Polanco Uno', locationId: pol.id }, tok)).body;
+    expect(pMain.locationId).toBe(main.id);
+    expect(pPol.locationId).toBe(pol.id);
+
+    // Public page lists both locations; availability follows each location's hours and team
+    await call('PATCH', '/tenant', { settings: { ...reg.tenant.settings, onlineBookingEnabled: true } }, tok);
+    const pub = (await call('GET', `/public/${reg.tenant.slug}`)).body;
+    expect(pub.locations.map((l: { name: string }) => l.name).sort()).toEqual(['Polanco', 'Principal']);
+    expect(pub.professionals.find((p: { id: string }) => p.id === pPol.id).locationId).toBe(pol.id);
+    const day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 }).toISODate()!;
+    const slots = (await call('GET', `/public/${reg.tenant.slug}/availability?serviceId=${svc.id}&date=${day}&locationId=${pol.id}`)).body.slots as string[];
+    expect(slots.length).toBe(4);
+    expect(slots.every((x) => { const h = DateTime.fromISO(x).setZone('America/Mexico_City').hour; return h >= 15 && h < 17; })).toBe(true);
+    const booked = await call('POST', `/public/${reg.tenant.slug}/bookings`, {
+      serviceId: svc.id, startsAt: slots[0], name: 'Cliente Polanco', phone: '5561110001', locationId: pol.id,
+    });
+    expect(booked.status).toBe(201);
+    expect(booked.body.resourceName).toBe('Polanco Uno');
+
+    // Staff-side booking in the main location
+    const cust = (await call('POST', '/customers', { name: 'Cliente Centro', phone: '5561110002' }, tok)).body;
+    const at = DateTime.now().plus({ days: 2 }).set({ hour: 11, minute: 0, second: 0, millisecond: 0 });
+    const apMain = (await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: at.toISO() }, tok)).body;
+    expect(apMain.locationId).toBe(main.id);
+    expect(apMain.professionalId).toBe(pMain.id);
+
+    // A manager limited to Polanco (gerente de sucursal)
+    const ger = await call('POST', '/users', { name: 'Gerente', email: 'gerente@test.mx', password: 'password123', role: 'admin', locationId: pol.id }, tok);
+    expect(ger.body).toMatchObject({ role: 'admin', locationId: pol.id, locationName: 'Polanco' });
+    const gTok = (await call('POST', '/auth/login', { email: 'gerente@test.mx', password: 'password123' })).body.token;
+    const range = `from=${encodeURIComponent(at.minus({ days: 3 }).toISO()!)}&to=${encodeURIComponent(at.plus({ days: 3 }).toISO()!)}`;
+    const gList = (await call('GET', `/appointments?${range}`, undefined, gTok)).body;
+    expect(gList.length).toBe(1);
+    expect(gList[0].locationId).toBe(pol.id);
+    expect((await call('GET', `/appointments?${range}`, undefined, tok)).body.length).toBe(2);
+    expect((await call('GET', `/appointments/${apMain.id}`, undefined, gTok)).status).toBe(404);
+    expect((await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, professionalId: pMain.id, startsAt: at.plus({ hours: 2 }).toISO() }, gTok)).status).toBe(403);
+    const gBook = await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: at.set({ hour: 16 }).toISO() }, gTok);
+    expect(gBook.status).toBe(201);
+    expect(gBook.body.locationId).toBe(pol.id);
+    expect((await call('PATCH', '/tenant', { name: 'Hackeado' }, gTok)).status).toBe(403);
+    expect((await call('POST', '/locations', { name: 'Otra' }, gTok)).status).toBe(403);
+    expect((await call('POST', '/services', { name: 'X', durationMin: 30, priceCents: 1 }, gTok)).status).toBe(403);
+    expect((await call('PUT', `/professionals/${pMain.id}`, { name: 'Robado' }, gTok)).status).toBe(403);
+    expect((await call('POST', '/users', { name: 'Otro', email: 'otro@test.mx', password: 'password123', role: 'staff', locationId: main.id }, gTok)).status).toBe(403);
+    const gUsers = (await call('GET', '/users', undefined, gTok)).body as { email: string }[];
+    expect(gUsers.map((u) => u.email)).toEqual(['gerente@test.mx']);
+    // Reports split by location; the gerente only sees Polanco
+    await call('PATCH', `/appointments/${apMain.id}`, { status: 'completed' }, tok);
+    await call('PATCH', `/appointments/${gBook.body.id}`, { status: 'completed' }, tok);
+    const from = DateTime.now().toISODate()!;
+    const to = at.plus({ days: 1 }).toISODate()!;
+    const rep = (await call('GET', `/reports?from=${from}&to=${to}`, undefined, tok)).body;
+    expect(rep.byLocation.map((x: { name: string }) => x.name).sort()).toEqual(['Polanco', 'Principal']);
+    const gRep = (await call('GET', `/reports?from=${from}&to=${to}`, undefined, gTok)).body;
+    expect(gRep.byLocation.map((x: { name: string }) => x.name)).toEqual(['Polanco']);
+    // Can't close a location with upcoming bookings
+    expect((await call('PUT', `/locations/${pol.id}`, { name: 'Polanco', active: false }, tok)).body.error).toBe('location_has_bookings');
+
+    // Someone who already has an account elsewhere joins with their own password
+    const shared = await call('POST', '/users', { name: 'Owner B', email: 'owner-b@test.mx', password: 'whatever123', role: 'staff' }, tok);
+    expect(shared.status).toBe(201);
+    expect(shared.body.sharedAccount).toBe(true);
+    expect((await call('PATCH', `/users/${shared.body.id}`, { password: 'hijacked123' }, tok)).body.error).toBe('shared_account');
+    const bLogin = (await call('POST', '/auth/login', { email: 'owner-b@test.mx', password: 'password123' })).body;
+    expect(bLogin.businesses).toHaveLength(2);
+    // Removing them here keeps their account and their own business
+    expect((await call('DELETE', `/users/${shared.body.id}`, undefined, tok)).status).toBe(204);
+    expect((await call('POST', '/auth/login', { email: 'owner-b@test.mx', password: 'password123' })).body.businesses).toHaveLength(1);
   });
 });

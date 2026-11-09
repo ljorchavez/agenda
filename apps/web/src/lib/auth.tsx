@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AuthResponse, SessionUser, TenantDto } from '@agenda/shared';
+import type { AuthResponse, BusinessSummary, SessionUser, TenantDto } from '@agenda/shared';
 import { api, tokenStore } from './api';
 
 interface AuthState {
@@ -10,6 +10,10 @@ interface AuthState {
   setSession: (res: AuthResponse) => void;
   setTenant: (t: TenantDto) => void;
   setUser: (u: SessionUser) => void;
+  /** Businesses this login can open */
+  businesses: BusinessSummary[];
+  /** Opens another business (new token; cached data is dropped) */
+  switchBusiness: (tenantId: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -20,13 +24,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [tenant, setTenant] = useState<TenantDto | null>(null);
   const [loading, setLoading] = useState(Boolean(tokenStore.get()));
+  const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
 
   useEffect(() => {
     if (!tokenStore.get()) return;
-    api<{ user: SessionUser; tenant: TenantDto }>('/auth/me')
+    api<{ user: SessionUser; tenant: TenantDto; businesses: BusinessSummary[] }>('/auth/me')
       .then((r) => {
         setUser(r.user);
         setTenant(r.tenant);
+        setBusinesses(r.businesses ?? []);
       })
       .catch(() => tokenStore.clear())
       .finally(() => setLoading(false));
@@ -34,19 +40,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setSession = useCallback((res: AuthResponse) => {
     tokenStore.set(res.token);
+    qc.clear();
     setUser(res.user);
     setTenant(res.tenant);
-  }, []);
+    setBusinesses(res.businesses ?? []);
+  }, [qc]);
+
+  const switchBusiness = useCallback(async (tenantId: string) => {
+    setSession(await api<AuthResponse>('/auth/switch', { method: 'POST', body: { tenantId } }));
+  }, [setSession]);
 
   const logout = useCallback(() => {
     tokenStore.clear();
     setUser(null);
     setTenant(null);
+    setBusinesses([]);
     qc.clear();
   }, [qc]);
 
   return (
-    <AuthContext.Provider value={{ user, tenant, loading, setSession, setTenant, setUser, logout }}>
+    <AuthContext.Provider value={{ user, tenant, loading, setSession, setTenant, setUser, businesses, switchBusiness, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -70,5 +83,15 @@ export function useAccess() {
   const perPerson = tenant?.kind === 'appointments' || tenant?.kind === 'classes';
   const professionalId = user?.professionalId ?? null;
   const scoped = !manager && (perPerson || Boolean(professionalId));
-  return { manager, scoped, professionalId, unlinked: scoped && !professionalId && perPerson };
+  /** Location this login is limited to (gerente de sucursal, host), or null */
+  const locationId = user?.role === 'owner' ? null : user?.locationId ?? null;
+  return {
+    manager,
+    /** Can change business-wide things: settings, services, locations */
+    businessManager: manager && !locationId,
+    scoped,
+    professionalId,
+    locationId,
+    unlinked: scoped && !professionalId && perPerson,
+  };
 }

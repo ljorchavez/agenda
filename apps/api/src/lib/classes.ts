@@ -21,6 +21,7 @@ type Row = {
   status: string;
   notes: string | null;
   booked: number | string;
+  location_id: string;
 };
 
 /** Sessions with their class type, instructor and spots taken, scoped by tenant. */
@@ -28,7 +29,7 @@ export async function querySessions(db: Pick<Db, 'execute'>, tenantId: string, w
   const res = await db.execute<Row>(sql`
     select cs.id, cs.service_id, s.name as service_name, s.price_cents,
            cs.professional_id, p.name as professional_name, p.color as professional_color,
-           cs.starts_at, cs.ends_at, cs.capacity, cs.status, cs.notes,
+           cs.starts_at, cs.ends_at, cs.capacity, cs.status, cs.notes, cs.location_id,
            coalesce((select sum(coalesce(a.party_size, 1)) from appointments a
                      where a.class_session_id = cs.id and a.tenant_id = cs.tenant_id
                        and a.status in ${HOLDS_SPOT}), 0) as booked
@@ -51,11 +52,13 @@ export async function querySessions(db: Pick<Db, 'execute'>, tenantId: string, w
     status: r.status as ClassSessionDto['status'],
     priceCents: Number(r.price_cents),
     notes: r.notes,
+    locationId: r.location_id,
   }));
 }
 
 export const toPublicSession = (s: ClassSessionDto): PublicClassSessionDto => ({
   id: s.id,
+  locationId: s.locationId,
   serviceId: s.serviceId,
   serviceName: s.serviceName,
   professionalName: s.professionalName,
@@ -79,7 +82,7 @@ export async function lockSession(
   const res = await tx.execute<{
     id: string; tenant_id: string; service_id: string; professional_id: string | null;
     starts_at: Date | string; ends_at: Date | string; capacity: number; status: string; notes: string | null;
-    created_at: Date | string; updated_at: Date | string;
+    created_at: Date | string; updated_at: Date | string; location_id: string;
   }>(sql`select * from class_sessions where id = ${id} and tenant_id = ${tenantId} for update`);
   const r = res.rows[0];
   if (!r) throw notFound('class_session');
@@ -98,6 +101,7 @@ export async function lockSession(
       capacity: Number(r.capacity),
       status: r.status,
       notes: r.notes,
+      locationId: r.location_id,
       createdAt: new Date(r.created_at),
       updatedAt: new Date(r.updated_at),
     },

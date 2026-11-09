@@ -14,15 +14,17 @@ import {
   type Role,
   type SessionUser,
   type TenantDto,
+  type LocationDto,
   type TenantSettings,
   type UserDto,
 } from '@agenda/shared';
 import { PaymentSettingsSection } from '../components/PaymentSettings';
 import { PublicProfileSection } from '../components/PublicProfile';
+import { LocationSelect, LocationsSection } from '../components/Locations';
 import { ErrorText, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
-import { useProfessionals } from '../lib/queries';
+import { useAccess, useAuth } from '../lib/auth';
+import { useMyLocations, useProfessionals } from '../lib/queries';
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -131,7 +133,9 @@ function BusinessSettings() {
   const { t, i18n } = useTranslation();
   const { tenant, user, setTenant } = useAuth();
   // Admins edit the business like the owner; payouts (bank / Mercado Pago) stay with the owner.
-  const canEdit = isManager(user?.role);
+  // Managers limited to one location (gerentes) only see business settings.
+  const { businessManager } = useAccess();
+  const canEdit = isManager(user?.role) && businessManager;
   const isOwner = user?.role === 'owner';
   const [name, setName] = useState(tenant?.name ?? '');
   const [businessType, setBusinessType] = useState(tenant?.businessType ?? 'other');
@@ -366,12 +370,13 @@ function BusinessSettings() {
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <AccountSection />
       </div>
+      <LocationsSection editable={businessManager} />
       <UsersSection hasTeam={hasTeam} kind={tenant!.kind} />
     </>
   );
 }
 
-type UserForm = { name: string; email: string; password: string; role: Role; professionalId: string };
+type UserForm = { name: string; email: string; password: string; role: Role; professionalId: string; locationId: string };
 
 /** Logins with access to the business, their role and which team member's agenda they work. */
 function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
@@ -382,6 +387,8 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<UserDto[]>('/users') });
   const pros = useProfessionals(hasTeam);
   const [editing, setEditing] = useState<UserDto | 'new' | null>(null);
+  const { locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
   const memberWord = kind === 'classes' ? t('settings.linkInstructor') : t('settings.linkMember');
   return (
     <section className="card mt-6">
@@ -401,6 +408,9 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
                 <span className="block truncate text-slate-500">{u.email}</span>
               </span>
               <span className="flex items-center gap-2">
+                {locs.anyMulti && u.role !== 'owner' && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{u.locationName ?? t('locations.all')}</span>
+                )}
                 {hasTeam && u.professionalName && (
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{memberWord}: {u.professionalName}</span>
                 )}
@@ -433,6 +443,8 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
           memberWord={memberWord}
           pros={pros.data ?? []}
           users={users.data ?? []}
+          locations={locs.anyMulti ? locs.list : []}
+          ownLocation={ownLocation}
           onClose={() => setEditing(null)}
           onDone={() => {
             setEditing(null);
@@ -452,6 +464,8 @@ function UserModal({
   memberWord,
   pros,
   users,
+  locations,
+  ownLocation,
   onClose,
   onDone,
 }: {
@@ -459,35 +473,42 @@ function UserModal({
   roles: Role[];
   hasTeam: boolean;
   memberWord: string;
-  pros: { id: string; name: string; active: boolean }[];
+  pros: { id: string; name: string; active: boolean; locationId: string }[];
   users: UserDto[];
+  locations: LocationDto[];
+  ownLocation: string | null;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const self = target?.id === user!.id;
+  // People who also use other businesses manage their own name and password.
+  const lockedAccount = Boolean(target?.sharedAccount && !self);
   const [form, setForm] = useState<UserForm>({
     name: target?.name ?? '',
     email: target?.email ?? '',
     password: '',
     role: target?.role ?? 'staff',
     professionalId: target?.professionalId ?? '',
+    locationId: target?.locationId ?? ownLocation ?? '',
   });
   const takenBy = new Map(users.filter((u) => u.professionalId && u.id !== target?.id).map((u) => [u.professionalId!, u.name]));
   const save = useMutation({
     mutationFn: () => {
       const professionalId = hasTeam ? form.professionalId || null : undefined;
+      const locationId = locations.length && form.role !== 'owner' ? form.locationId || null : undefined;
       if (!target) {
-        return api('/users', { method: 'POST', body: { name: form.name, email: form.email, password: form.password, role: form.role, professionalId } });
+        return api('/users', { method: 'POST', body: { name: form.name, email: form.email, password: form.password, role: form.role, professionalId, locationId } });
       }
       return api(`/users/${target.id}`, {
         method: 'PATCH',
         body: {
-          name: form.name,
+          ...(lockedAccount ? {} : { name: form.name }),
           ...(self ? {} : { role: form.role }),
           ...(form.password ? { password: form.password } : {}),
           professionalId,
+          ...(self ? {} : { locationId }),
         },
       });
     },
@@ -503,7 +524,7 @@ function UserModal({
       <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
         <div>
           <label className="label" htmlFor="u-name">{t('auth.name')}</label>
-          <input id="u-name" required minLength={2} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input id="u-name" required minLength={2} className="input" disabled={lockedAccount} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
         {!target && (
           <div>
@@ -511,6 +532,7 @@ function UserModal({
             <input id="u-email" required type="email" className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           </div>
         )}
+        {!lockedAccount && (
         <div>
           <label className="label" htmlFor="u-pass">{target ? t('settings.resetPassword') : t('auth.password')}</label>
           <input
@@ -524,7 +546,9 @@ function UserModal({
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
+          {!target && <p className="mt-1 text-xs text-slate-500">{t('settings.existingAccountHelp')}</p>}
         </div>
+        )}
         <div>
           <label className="label" htmlFor="u-role">{t('settings.roleLabel')}</label>
           <select id="u-role" className="input" disabled={self} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
@@ -532,6 +556,18 @@ function UserModal({
           </select>
           <p className="mt-1 text-xs text-slate-500">{t(`settings.roleHelp.${form.role}`)}</p>
         </div>
+        {locations.length > 0 && form.role !== 'owner' && (
+          <div>
+            <label className="label" htmlFor="u-loc">{t('locations.location')}</label>
+            {ownLocation ? (
+              <p className="text-sm text-slate-700">{locations.find((l) => l.id === ownLocation)?.name}</p>
+            ) : (
+              <LocationSelect id="u-loc" value={form.locationId} onChange={(v) => setForm({ ...form, locationId: v })} list={locations} allLabel={t('locations.all')} />
+            )}
+            <p className="mt-1 text-xs text-slate-500">{t('locations.userHelp')}</p>
+          </div>
+        )}
+        {target?.sharedAccount && !self && <p className="text-xs text-slate-500">{t('settings.sharedAccount')}</p>}
         {hasTeam && (
           <div>
             <label className="label" htmlFor="u-pro">{memberWord}</label>

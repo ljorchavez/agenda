@@ -9,7 +9,7 @@ import {
   type ManageAppointmentDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, professionals, services, spaces, tenants, type Appointment, type Service, type Tenant } from '../db/schema.js';
+import { appointments, customers, locations, professionals, services, spaces, tenants, type Appointment, type Location, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { verifyManageToken } from '../lib/crypto.js';
@@ -25,7 +25,7 @@ import { assignTable } from '../lib/tables.js';
  */
 export const manageRoutes = new Hono();
 
-type Loaded = { appt: Appointment; tenant: Tenant; service: Service; customerName: string; resourceName: string | null };
+type Loaded = { appt: Appointment; tenant: Tenant; service: Service; customerName: string; resourceName: string | null; location: Location | null };
 const isTables = (l: Loaded) => businessKind(l.tenant.businessType) === 'reservations';
 const durationOf = (a: Appointment) => Math.round((a.endsAt.getTime() - a.startsAt.getTime()) / 60000);
 
@@ -37,15 +37,17 @@ async function slotsFor(l: Loaded, date: string, minStart: DateTime): Promise<st
       serviceId: appt.serviceId,
       spots: appt.partySize ?? 1,
       excludeSessionId: appt.classSessionId,
+      locationId: appt.locationId,
     });
     return list.map((s) => s.startsAt);
   }
-  if (appt.spaceId) return computeSpaceSlots(tenant, durationOf(appt), date, minStart, { excludeId: appt.id, spaceId: appt.spaceId });
-  if (isTables(l)) return computeTableSlots(tenant, appt.partySize ?? 2, date, minStart, { excludeId: appt.id, durationMin: durationOf(appt) });
+  if (appt.spaceId) return computeSpaceSlots(tenant, durationOf(appt), date, minStart, { excludeId: appt.id, spaceId: appt.spaceId, locationId: appt.locationId });
+  if (isTables(l)) return computeTableSlots(tenant, appt.partySize ?? 2, date, minStart, { excludeId: appt.id, durationMin: durationOf(appt), locationId: appt.locationId });
   return computeSlots(tenant, durationOf(appt), date, minStart, {
     excludeId: appt.id,
     serviceId: appt.serviceId,
     professionalId: appt.professionalId,
+    locationId: appt.locationId,
   });
 }
 
@@ -66,7 +68,8 @@ async function load(token: string): Promise<Loaded> {
     : appt.spaceId
       ? await db.query.spaces.findFirst({ where: and(eq(spaces.id, appt.spaceId), eq(spaces.tenantId, appt.tenantId)) })
       : null;
-  return { appt, tenant, service, customerName: customer.name, resourceName: resource?.name ?? null };
+  const location = (await db.query.locations.findFirst({ where: and(eq(locations.id, appt.locationId), eq(locations.tenantId, appt.tenantId)) })) ?? null;
+  return { appt, tenant, service, customerName: customer.name, resourceName: resource?.name ?? null, location };
 }
 
 /** Business rules for what the customer may change right now. */
@@ -89,7 +92,7 @@ export function policy(appt: Pick<Appointment, 'status' | 'startsAt'>, tenant: P
   };
 }
 
-function toDto({ appt, tenant, service, customerName, resourceName }: Loaded): ManageAppointmentDto {
+function toDto({ appt, tenant, service, customerName, resourceName, location }: Loaded): ManageAppointmentDto {
   const p = policy(appt, tenant);
   return {
     business: {
@@ -97,8 +100,8 @@ function toDto({ appt, tenant, service, customerName, resourceName }: Loaded): M
       slug: tenant.slug,
       timezone: tenant.timezone,
       locale: tenant.locale as Locale,
-      phone: tenant.phone,
-      hours: tenant.settings.hours,
+      phone: location?.phone ?? tenant.phone,
+      hours: location?.hours ?? tenant.settings.hours,
       kind: businessKind(tenant.businessType),
     },
     appointment: {
@@ -149,6 +152,7 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
       serviceId: l.appt.serviceId,
       spots: l.appt.partySize ?? 1,
       excludeSessionId: l.appt.classSessionId,
+      locationId: l.appt.locationId,
     });
     targetSession = list.find((s) => DateTime.fromISO(s.startsAt).toMillis() === start.toMillis())?.sessionId ?? null;
     if (!targetSession) throw conflict('slot_unavailable', 'This time is no longer available');
@@ -181,26 +185,27 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
       endsAt = session.endsAt;
     } else if (l.appt.spaceId) {
       try {
-        await assignSpace(tx, l.tenant.id, startsAt, endsAt, { spaceId: l.appt.spaceId, excludeId: l.appt.id });
+        await assignSpace(tx, l.tenant.id, startsAt, endsAt, { spaceId: l.appt.spaceId, excludeId: l.appt.id, locationId: l.appt.locationId });
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
-    } else if (!isTables(l) && (await activeProfessionals(tx, l.tenant.id)).length) {
+    } else if (!isTables(l) && (await activeProfessionals(tx, l.tenant.id, l.appt.locationId)).length) {
       try {
         professionalId = (await assignProfessional(tx, l.tenant.id, l.appt.serviceId, startsAt, endsAt, {
           professionalId: l.appt.professionalId,
           excludeId: l.appt.id,
+          locationId: l.appt.locationId,
         })).id;
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
     } else if (isTables(l)) {
       try {
-        tableId = (await assignTable(tx, l.tenant.id, l.appt.partySize ?? 2, startsAt, endsAt, { excludeId: l.appt.id })).id;
+        tableId = (await assignTable(tx, l.tenant.id, l.appt.partySize ?? 2, startsAt, endsAt, { excludeId: l.appt.id, locationId: l.appt.locationId })).id;
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
-    } else if (await hasOverlap(tx, l.tenant.id, startsAt, endsAt, { excludeId: l.appt.id })) {
+    } else if (await hasOverlap(tx, l.tenant.id, startsAt, endsAt, { excludeId: l.appt.id, locationId: l.appt.locationId })) {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
     // Status is re-read under the lock so a concurrent cancel can't be undone.

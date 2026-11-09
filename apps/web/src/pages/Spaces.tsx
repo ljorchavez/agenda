@@ -4,9 +4,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { SpaceDto } from '@agenda/shared';
 import { Empty, ErrorText, Loading, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
+import { LocationSelect } from '../components/Locations';
 import { money, toCents } from '../lib/format';
-import { useSpaces } from '../lib/queries';
+import { useMyLocations, useSpaces } from '../lib/queries';
 
 /** Courts, rooms or studios rented by the hour. Online bookings pick a free one or the one the customer chose. */
 export function SpacesPage() {
@@ -14,6 +15,11 @@ export function SpacesPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isOwner = user?.role === 'owner' || user?.role === 'admin';
+  // Each location has its own; managers limited to a location only see theirs.
+  const { locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const [loc, setLoc] = useState('');
+  const currentLoc = loc || ownLocation || locs.list[0]?.id || '';
   const spaces = useSpaces();
   const [form, setForm] = useState({ name: '', price: '', description: '' });
   const [editing, setEditing] = useState<{ id: string; name: string; price: string; description: string } | null>(null);
@@ -24,7 +30,7 @@ export function SpacesPage() {
     mutationFn: () =>
       api<SpaceDto>('/spaces', {
         method: 'POST',
-        body: { name: form.name, pricePerHourCents: toCents(form.price || 0), description: form.description || null, active: true },
+        body: { name: form.name, pricePerHourCents: toCents(form.price || 0), description: form.description || null, active: true, locationId: currentLoc || undefined },
       }),
     onSuccess: () => {
       setForm({ name: '', price: form.price, description: '' });
@@ -33,7 +39,7 @@ export function SpacesPage() {
   });
   const update = useMutation({
     mutationFn: (x: SpaceDto) =>
-      api<SpaceDto>(`/spaces/${x.id}`, { method: 'PUT', body: { name: x.name, pricePerHourCents: x.pricePerHourCents, description: x.description, active: x.active } }),
+      api<SpaceDto>(`/spaces/${x.id}`, { method: 'PUT', body: { name: x.name, pricePerHourCents: x.pricePerHourCents, description: x.description, active: x.active, locationId: x.locationId } }),
     onSuccess: () => {
       setEditing(null);
       refresh();
@@ -47,12 +53,13 @@ export function SpacesPage() {
     },
   });
 
-  const list = spaces.data ?? [];
+  const list = (spaces.data ?? []).filter((x) => !locs.anyMulti || x.locationId === currentLoc);
 
   return (
     <>
       <PageHeader title={t('spaces.title')} />
       <p className="-mt-4 mb-4 text-sm text-slate-500">{t('spaces.help')}</p>
+      {locs.multi && <LocationSelect value={currentLoc} onChange={setLoc} list={locs.list} className="input mb-4 max-w-xs" />}
 
       {isOwner && (
         <form

@@ -278,7 +278,10 @@
     "own_role": "No puedes cambiar tu propio rol.",
     "last_owner": "El negocio necesita al menos un dueño.",
     "own_user": "No puedes quitarte el acceso a ti mismo.",
-    "forbidden": "Tu rol no puede administrar a ese usuario."
+    "forbidden": "Tu rol no puede administrar a ese usuario.",
+    "sharedAccount": "Esta persona también usa otros negocios: solo ella puede cambiar su nombre y contraseña.",
+    "existingAccountHelp": "Si el correo ya tiene cuenta (por ejemplo, trabaja en otro negocio), entrará con su contraseña actual.",
+    "shared_account": "Esta persona también usa otros negocios: solo ella puede cambiar su nombre y contraseña."
   },
   "booking": {
     "title": "Agenda tu cita",
@@ -341,7 +344,9 @@
     "successClass_other": "{{service}} el {{date}} ({{count}} lugares). Te enviaremos un recordatorio por WhatsApp.",
     "successRentalTitle": "¡Listo! Tu espacio está reservado",
     "successRental": "{{space}} el {{date}} por {{minutes}} min. Te enviaremos un recordatorio por WhatsApp.",
-    "successDetailWith": "{{service}} con {{name}} el {{date}}. Te enviaremos un recordatorio por WhatsApp."
+    "successDetailWith": "{{service}} con {{name}} el {{date}}. Te enviaremos un recordatorio por WhatsApp.",
+    "chooseLocation": "Elige la sucursal",
+    "changeLocation": "cambiar"
   },
   "paymentSettings": {
     "title": "Métodos de pago",
@@ -450,7 +455,8 @@
       "sources": "Origen de las citas",
       "heatmap": "Horarios más ocupados",
       "professionals": "Por profesional",
-      "spaces": "Por espacio"
+      "spaces": "Por espacio",
+      "locations": "Por sucursal"
     },
     "current": "Periodo actual",
     "previous": "Periodo anterior",
@@ -684,12 +690,45 @@
     "own_role": "No puedes cambiar tu propio rol.",
     "own_user": "No puedes quitarte el acceso a ti mismo.",
     "email_taken": "Ese correo ya tiene una cuenta.",
-    "wrong_password": "La contraseña actual no es correcta."
+    "wrong_password": "La contraseña actual no es correcta.",
+    "location_not_found": "Esa sucursal no existe o está inactiva.",
+    "not_your_location": "Solo puedes administrar tu sucursal.",
+    "no_business": "Esta cuenta no tiene negocios."
   },
   "roles": {
     "notLinked": "Tu usuario aún no está vinculado a un perfil del equipo. Pide al dueño o a un administrador que lo vincule para ver tu agenda.",
     "onlyYours": "Estás viendo solo tus citas.",
     "onlyYourClasses": "Estás viendo solo tus clases.",
     "bookingFor": "Se agenda con {{name}}."
+  },
+  "business": {
+    "switch": "Negocio",
+    "new": "+ Abrir otro negocio",
+    "newTitle": "Abrir otro negocio",
+    "create": "Crear negocio",
+    "newHelp_one": "Tendrás tus negocios en la misma cuenta y podrás cambiar entre ellos desde el menú. Cada negocio tiene su propio plan.",
+    "newHelp_other": "Ya tienes {{count}} negocios en esta cuenta. Cada negocio tiene su propio plan; cambia entre ellos desde el menú."
+  },
+  "locations": {
+    "title": "Sucursales",
+    "add": "Agregar sucursal",
+    "edit": "Editar sucursal",
+    "location": "Sucursal",
+    "all": "Todas las sucursales",
+    "help": "Cada sucursal tiene su propio equipo, mesas o espacios, horario y agenda. Clientes, servicios y cobros son compartidos.",
+    "plan": "Tu plan incluye {{included}} sucursal · Activas: {{active}}",
+    "extra_one": "{{count}} sucursal extra",
+    "extra_other": "{{count}} sucursales extra",
+    "extraNotice": "Cada sucursal adicional se cobra aparte de tu plan.",
+    "primary": "Principal",
+    "usesProfile": "Dirección del perfil del negocio",
+    "businessHours": "horario del negocio",
+    "name": "Nombre de la sucursal",
+    "ownHours": "Esta sucursal tiene su propio horario",
+    "active": "Sucursal activa (aparece en tu página de reservas)",
+    "primaryAddressHelp": "Si dejas la dirección vacía, se usa la del perfil del negocio.",
+    "userHelp": "Limita lo que ve: un administrador con sucursal es gerente de esa sucursal.",
+    "primary_location": "La sucursal principal no se puede desactivar.",
+    "location_has_bookings": "Esta sucursal tiene reservas próximas. Muévelas o cancélalas primero."
   }
 }

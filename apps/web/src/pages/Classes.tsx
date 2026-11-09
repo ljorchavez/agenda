@@ -7,13 +7,16 @@ import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../component
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
 import { dateLocale, dateTime, money, timeOnly, toLocalInput } from '../lib/format';
-import { useCustomers, useProfessionals, useServices } from '../lib/queries';
+import { useCustomers, useMyLocations, useProfessionals, useServices } from '../lib/queries';
+import { LocationSelect } from '../components/Locations';
 
 /** Week view of group classes; each class shows spots taken and opens its attendee list. */
 export function ClassesPage() {
   const { t } = useTranslation();
   // Colaboradores (instructors) see only their own classes and can't schedule new ones.
-  const { manager, unlinked } = useAccess();
+  const { manager, unlinked, scoped, locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const [loc, setLoc] = useState('');
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [creating, setCreating] = useState<Date | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -48,6 +51,20 @@ export function ClassesPage() {
       <p className="-mt-4 mb-4 text-sm text-slate-500">
         {format(weekStart, 'd MMM', { locale: dateLocale() })} – {format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}
       </p>
+      {!scoped && locs.multi && (
+        <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('locations.title')}>
+          {[{ id: '', name: t('locations.all') }, ...locs.list].map((l) => (
+            <button
+              key={l.id || 'all'}
+              onClick={() => setLoc(l.id)}
+              aria-pressed={loc === l.id}
+              className={`whitespace-nowrap rounded-lg border px-3 py-1 text-sm ${loc === l.id ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+            >
+              {l.id ? '⌂ ' : ''}{l.name}
+            </button>
+          ))}
+        </div>
+      )}
       {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
       {!manager && !unlinked && <p className="mb-4 text-sm text-slate-500">{t('roles.onlyYourClasses')}</p>}
       {sessions.isLoading ? (
@@ -55,7 +72,7 @@ export function ClassesPage() {
       ) : (
         <div className="grid gap-3 lg:grid-cols-7">
           {days.map((d) => {
-            const items = (sessions.data ?? []).filter((s) => isSameDay(new Date(s.startsAt), d));
+            const items = (sessions.data ?? []).filter((s) => isSameDay(new Date(s.startsAt), d) && (!loc || s.locationId === loc));
             const isToday = isSameDay(d, today);
             return (
               <div key={d.toISOString()} className={`rounded-xl border bg-white p-2 ${isToday ? 'border-brand-500' : 'border-slate-200'}`}>
@@ -97,14 +114,18 @@ export function ClassesPage() {
           })}
         </div>
       )}
-      {creating && <NewSessionModal initial={creating} onClose={() => setCreating(null)} />}
+      {creating && <NewSessionModal initial={creating} defaultLocation={loc} onClose={() => setCreating(null)} />}
       {selected && <SessionModal id={selected} onClose={() => setSelected(null)} onOpen={setSelected} />}
     </>
   );
 }
 
-function NewSessionModal({ initial, onClose }: { initial: Date; onClose: () => void }) {
+function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date; defaultLocation: string; onClose: () => void }) {
   const { t } = useTranslation();
+  const { locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const [locationId, setLocationId] = useState(defaultLocation || ownLocation || '');
+  const effectiveLoc = locationId || locs.list[0]?.id || '';
   const qc = useQueryClient();
   const services = useServices();
   const pros = useProfessionals();
@@ -125,6 +146,7 @@ function NewSessionModal({ initial, onClose }: { initial: Date; onClose: () => v
           startsAt: new Date(startsAt).toISOString(),
           durationMin: duration ? Number(duration) : undefined,
           professionalId: professionalId || null,
+          locationId: effectiveLoc || undefined,
           capacity: Number(capacity),
           notes: notes || null,
         },
@@ -137,6 +159,12 @@ function NewSessionModal({ initial, onClose }: { initial: Date; onClose: () => v
   return (
     <Modal open title={t('classes.new')} onClose={onClose}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
+        {locs.multi && (
+          <div>
+            <label className="label" htmlFor="cs-loc">{t('locations.location')}</label>
+            <LocationSelect id="cs-loc" value={effectiveLoc} onChange={(v) => { setLocationId(v); setProfessionalId(''); }} list={locs.list} />
+          </div>
+        )}
         <div>
           <label className="label">{t('classes.classType')}</label>
           <select required className="input" value={svc?.id ?? ''} onChange={(e) => { setServiceId(e.target.value); setDuration(''); }}>
@@ -161,7 +189,7 @@ function NewSessionModal({ initial, onClose }: { initial: Date; onClose: () => v
           <label className="label">{t('classes.instructor')}</label>
           <select className="input" value={professionalId} onChange={(e) => setProfessionalId(e.target.value)}>
             <option value="">{t('classes.noInstructor')}</option>
-            {(pros.data ?? []).filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {(pros.data ?? []).filter((p) => p.active && (!effectiveLoc || p.locationId === effectiveLoc)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
         <div>

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
+import { NewBusinessPage } from './pages/NewBusiness';
 import { AgendaPage } from './pages/Agenda';
 import { BookingPage } from './pages/Booking';
 import { CustomerDetailPage } from './pages/CustomerDetail';
@@ -59,6 +60,7 @@ export function App() {
         <Route path="spaces" element={<SpacesPage />} />
         <Route path="classes" element={<ClassesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="new-business" element={<NewBusinessPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

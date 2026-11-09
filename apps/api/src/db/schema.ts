@@ -20,6 +20,7 @@ import {
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
   ROLES,
+  type BusinessHours,
   type TenantSettings,
 } from '@agenda/shared';
 
@@ -85,6 +86,8 @@ export const diningTables = pgTable(
     seats: integer('seats').notNull(),
     area: text('area'),
     active: boolean('active').notNull().default(true),
+    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
+    locationId: uuid('location_id').notNull().default(sql`null`),
     ...timestamps,
   },
   (t) => [index('dining_tables_tenant_idx').on(t.tenantId)],
@@ -104,6 +107,8 @@ export const professionals = pgTable(
     /** Services this person performs; empty = all */
     serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
     userId: uuid('user_id'),
+    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
+    locationId: uuid('location_id').notNull().default(sql`null`),
     ...timestamps,
   },
   (t) => [
@@ -124,6 +129,8 @@ export const spaces = pgTable(
     description: text('description'),
     pricePerHourCents: integer('price_per_hour_cents').notNull().default(0),
     active: boolean('active').notNull().default(true),
+    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
+    locationId: uuid('location_id').notNull().default(sql`null`),
     ...timestamps,
   },
   (t) => [index('spaces_tenant_idx').on(t.tenantId)],
@@ -133,16 +140,58 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     passwordHash: text('password_hash').notNull(),
     name: text('name').notNull(),
-    role: roleEnum('role').notNull().default('staff'),
     ...timestamps,
   },
-  (t) => [uniqueIndex('users_email_idx').on(t.email), index('users_tenant_idx').on(t.tenantId)],
+  (t) => [uniqueIndex('users_email_idx').on(t.email)],
+);
+
+/** A person's access to a business: role and, optionally, a single location. */
+export const memberships = pgTable(
+  'memberships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: roleEnum('role').notNull().default('staff'),
+    /** Null = every location */
+    locationId: uuid('location_id'),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('memberships_tenant_user_uq').on(t.tenantId, t.userId), index('memberships_user_idx').on(t.userId)],
+);
+
+/** Sucursales. Every business has exactly one primary location (created by a DB trigger). */
+export const locations = pgTable(
+  'locations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    phone: text('phone'),
+    /** For the primary location, null address/coords mean "use the business profile" */
+    address: text('address'),
+    neighborhood: text('neighborhood'),
+    city: text('city'),
+    state: text('state'),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    /** Null = business hours */
+    hours: jsonb('hours').$type<BusinessHours>(),
+    active: boolean('active').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [index('locations_tenant_idx').on(t.tenantId)],
 );
 
 export const customers = pgTable(
@@ -201,6 +250,8 @@ export const classSessions = pgTable(
     /** scheduled | cancelled */
     status: text('status').notNull().default('scheduled'),
     notes: text('notes'),
+    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
+    locationId: uuid('location_id').notNull().default(sql`null`),
     ...timestamps,
   },
   (t) => [index('class_sessions_tenant_starts_idx').on(t.tenantId, t.startsAt)],
@@ -232,6 +283,8 @@ export const appointments = pgTable(
     professionalId: uuid('professional_id').references(() => professionals.id, { onDelete: 'set null' }),
     spaceId: uuid('space_id').references(() => spaces.id, { onDelete: 'set null' }),
     classSessionId: uuid('class_session_id').references(() => classSessions.id, { onDelete: 'cascade' }),
+    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
+    locationId: uuid('location_id').notNull().default(sql`null`),
     reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
     ...timestamps,
   },
@@ -306,6 +359,8 @@ export const messageLogs = pgTable(
 
 export type Tenant = typeof tenants.$inferSelect;
 export type User = typeof users.$inferSelect;
+export type Membership = typeof memberships.$inferSelect;
+export type Location = typeof locations.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Service = typeof services.$inferSelect;
 export type Appointment = typeof appointments.$inferSelect;

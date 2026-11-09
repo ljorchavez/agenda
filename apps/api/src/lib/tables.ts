@@ -29,11 +29,17 @@ export async function loadTableState(
   from: Date,
   to: Date,
   excludeId?: string,
+  locationId?: string,
 ): Promise<{ tables: TableLite[]; busy: Busy[] }> {
   const tables = await db
     .select({ id: diningTables.id, name: diningTables.name, seats: diningTables.seats })
     .from(diningTables)
-    .where(and(eq(diningTables.tenantId, tenantId), eq(diningTables.active, true), gte(diningTables.seats, partySize)));
+    .where(and(
+      eq(diningTables.tenantId, tenantId),
+      eq(diningTables.active, true),
+      gte(diningTables.seats, partySize),
+      locationId ? eq(diningTables.locationId, locationId) : undefined,
+    ));
   if (!tables.length) return { tables, busy: [] };
   const exclude = excludeId ? sql`and id <> ${excludeId}` : sql``;
   const res = await db.execute<{ table_id: string; starts_at: Date | string; ends_at: Date | string }>(sql`
@@ -54,9 +60,9 @@ export async function assignTable(
   partySize: number,
   start: Date,
   end: Date,
-  opts: { excludeId?: string; tableId?: string | null } = {},
+  opts: { excludeId?: string; tableId?: string | null; locationId?: string } = {},
 ): Promise<TableLite> {
-  const { tables, busy } = await loadTableState(db, tenantId, partySize, start, end, opts.excludeId);
+  const { tables, busy } = await loadTableState(db, tenantId, partySize, start, end, opts.excludeId, opts.locationId);
   if (opts.tableId) {
     const wanted = tables.find((t) => t.id === opts.tableId);
     if (!wanted) throw new AppError(422, 'table_too_small', 'That table is inactive or too small for the party');

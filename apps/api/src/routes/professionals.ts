@@ -2,8 +2,9 @@ import { Hono } from 'hono';
 import { and, asc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { professionalInputSchema } from '@agenda/shared';
 import { getDb, type Db } from '../db/client.js';
-import { appointments, professionals, services, users } from '../db/schema.js';
+import { appointments, memberships, professionals, services } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
+import { guardRow, locationForWrite } from '../lib/locations.js';
 import { toProfessionalDto } from '../lib/mappers.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
@@ -23,7 +24,7 @@ async function validateRefs(db: Db, tenantId: string, serviceIds: string[], user
     if (found.length !== new Set(serviceIds).size) throw notFound('service');
   }
   if (userId) {
-    const u = await db.query.users.findFirst({ where: and(eq(users.id, userId), eq(users.tenantId, tenantId)), columns: { id: true } });
+    const u = await db.query.memberships.findFirst({ where: and(eq(memberships.userId, userId), eq(memberships.tenantId, tenantId)), columns: { id: true } });
     if (!u) throw notFound('user');
   }
 }
@@ -42,20 +43,21 @@ professionalRoutes.post('/professionals', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const db = getDb();
   await validateRefs(db, tenantId, input.serviceIds, input.userId);
+  const locationId = (await locationForWrite(db, c, input.locationId, { create: true }))!;
   const row = await db.transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${tenantId} for update`);
     const before = await tx
       .select({ id: professionals.id })
       .from(professionals)
-      .where(and(eq(professionals.tenantId, tenantId), eq(professionals.active, true)))
+      .where(and(eq(professionals.tenantId, tenantId), eq(professionals.locationId, locationId), eq(professionals.active, true)))
       .limit(1);
     // A login belongs to one team member at most.
     if (input.userId) await tx.update(professionals).set({ userId: null }).where(and(eq(professionals.tenantId, tenantId), eq(professionals.userId, input.userId)));
     const [created] = await tx
       .insert(professionals)
-      .values({ ...input, serviceIds: [...new Set(input.serviceIds)], userId: input.userId ?? null, tenantId })
+      .values({ ...input, serviceIds: [...new Set(input.serviceIds)], userId: input.userId ?? null, tenantId, locationId })
       .returning();
-    // Switching from a single agenda to a team: upcoming appointments go to the first professional.
+    // Switching a location from a single agenda to a team: its upcoming appointments go to the first professional.
     if (!before.length && created!.active) {
       await tx
         .update(appointments)
@@ -63,6 +65,7 @@ professionalRoutes.post('/professionals', requireManager, async (c) => {
         .where(
           and(
             eq(appointments.tenantId, tenantId),
+            eq(appointments.locationId, locationId),
             isNull(appointments.professionalId),
             isNull(appointments.classSessionId),
             isNull(appointments.spaceId),
@@ -82,6 +85,9 @@ professionalRoutes.put('/professionals/:id', requireManager, async (c) => {
   const db = getDb();
   await validateRefs(db, tenantId, input.serviceIds, input.userId);
   const id = c.req.param('id');
+  const current = await db.query.professionals.findFirst({ where: and(eq(professionals.id, id), eq(professionals.tenantId, tenantId)) });
+  if (!current) throw notFound('professional');
+  const locationId = await locationForWrite(db, c, input.locationId, { current: current.locationId });
   if (input.userId) {
     await db
       .update(professionals)
@@ -90,7 +96,7 @@ professionalRoutes.put('/professionals/:id', requireManager, async (c) => {
   }
   const [row] = await db
     .update(professionals)
-    .set({ ...input, serviceIds: [...new Set(input.serviceIds)], userId: input.userId ?? null })
+    .set({ ...input, serviceIds: [...new Set(input.serviceIds)], userId: input.userId ?? null, locationId })
     .where(and(eq(professionals.id, c.req.param('id')), eq(professionals.tenantId, tenantId)))
     .returning();
   if (!row) throw notFound('professional');
@@ -102,6 +108,9 @@ professionalRoutes.delete('/professionals/:id', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();
+  const current = await db.query.professionals.findFirst({ where: and(eq(professionals.id, id), eq(professionals.tenantId, tenantId)) });
+  if (!current) throw notFound('professional');
+  guardRow(c, current.locationId);
   const used = await db.query.appointments.findFirst({
     where: and(eq(appointments.tenantId, tenantId), eq(appointments.professionalId, id)),
     columns: { id: true },

@@ -278,7 +278,10 @@
     "own_role": "You can't change your own role.",
     "last_owner": "The business needs at least one owner.",
     "own_user": "You can't remove yourself.",
-    "forbidden": "Your role can't manage that user."
+    "forbidden": "Your role can't manage that user.",
+    "sharedAccount": "This person also uses other businesses: only they can change their name and password.",
+    "existingAccountHelp": "If the email already has an account (e.g. they work at another business), they'll sign in with their current password.",
+    "shared_account": "This person also uses other businesses: only they can change their name and password."
   },
   "booking": {
     "title": "Book your appointment",
@@ -341,7 +344,9 @@
     "successClass_other": "{{service}} on {{date}} ({{count}} spots). We will send you a WhatsApp reminder.",
     "successRentalTitle": "Done! Your space is booked",
     "successRental": "{{space}} on {{date}} for {{minutes}} min. We will send you a WhatsApp reminder.",
-    "successDetailWith": "{{service}} with {{name}} on {{date}}. We will send you a WhatsApp reminder."
+    "successDetailWith": "{{service}} with {{name}} on {{date}}. We will send you a WhatsApp reminder.",
+    "chooseLocation": "Choose a location",
+    "changeLocation": "change"
   },
   "paymentSettings": {
     "title": "Payment methods",
@@ -450,7 +455,8 @@
       "sources": "Booking source",
       "heatmap": "Busiest times",
       "professionals": "By professional",
-      "spaces": "By space"
+      "spaces": "By space",
+      "locations": "By location"
     },
     "current": "Current period",
     "previous": "Previous period",
@@ -684,12 +690,45 @@
     "own_role": "You can't change your own role.",
     "own_user": "You can't remove yourself.",
     "email_taken": "That email already has an account.",
-    "wrong_password": "Current password is incorrect."
+    "wrong_password": "Current password is incorrect.",
+    "location_not_found": "That location doesn't exist or is inactive.",
+    "not_your_location": "You can only manage your location.",
+    "no_business": "This login has no business."
   },
   "roles": {
     "notLinked": "Your login isn't linked to a team profile yet. Ask the owner or an admin to link it to see your agenda.",
     "onlyYours": "You're seeing only your bookings.",
     "onlyYourClasses": "You're seeing only your classes.",
     "bookingFor": "Booked with {{name}}."
+  },
+  "business": {
+    "switch": "Business",
+    "new": "+ Open another business",
+    "newTitle": "Open another business",
+    "create": "Create business",
+    "newHelp_one": "Your businesses share this login and you can switch between them from the menu. Each business has its own plan.",
+    "newHelp_other": "You already have {{count}} businesses on this login. Each business has its own plan; switch between them from the menu."
+  },
+  "locations": {
+    "title": "Locations",
+    "add": "Add location",
+    "edit": "Edit location",
+    "location": "Location",
+    "all": "All locations",
+    "help": "Each location has its own team, tables or spaces, hours and agenda. Customers, services and payouts are shared.",
+    "plan": "Your plan includes {{included}} location · Active: {{active}}",
+    "extra_one": "{{count}} extra location",
+    "extra_other": "{{count}} extra locations",
+    "extraNotice": "Each additional location is billed on top of your plan.",
+    "primary": "Main",
+    "usesProfile": "Business profile address",
+    "businessHours": "business hours",
+    "name": "Location name",
+    "ownHours": "This location has its own hours",
+    "active": "Active location (shown on your booking page)",
+    "primaryAddressHelp": "Leave the address empty to use the business profile address.",
+    "userHelp": "Limits what they see: an admin with a location manages that location.",
+    "primary_location": "The main location can't be deactivated.",
+    "location_has_bookings": "This location has upcoming bookings. Move or cancel them first."
   }
 }

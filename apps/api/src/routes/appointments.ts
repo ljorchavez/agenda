@@ -10,14 +10,15 @@ import {
   type BusinessKind,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, payments, professionals, services, tenants, users, type Service } from '../db/schema.js';
+import { appointments, customers, diningTables, memberships, payments, professionals, services, spaces, tenants, type Service } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { hasOverlap, queryAppointments } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { activeProfessionals, assignProfessional, assignSpace, internalService, RENTAL_SERVICE_NAME } from '../lib/resources.js';
 import { assignTable } from '../lib/tables.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { forbiddenScope, getScope, inScope, scopeSql } from '../lib/access.js';
+import { assertLocation, forbiddenScope, getScope, inScope, scopeSql } from '../lib/access.js';
+import { locationForWrite } from '../lib/locations.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const appointmentRoutes = new Hono<AppEnv>();
@@ -28,11 +29,25 @@ const ACTIVE = new Set(['scheduled', 'confirmed']);
 /** A staff member assigned to an appointment must belong to the same tenant. */
 async function assertStaffInTenant(db: Db, tenantId: string, staffUserId: string | null | undefined) {
   if (!staffUserId) return;
-  const staff = await db.query.users.findFirst({
-    where: and(eq(users.id, staffUserId), eq(users.tenantId, tenantId)),
+  const staff = await db.query.memberships.findFirst({
+    where: and(eq(memberships.userId, staffUserId), eq(memberships.tenantId, tenantId)),
     columns: { id: true },
   });
   if (!staff) throw notFound('staff');
+}
+
+/** A booking happens where its professional, table or space is. */
+async function hintedLocation(db: Db, tenantId: string, input: { professionalId?: string | null; tableId?: string | null; spaceId?: string | null }) {
+  if (input.professionalId) {
+    return (await db.query.professionals.findFirst({ where: and(eq(professionals.id, input.professionalId), eq(professionals.tenantId, tenantId)) }))?.locationId;
+  }
+  if (input.tableId) {
+    return (await db.query.diningTables.findFirst({ where: and(eq(diningTables.id, input.tableId), eq(diningTables.tenantId, tenantId)) }))?.locationId;
+  }
+  if (input.spaceId) {
+    return (await db.query.spaces.findFirst({ where: and(eq(spaces.id, input.spaceId), eq(spaces.tenantId, tenantId)) }))?.locationId;
+  }
+  return undefined;
 }
 
 async function assertProfessionalInTenant(db: Pick<Db, 'query'>, tenantId: string, id: string | null | undefined) {
@@ -90,7 +105,7 @@ appointmentRoutes.post('/appointments', async (c) => {
 
   // Team members book only into their own agenda.
   const scope = await getScope(db, c);
-  if (!scope.all) {
+  if (scope.personal) {
     if (input.professionalId && input.professionalId !== scope.professionalId) throw forbiddenScope();
     if (input.staffUserId && input.staffUserId !== scope.userId) throw forbiddenScope();
     input.allowOverlap = false;
@@ -107,6 +122,10 @@ appointmentRoutes.post('/appointments', async (c) => {
   } else if (!input.classSessionId) {
     throw new AppError(422, 'service_required', 'serviceId is required');
   }
+  // Class sign-ups take the session's location (checked inside the transaction).
+  const locationId = input.classSessionId
+    ? undefined
+    : (await locationForWrite(db, c, (await hintedLocation(db, tenantId, input)) ?? input.locationId, { create: true }))!;
 
   const row = await db.transaction(async (tx) => {
     await lockTenant(tx, tenantId);
@@ -116,12 +135,14 @@ appointmentRoutes.post('/appointments', async (c) => {
       staffUserId: input.staffUserId ?? null,
       notes: input.notes ?? null,
       source: 'staff' as const,
+      locationId,
     };
 
     // Classes: add the customer to a session if there's room.
     if (input.classSessionId) {
       const { session, booked } = await lockSession(tx, tenantId, input.classSessionId);
-      if (!scope.all && session.professionalId !== scope.professionalId) throw forbiddenScope();
+      if (scope.personal && session.professionalId !== scope.professionalId) throw forbiddenScope();
+      assertLocation(scope, session.locationId);
       if (session.status !== 'scheduled') throw new AppError(422, 'class_cancelled', 'The class was cancelled');
       const spots = input.partySize ?? 1;
       if (!input.allowOverlap) assertRoom(session.capacity, booked, spots);
@@ -137,6 +158,7 @@ appointmentRoutes.post('/appointments', async (c) => {
           endsAt: session.endsAt,
           partySize: spots,
           priceCents: input.priceCents ?? (svc?.priceCents ?? 0) * spots,
+          locationId: session.locationId,
         })
         .returning({ id: appointments.id });
       return inserted!;
@@ -150,7 +172,7 @@ appointmentRoutes.post('/appointments', async (c) => {
       const durationMin = input.durationMin ?? rentalSettingsOf(tenant.settings).durations[0]!;
       const endsAt = new Date(startsAt.getTime() + durationMin * MIN);
       const space = input.spaceId || !input.allowOverlap
-        ? await assignSpace(tx, tenantId, startsAt, endsAt, input.allowOverlap ? {} : { spaceId: input.spaceId })
+        ? await assignSpace(tx, tenantId, startsAt, endsAt, input.allowOverlap ? { locationId } : { spaceId: input.spaceId, locationId })
         : null;
       const [inserted] = await tx
         .insert(appointments)
@@ -174,7 +196,7 @@ appointmentRoutes.post('/appointments', async (c) => {
       let tableId: string | null = null;
       // Explicit table is always validated; otherwise auto-assign unless overlap is allowed.
       if (input.tableId || !input.allowOverlap) {
-        tableId = (await assignTable(tx, tenantId, partySize, startsAt, endsAt, { tableId: input.tableId })).id;
+        tableId = (await assignTable(tx, tenantId, partySize, startsAt, endsAt, { tableId: input.tableId, locationId })).id;
       }
       const [inserted] = await tx
         .insert(appointments)
@@ -185,14 +207,14 @@ appointmentRoutes.post('/appointments', async (c) => {
 
     // Services: per-professional agendas when the business has a team, single agenda otherwise.
     let professionalId: string | null = input.professionalId ?? null;
-    if ((await activeProfessionals(tx, tenantId)).length) {
-      if (!scope.all && !scope.professionalId) throw new AppError(403, 'not_linked', 'Your login is not linked to a team member');
+    if ((await activeProfessionals(tx, tenantId, locationId)).length) {
+      if (scope.personal && !scope.professionalId) throw new AppError(403, 'not_linked', 'Your login is not linked to a team member');
       if (!input.allowOverlap) {
-        professionalId = (await assignProfessional(tx, tenantId, svc.id, startsAt, endsAt, { professionalId: input.professionalId })).id;
+        professionalId = (await assignProfessional(tx, tenantId, svc.id, startsAt, endsAt, { professionalId: input.professionalId, locationId })).id;
       }
     } else if (
       !input.allowOverlap &&
-      (await hasOverlap(tx, tenantId, startsAt, endsAt, { staffUserId: input.staffUserId ?? null }))
+      (await hasOverlap(tx, tenantId, startsAt, endsAt, { staffUserId: input.staffUserId ?? null, locationId }))
     ) {
       throw conflict('overlap', 'The time slot overlaps another appointment');
     }
@@ -218,8 +240,8 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
   });
   if (!current) throw notFound('appointment');
   const scope = await getScope(db, c);
-  if (!scope.all) {
-    if (!inScope(scope, current)) throw notFound('appointment');
+  if (!inScope(scope, current)) throw notFound('appointment');
+  if (scope.personal) {
     // Team members can't hand a booking to someone else.
     if (input.professionalId !== undefined && input.professionalId !== current.professionalId) throw forbiddenScope();
     if (input.staffUserId !== undefined && input.staffUserId !== current.staffUserId) throw forbiddenScope();
@@ -272,7 +294,7 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
       }
     } else if (rental) {
       if (needsCheck) {
-        const space = await assignSpace(tx, tenantId, startsAt, endsAt, { spaceId: spaceId ?? undefined, excludeId: id });
+        const space = await assignSpace(tx, tenantId, startsAt, endsAt, { spaceId: spaceId ?? undefined, excludeId: id, locationId: current.locationId });
         nextSpace = space.id;
         // Re-price when the length or the space changes, unless a price was given.
         if (input.priceCents === undefined && (timeChanged || space.id !== current.spaceId)) {
@@ -282,26 +304,27 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
     } else if (restaurant) {
       if (needsCheck) {
         if (input.tableId) {
-          tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, tableId: input.tableId })).id;
+          tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, tableId: input.tableId, locationId: current.locationId })).id;
         } else {
           // Keep the current table if it still works, otherwise pick another one.
           try {
             tableId = current.tableId && input.tableId === undefined
-              ? (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, tableId: current.tableId })).id
-              : (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id })).id;
+              ? (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, tableId: current.tableId, locationId: current.locationId })).id
+              : (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, locationId: current.locationId })).id;
           } catch {
-            tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id })).id;
+            tableId = (await assignTable(tx, tenantId, partySize!, startsAt, endsAt, { excludeId: id, locationId: current.locationId })).id;
           }
         }
       }
-    } else if ((await activeProfessionals(tx, tenantId)).length) {
+    } else if ((await activeProfessionals(tx, tenantId, current.locationId)).length) {
       if (needsCheck) {
         nextProfessional = (await assignProfessional(tx, tenantId, current.serviceId, startsAt, endsAt, {
           professionalId,
           excludeId: id,
+          locationId: current.locationId,
         })).id;
       }
-    } else if (needsCheck && (await hasOverlap(tx, tenantId, startsAt, endsAt, { staffUserId, excludeId: id }))) {
+    } else if (needsCheck && (await hasOverlap(tx, tenantId, startsAt, endsAt, { staffUserId, excludeId: id, locationId: current.locationId }))) {
       throw conflict('overlap', 'The time slot overlaps another appointment');
     }
 
@@ -347,7 +370,12 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
 });
 
 appointmentRoutes.delete('/appointments/:id', requireManager, async (c) => {
-  const [row] = await getDb()
+  const db = getDb();
+  const current = await db.query.appointments.findFirst({
+    where: and(eq(appointments.id, c.req.param('id')), eq(appointments.tenantId, c.get('tenantId'))),
+  });
+  if (!current || !inScope(await getScope(db, c), current)) throw notFound('appointment');
+  const [row] = await db
     .delete(appointments)
     .where(
       and(eq(appointments.id, c.req.param('id')), eq(appointments.tenantId, c.get('tenantId'))),

@@ -14,12 +14,16 @@ const overlaps = (b: Interval, start: Date, end: Date) => b.s < end && b.e > sta
 
 // ---------- Professionals ----------
 
-/** Active professionals of a tenant (empty = the business works as a single agenda). */
-export function activeProfessionals(db: Pick<Db, 'select'>, tenantId: string): Promise<Professional[]> {
+/** Active professionals of a location (empty = that location works as a single agenda). */
+export function activeProfessionals(db: Pick<Db, 'select'>, tenantId: string, locationId?: string): Promise<Professional[]> {
   return db
     .select()
     .from(professionals)
-    .where(and(eq(professionals.tenantId, tenantId), eq(professionals.active, true)))
+    .where(and(
+      eq(professionals.tenantId, tenantId),
+      eq(professionals.active, true),
+      locationId ? eq(professionals.locationId, locationId) : undefined,
+    ))
     .orderBy(asc(professionals.name));
 }
 
@@ -46,13 +50,22 @@ export function pickProfessional(pros: ProLite[], busy: ProBusy[], start: Date, 
  * Busy intervals per professional in [from, to): their appointments (not classes or rentals)
  * plus the classes they teach.
  */
-export async function professionalBusy(db: Pick<Db, 'execute'>, tenantId: string, from: Date, to: Date, excludeId?: string): Promise<ProBusy[]> {
+export async function professionalBusy(
+  db: Pick<Db, 'execute'>,
+  tenantId: string,
+  from: Date,
+  to: Date,
+  excludeId?: string,
+  locationId?: string,
+): Promise<ProBusy[]> {
   const exclude = excludeId ? sql`and id <> ${excludeId}` : sql``;
+  // Unassigned appointments only block the team of their own location.
+  const loc = locationId ? sql`and (professional_id is not null or location_id = ${locationId})` : sql``;
   const res = await db.execute<{ pid: string | null; s: Date | string; e: Date | string }>(sql`
     select professional_id as pid, starts_at as s, ends_at as e from appointments
     where tenant_id = ${tenantId} and status in ('scheduled', 'confirmed')
       and class_session_id is null and space_id is null and table_id is null
-      and starts_at < ${to.toISOString()} and ends_at > ${from.toISOString()} ${exclude}
+      and starts_at < ${to.toISOString()} and ends_at > ${from.toISOString()} ${exclude} ${loc}
     union all
     select professional_id as pid, starts_at as s, ends_at as e from class_sessions
     where tenant_id = ${tenantId} and status = 'scheduled' and professional_id is not null
@@ -70,11 +83,13 @@ export async function assignProfessional(
   serviceId: string,
   start: Date,
   end: Date,
-  opts: { professionalId?: string | null; excludeId?: string } = {},
+  opts: { professionalId?: string | null; excludeId?: string; locationId?: string } = {},
 ): Promise<Professional> {
-  const pros = await activeProfessionals(db, tenantId);
+  const pros = await activeProfessionals(db, tenantId, opts.locationId);
   // A ±12 h window also gives a rough per-day load for spreading bookings.
-  const busy = await professionalBusy(db, tenantId, new Date(start.getTime() - 12 * 3600e3), new Date(end.getTime() + 12 * 3600e3), opts.excludeId);
+  const busy = await professionalBusy(
+    db, tenantId, new Date(start.getTime() - 12 * 3600e3), new Date(end.getTime() + 12 * 3600e3), opts.excludeId, opts.locationId,
+  );
   if (opts.professionalId) {
     const p = pros.find((x) => x.id === opts.professionalId);
     if (!p) throw new AppError(404, 'professional_not_found', 'Professional not found or inactive');
@@ -91,11 +106,11 @@ export async function assignProfessional(
 
 // ---------- Spaces ----------
 
-export function activeSpaces(db: Pick<Db, 'select'>, tenantId: string): Promise<Space[]> {
+export function activeSpaces(db: Pick<Db, 'select'>, tenantId: string, locationId?: string): Promise<Space[]> {
   return db
     .select()
     .from(spaces)
-    .where(and(eq(spaces.tenantId, tenantId), eq(spaces.active, true)))
+    .where(and(eq(spaces.tenantId, tenantId), eq(spaces.active, true), locationId ? eq(spaces.locationId, locationId) : undefined))
     .orderBy(asc(spaces.name));
 }
 
@@ -120,9 +135,9 @@ export async function assignSpace(
   tenantId: string,
   start: Date,
   end: Date,
-  opts: { spaceId?: string | null; excludeId?: string } = {},
+  opts: { spaceId?: string | null; excludeId?: string; locationId?: string } = {},
 ): Promise<Space> {
-  const list = await activeSpaces(db, tenantId);
+  const list = await activeSpaces(db, tenantId, opts.locationId);
   if (opts.spaceId && !list.some((s) => s.id === opts.spaceId)) throw new AppError(404, 'space_not_found', 'Space not found or inactive');
   const busy = await spaceBusy(db, tenantId, start, end, opts.excludeId);
   const s = pickSpace(list, busy, start, end, opts.spaceId);

@@ -12,11 +12,11 @@ import type { ClassSession, Customer, Payment, Professional, Service, Space, Ten
 import type { ClassSessionDto, ProfessionalDto, SpaceDto } from '@agenda/shared';
 
 export function toProfessionalDto(p: Professional): ProfessionalDto {
-  return { id: p.id, name: p.name, color: p.color, active: p.active, serviceIds: p.serviceIds ?? [], userId: p.userId };
+  return { id: p.id, name: p.name, color: p.color, active: p.active, serviceIds: p.serviceIds ?? [], userId: p.userId, locationId: p.locationId };
 }
 
 export function toSpaceDto(s: Space): SpaceDto {
-  return { id: s.id, name: s.name, description: s.description, pricePerHourCents: s.pricePerHourCents, active: s.active };
+  return { id: s.id, name: s.name, description: s.description, pricePerHourCents: s.pricePerHourCents, active: s.active, locationId: s.locationId };
 }
 
 export function toClassSessionDto(
@@ -37,6 +37,7 @@ export function toClassSessionDto(
     status: s.status as ClassSessionDto['status'],
     priceCents: extra.priceCents,
     notes: s.notes,
+    locationId: s.locationId,
   };
 }
 
@@ -140,6 +141,7 @@ export type AppointmentRow = {
   space_id: string | null;
   space_name: string | null;
   class_session_id: string | null;
+  location_id: string;
 };
 
 export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
@@ -168,5 +170,6 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     spaceId: r.space_id,
     spaceName: r.space_name,
     classSessionId: r.class_session_id,
+    locationId: r.location_id,
   };
 }

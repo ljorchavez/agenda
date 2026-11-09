@@ -53,12 +53,13 @@ function filters(q: ReportQuery): SQL {
   if (q.staffUserId) parts.push(sql`and a.staff_user_id = ${q.staffUserId}`);
   if (q.professionalId) parts.push(sql`and a.professional_id = ${q.professionalId}`);
   if (q.spaceId) parts.push(sql`and a.space_id = ${q.spaceId}`);
+  if (q.locationId) parts.push(sql`and a.location_id = ${q.locationId}`);
   if (q.source) parts.push(sql`and a.source = ${q.source}`);
   return parts.length ? sql.join(parts, sql` `) : sql``;
 }
 
 function paymentFilter(q: ReportQuery, f: SQL): SQL {
-  if (!q.serviceId && !q.staffUserId && !q.professionalId && !q.spaceId && !q.source) return sql``;
+  if (!q.serviceId && !q.staffUserId && !q.professionalId && !q.spaceId && !q.source && !q.locationId) return sql``;
   return sql`and exists (select 1 from appointments a where a.id = p.appointment_id and a.tenant_id = p.tenant_id ${f})`;
 }
 
@@ -168,7 +169,8 @@ reportRoutes.get('/reports', async (c) => {
   const db = getDb();
   // Team members only get their own numbers, whatever filter they send.
   const scope = await getScope(db, c);
-  if (!scope.all) {
+  if (scope.locationId) q.locationId = scope.locationId;
+  if (scope.personal) {
     q.staffUserId = scope.professionalId ? undefined : scope.userId;
     q.professionalId = scope.professionalId ?? undefined;
     q.spaceId = undefined;
@@ -191,7 +193,7 @@ reportRoutes.get('/reports', async (c) => {
   const T = end.toUTC().toISO()!;
   const f = filters(q);
 
-  const [k, pk, s, ps, svc, method, source, weekday, heat, top, pro, spc] = await Promise.all([
+  const [k, pk, s, ps, svc, method, source, weekday, heat, top, pro, spc, loc] = await Promise.all([
     kpis(db, tenantId, q, cur),
     kpis(db, tenantId, q, prev),
     series(db, tenantId, tz, q, cur, g),
@@ -243,6 +245,12 @@ reportRoutes.get('/reports', async (c) => {
       where a.tenant_id = ${tenantId} and a.status = 'completed'
         and a.starts_at >= ${F}::timestamptz and a.starts_at < ${T}::timestamptz ${f}
       group by sp.id order by revenue desc, sp.name`),
+    db.execute(sql`
+      select l.id, l.name, count(a.id) as count, coalesce(sum(a.price_cents), 0) as revenue
+      from appointments a join locations l on l.id = a.location_id and l.tenant_id = a.tenant_id
+      where a.tenant_id = ${tenantId} and a.status = 'completed'
+        and a.starts_at >= ${F}::timestamptz and a.starts_at < ${T}::timestamptz ${f}
+      group by l.id order by revenue desc, l.name`),
   ]);
 
   const body: ReportDto = {
@@ -256,6 +264,7 @@ reportRoutes.get('/reports', async (c) => {
     byService: svc.rows.map((r) => ({ id: String(r.id), name: String(r.name), count: n(r.count), revenueCents: n(r.revenue) })),
     byProfessional: pro.rows.map((r) => ({ id: String(r.id), name: String(r.name), color: String(r.color), count: n(r.count), revenueCents: n(r.revenue) })),
     bySpace: spc.rows.map((r) => ({ id: String(r.id), name: String(r.name), count: n(r.count), revenueCents: n(r.revenue) })),
+    byLocation: loc.rows.map((r) => ({ id: String(r.id), name: String(r.name), count: n(r.count), revenueCents: n(r.revenue) })),
     byMethod: method.rows.map((r) => ({ method: r.method as PaymentMethod, count: n(r.count), revenueCents: n(r.revenue) })),
     bySource: source.rows.map((r) => ({ source: r.source as AppointmentSource, count: n(r.count) })),
     byWeekday: weekday.rows.map((r) => ({ weekday: n(r.weekday), count: n(r.count) })),

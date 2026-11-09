@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
@@ -16,13 +16,16 @@ import { api } from '../lib/api';
 import { dateLocale, dateTime, money } from '../lib/format';
 
 type Book = (body: Record<string, unknown>) => void;
-type FlowProps = { business: PublicBusinessDto; onBook: Book; pending: boolean; error: unknown; resetKey: number };
+/** `loc` is the chosen location (sucursal); `business` already shows only its team, spaces and hours. */
+type FlowProps = { business: PublicBusinessDto; loc: string; onBook: Book; pending: boolean; error: unknown; resetKey: number };
 
 /** Public page where end customers book by themselves: /b/:slug */
 export function BookingPage() {
   const { slug = '' } = useParams();
   const { t, i18n } = useTranslation();
   const [resetKey, setResetKey] = useState(0);
+  const [params, setParams] = useSearchParams();
+  const chosenLoc = params.get('l') ?? '';
 
   const biz = useQuery({
     queryKey: ['public', slug],
@@ -46,7 +49,32 @@ export function BookingPage() {
   if (biz.isError || !biz.data)
     return <div className="flex min-h-screen items-center justify-center p-6 text-center text-slate-600">{t('booking.notFound')}</div>;
 
-  const business = biz.data;
+  const full = biz.data;
+  // Several locations: the customer picks one first (or arrives with ?l= from the directory).
+  const multi = full.locations.length > 1;
+  const location = full.locations.find((l) => l.id === chosenLoc) ?? (multi ? undefined : full.locations[0]);
+  const business: PublicBusinessDto = location
+    ? {
+        ...full,
+        hours: location.hours,
+        phone: location.phone ?? full.phone,
+        address: location.address,
+        neighborhood: location.neighborhood,
+        city: location.city,
+        state: location.state,
+        lat: location.lat,
+        lng: location.lng,
+        professionals: full.professionals.filter((p) => p.locationId === location.id),
+        spaces: full.spaces.filter((x) => x.locationId === location.id),
+      }
+    : full;
+  const pickLocation = (id: string) => {
+    const next = new URLSearchParams(params);
+    if (id) next.set('l', id);
+    else next.delete('l');
+    setParams(next, { replace: true });
+    book.reset();
+  };
   const mapsUrl =
     business.lat != null
       ? `https://www.google.com/maps/search/?api=1&query=${business.lat},${business.lng}`
@@ -59,7 +87,8 @@ export function BookingPage() {
     rentals: t('booking.titleRentals'),
     appointments: t('booking.title'),
   }[business.kind];
-  const flowProps: FlowProps = { business, onBook: (b) => book.mutate(b), pending: book.isPending, error: book.error, resetKey };
+  const loc = location?.id ?? '';
+  const flowProps: FlowProps = { business, loc, onBook: (b) => book.mutate({ ...b, ...(loc ? { locationId: loc } : {}) }), pending: book.isPending, error: book.error, resetKey };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-8">
@@ -68,6 +97,12 @@ export function BookingPage() {
           <div>
             <Link to="/directorio" className="text-xs text-slate-500 hover:text-brand-700">← {t('directory.title')}</Link>
             <h1 className="text-2xl font-bold text-slate-900">{business.name}</h1>
+            {multi && location && (
+              <p className="text-sm font-medium text-brand-700">
+                ⌂ {location.name} ·{' '}
+                <button className="underline" onClick={() => pickLocation('')}>{t('booking.changeLocation')}</button>
+              </p>
+            )}
             <p className="text-slate-600">{subtitle}</p>
             {business.description && <p className="mt-2 max-w-md text-sm text-slate-600">{business.description}</p>}
             {(business.address || business.neighborhood) && (
@@ -85,10 +120,24 @@ export function BookingPage() {
           <LanguageSwitch />
         </div>
 
-        {book.isSuccess ? (
+        {multi && !location ? (
+          <div className="card">
+            <Section title={t('booking.chooseLocation')}>
+              <div className="grid gap-2">
+                {full.locations.map((l) => (
+                  <button key={l.id} onClick={() => pickLocation(l.id)} className="rounded-lg border border-slate-300 p-3 text-left hover:border-brand-500">
+                    <span className="block font-medium text-slate-800">⌂ {l.name}</span>
+                    <span className="block text-sm text-slate-500">{[l.address, l.neighborhood, l.city].filter(Boolean).join(', ') || '—'}</span>
+                    <span className="block text-xs text-slate-400">{l.hours.open}–{l.hours.close}</span>
+                  </button>
+                ))}
+              </div>
+            </Section>
+          </div>
+        ) : book.isSuccess ? (
           <Success business={business} result={book.data} onAnother={() => book.reset()} />
         ) : (
-          <div className="card space-y-6">
+          <div className="card space-y-6" key={loc}>
             {business.kind === 'reservations' ? (
               <TablesFlow {...flowProps} />
             ) : business.kind === 'classes' ? (
@@ -212,7 +261,7 @@ function useResetOnError(resetKey: number, clear: () => void) {
 
 // ---------- Services (optionally with a professional) ----------
 
-function ServicesFlow({ business, onBook, pending, error, resetKey }: FlowProps) {
+function ServicesFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
   const { t } = useTranslation();
   const [serviceId, setServiceId] = useState('');
   const [proId, setProId] = useState('');
@@ -222,9 +271,9 @@ function ServicesFlow({ business, onBook, pending, error, resetKey }: FlowProps)
   const service = business.services.find((s) => s.id === serviceId);
   const pros = eligibleProfessionals(business.professionals, serviceId || null);
   const slots = useQuery({
-    queryKey: ['slots', business.slug, serviceId, proId, date],
+    queryKey: ['slots', business.slug, loc, serviceId, proId, date],
     queryFn: () =>
-      api<{ slots: string[] }>(`/public/${business.slug}/availability?serviceId=${serviceId}&date=${date}${proId ? `&professionalId=${proId}` : ''}`),
+      api<{ slots: string[] }>(`/public/${business.slug}/availability?serviceId=${serviceId}&date=${date}${proId ? `&professionalId=${proId}` : ''}${loc ? `&locationId=${loc}` : ''}`),
     enabled: Boolean(serviceId && date),
   });
   useResetOnError(resetKey, () => { setSlot(''); void slots.refetch(); });
@@ -297,15 +346,15 @@ function ServicesFlow({ business, onBook, pending, error, resetKey }: FlowProps)
 
 // ---------- Restaurant tables ----------
 
-function TablesFlow({ business, onBook, pending, error, resetKey }: FlowProps) {
+function TablesFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
   const { t } = useTranslation();
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [slot, setSlot] = useState('');
   const days = useOpenDays(business, 21);
   const slots = useQuery({
-    queryKey: ['slots', business.slug, `p${partySize}`, date],
-    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?partySize=${partySize}&date=${date}`),
+    queryKey: ['slots', business.slug, loc, `p${partySize}`, date],
+    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?partySize=${partySize}&date=${date}${loc ? `&locationId=${loc}` : ''}`),
     enabled: Boolean(date),
   });
   useResetOnError(resetKey, () => { setSlot(''); void slots.refetch(); });
@@ -343,12 +392,12 @@ function TablesFlow({ business, onBook, pending, error, resetKey }: FlowProps) {
 
 // ---------- Group classes ----------
 
-function ClassesFlow({ business, onBook, pending, error, resetKey }: FlowProps) {
+function ClassesFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
   const { t } = useTranslation();
   const fmt = useSlotFormat(business.timezone);
   const classes = useQuery({
-    queryKey: ['public-classes', business.slug],
-    queryFn: () => api<PublicClassSessionDto[]>(`/public/${business.slug}/classes?days=14`),
+    queryKey: ['public-classes', business.slug, loc],
+    queryFn: () => api<PublicClassSessionDto[]>(`/public/${business.slug}/classes?days=14${loc ? `&locationId=${loc}` : ''}`),
   });
   const dayOf = useMemo(() => new Intl.DateTimeFormat('en-CA', { timeZone: business.timezone }), [business.timezone]);
   const byDay = useMemo(() => {
@@ -442,7 +491,7 @@ function ClassesFlow({ business, onBook, pending, error, resetKey }: FlowProps) 
 
 // ---------- Space rentals ----------
 
-function RentalsFlow({ business, onBook, pending, error, resetKey }: FlowProps) {
+function RentalsFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
   const { t } = useTranslation();
   const durations = business.rentalDurations ?? [60];
   const [spaceId, setSpaceId] = useState('');
@@ -453,8 +502,8 @@ function RentalsFlow({ business, onBook, pending, error, resetKey }: FlowProps) 
   const space = business.spaces.find((s) => s.id === spaceId);
   const minPrice = Math.min(...business.spaces.map((s) => s.pricePerHourCents));
   const slots = useQuery({
-    queryKey: ['slots', business.slug, spaceId, duration, date],
-    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?durationMin=${duration}&date=${date}${spaceId ? `&spaceId=${spaceId}` : ''}`),
+    queryKey: ['slots', business.slug, loc, spaceId, duration, date],
+    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?durationMin=${duration}&date=${date}${spaceId ? `&spaceId=${spaceId}` : ''}${loc ? `&locationId=${loc}` : ''}`),
     enabled: Boolean(date),
   });
   useResetOnError(resetKey, () => { setSlot(''); void slots.refetch(); });

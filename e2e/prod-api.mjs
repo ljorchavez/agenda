@@ -59,6 +59,25 @@ r = await call('POST', '/api/auth/login', { email: 'not-an-email', password: 'x'
 check('login invalid email -> 422', r.status === 422, r.status);
 r = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
 check('demo login -> 200 + token', r.status === 200 && !!r.body?.token, r.text);
+const demoBusinesses = r.body?.businesses ?? [];
+check('demo owner sees every demo business', ['nutricion-demo', 'restaurante-demo', 'barberia-demo', 'yoga-demo', 'padel-demo'].every((x) => demoBusinesses.some((b) => b.slug === x && b.role === 'owner')), JSON.stringify(demoBusinesses.map((b) => b.slug)));
+/** Demo owner session opened on one business (business switcher). */
+async function asDemo(slug) {
+  const l = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const biz = (l.body?.businesses ?? []).find((b) => b.slug === slug);
+  if (!biz) return { token: null, tenant: null };
+  const sw = await call('POST', '/api/auth/switch', { tenantId: biz.id }, l.body.token);
+  return { token: sw.body?.token, tenant: sw.body?.tenant, user: sw.body?.user };
+}
+/** Same, but returns the raw switch response ({ status, body, text }). */
+async function demoLogin(slug) {
+  const l = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const biz = (l.body?.businesses ?? []).find((b) => b.slug === slug);
+  if (!biz) return { status: 404, body: null, text: `no demo business ${slug}` };
+  return call('POST', '/api/auth/switch', { tenantId: biz.id }, l.body.token);
+}
+r = await call('POST', '/api/auth/switch', { tenantId: demoBusinesses.find((b) => b.slug === 'nutricion-demo')?.id }, r.body?.token);
+check('switch to nutrition demo', r.status === 200 && r.body?.tenant?.slug === 'nutricion-demo', r.text.slice(0, 200));
 const token = r.body?.token;
 const tenant = r.body?.tenant;
 check('demo tenant slug', tenant?.slug === 'nutricion-demo', tenant?.slug);
@@ -296,7 +315,7 @@ if (process.env.CRON_SECRET) {
 
 // ---- Restaurant reservations
 {
-  const login = await call('POST', '/api/auth/login', { email: 'restaurante@agenda.mx', password: 'demo1234' });
+  const login = await demoLogin('restaurante-demo');
   check('restaurant demo login', login.status === 200 && login.body?.tenant?.kind === 'reservations', login.text.slice(0, 200));
   const rt = login.body?.token;
   const pub = await call('GET', '/api/public/restaurante-demo');
@@ -345,7 +364,8 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
 // ---- Team: per-professional agendas (barbershop demo)
 {
   const pub = await call('GET', '/api/public/barberia-demo');
-  check('barbershop exposes its team', pub.status === 200 && pub.body.kind === 'appointments' && pub.body.professionals?.length === 3, pub.text.slice(0, 200));
+  check('barbershop exposes its team', pub.status === 200 && pub.body.kind === 'appointments' && pub.body.professionals?.length === 4, pub.text.slice(0, 200));
+  check('barbershop has two locations', pub.body.locations?.map((l) => l.name).sort().join(',') === 'Narvarte,Polanco', JSON.stringify(pub.body.locations));
   const svc = pub.body.services[0];
   const pro = pub.body.professionals.find((p) => !p.serviceIds.length || p.serviceIds.includes(svc.id));
   let day = null;
@@ -368,9 +388,9 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
     check('"any barber" gets assigned to someone free', any.status === 201 && any.body.resourceName && any.body.resourceName !== pro.name, any.text);
     await call('POST', `/api/public/manage/${any.body.managePath?.slice(3)}/cancel`);
   } else check('slot still offered with another barber', false, 'all barbers busy at slot');
-  const login = await call('POST', '/api/auth/login', { email: 'barberia@agenda.mx', password: 'demo1234' });
+  const login = await demoLogin('barberia-demo');
   const team = await call('GET', '/api/professionals', null, login.body?.token);
-  check('barbershop team list (private)', team.status === 200 && team.body.length === 3 && (await call('GET', '/api/professionals')).status === 401);
+  check('barbershop team list (private)', team.status === 200 && team.body.length === 4 && (await call('GET', '/api/professionals')).status === 401);
   const m = await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`);
   check('customer cancels barber booking', m.status === 200);
 }
@@ -399,7 +419,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
     const back = (await call('GET', '/api/public/yoga-demo/classes?days=14')).body.find((x) => x.id === cls.id);
     check('cancelling frees the spot', c.status === 200 && back.spotsLeft === cls.spotsLeft);
   }
-  const login = await call('POST', '/api/auth/login', { email: 'clases@agenda.mx', password: 'demo1234' });
+  const login = await demoLogin('yoga-demo');
   const from = new Date().toISOString();
   const to = new Date(Date.now() + 7 * 864e5).toISOString();
   const sessions = await call('GET', `/api/class-sessions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, null, login.body?.token);
@@ -425,7 +445,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('same court same time -> 409', same.status === 409, same.text);
   const bad = await call('POST', '/api/public/padel-demo/bookings', { spaceId: null, durationMin: 45, startsAt: slot, name: 'Pádel QA 3', phone: '5514140003' });
   check('duration not offered -> 422', bad.status === 422 && bad.body.error === 'invalid_duration', bad.text);
-  const login = await call('POST', '/api/auth/login', { email: 'padel@agenda.mx', password: 'demo1234' });
+  const login = await demoLogin('padel-demo');
   const spaces = await call('GET', '/api/spaces', null, login.body?.token);
   check('club sees its courts', spaces.status === 200 && spaces.body.length === 4);
   check('customer cancels court', (await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`)).status === 200);
@@ -434,7 +454,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
 // ---- Roles: owner / admin see everything, colaboradores only their own
 {
   const login = async (email) => (await call('POST', '/api/auth/login', { email, password: 'demo1234' })).body;
-  const owner = await login('barberia@agenda.mx');
+  const owner = await asDemo('barberia-demo');
   const admin = await login('recepcion@agenda.mx');
   const memo = await login('memo@agenda.mx');
   check('demo logins have roles', owner?.user.role === 'owner' && admin?.user.role === 'admin' && memo?.user.role === 'staff' && !!memo.user.professionalId,
@@ -466,6 +486,36 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   const diego = await login('diego@agenda.mx');
   const ses = (await call('GET', `/api/class-sessions?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(to)}`, null, diego.token)).body ?? [];
   check('instructor sees only own classes', ses.length > 0 && ses.every((s) => s.professionalId === diego.user.professionalId), String(ses.length));
+}
+
+// ---- Locations (sucursales) and the Polanco manager
+{
+  const owner = await asDemo('barberia-demo');
+  const locs = await call('GET', '/api/locations', null, owner.token);
+  const pol = locs.body?.locations?.find((l) => l.name === 'Polanco');
+  check('locations + plan (1 included, 1 extra)', locs.status === 200 && !!pol && locs.body.plan.extraLocations === 1, locs.text.slice(0, 200));
+  const day = mxDay(10);
+  const pub = (await call('GET', '/api/public/barberia-demo')).body;
+  const rafa = pub.professionals.find((p) => p.locationId === pol?.id);
+  const slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${pub.services[0].id}&date=${day}&locationId=${pol?.id}`)).body?.slots ?? [];
+  const hour = (x) => Number(new Date(x).toLocaleTimeString('en-GB', { timeZone: 'America/Mexico_City', hour: '2-digit' }));
+  check('Polanco availability follows its own hours (11-21)', slots.length > 0 && slots.every((x) => hour(x) >= 11 && hour(x) < 21), slots.slice(0, 3).join(','));
+  const bk = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: pub.services[0].id, startsAt: slots[slots.length - 2], locationId: pol?.id, name: 'Sucursal QA', phone: '5518180001' });
+  check('booking at Polanco goes to its barber', bk.status === 201 && bk.body.resourceName === rafa?.name, bk.text);
+  const gerente = (await call('POST', '/api/auth/login', { email: 'polanco@agenda.mx', password: 'demo1234' })).body;
+  check('gerente limited to Polanco', gerente?.user?.role === 'admin' && gerente.user.locationId === pol?.id, JSON.stringify(gerente?.user));
+  const from = new Date(Date.now() - 30 * 864e5).toISOString();
+  const to = new Date(Date.now() + 30 * 864e5).toISOString();
+  const q = `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const gl = (await call('GET', q, null, gerente.token)).body ?? [];
+  const ol = (await call('GET', q, null, owner.token)).body ?? [];
+  check('gerente sees only Polanco bookings', gl.length > 0 && gl.every((a) => a.locationId === pol?.id) && ol.length > gl.length, `${gl.length} vs ${ol.length}`);
+  check("gerente can't change business settings", (await call('PATCH', '/api/tenant', { name: 'X' }, gerente.token)).status === 403);
+  const rep = await call('GET', `/api/reports?from=${mxDay(-60)}&to=${mxDay(0)}`, null, owner.token);
+  check('reports split by location', rep.body?.byLocation?.length === 2, JSON.stringify(rep.body?.byLocation));
+  check('customer cancels Polanco booking', (await call('POST', `/api/public/manage/${bk.body.managePath?.slice(3)}/cancel`)).status === 200);
+  const d = (await call('GET', '/api/public-directory')).body;
+  check('directory has a pin per barbershop location', d.entries.filter((e) => e.slug === 'barberia-demo').length === 2);
 }
 
 // ---- Directory shows the new kinds

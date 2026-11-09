@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { and, eq } from 'drizzle-orm';
 import { isManager, type Role } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { users } from '../db/schema.js';
+import { memberships } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { verifyToken } from '../lib/auth.js';
 
@@ -10,8 +10,10 @@ export interface AuthVars {
   userId: string;
   /** Always taken from the verified token, never from the request body/query. */
   tenantId: string;
-  /** Current role, read from the database so role changes and removals apply immediately. */
+  /** Current role in this business, read from the database so changes and removals apply immediately. */
   role: Role;
+  /** Location this login is limited to in this business (null = all locations). */
+  locationId: string | null;
 }
 
 export type AppEnv = { Variables: AuthVars };
@@ -26,14 +28,15 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   } catch {
     throw new AppError(401, 'unauthorized', 'Invalid or expired token');
   }
-  const user = await getDb().query.users.findFirst({
-    where: and(eq(users.id, claims.sub), eq(users.tenantId, claims.tid)),
-    columns: { role: true },
+  const m = await getDb().query.memberships.findFirst({
+    where: and(eq(memberships.userId, claims.sub), eq(memberships.tenantId, claims.tid)),
+    columns: { role: true, locationId: true },
   });
-  if (!user) throw new AppError(401, 'unauthorized', 'User no longer exists');
+  if (!m) throw new AppError(401, 'unauthorized', 'No access to this business');
   c.set('userId', claims.sub);
   c.set('tenantId', claims.tid);
-  c.set('role', user.role);
+  c.set('role', m.role);
+  c.set('locationId', m.locationId);
   await next();
 });
 
@@ -45,5 +48,14 @@ export const requireOwner = createMiddleware<AppEnv>(async (c, next) => {
 /** Owners and admins. */
 export const requireManager = createMiddleware<AppEnv>(async (c, next) => {
   if (!isManager(c.get('role'))) throw new AppError(403, 'forbidden', 'Owner or admin role required');
+  await next();
+});
+
+/** Owners and admins with access to every location (business-wide settings, catalogue, locations). */
+export const requireBusinessManager = createMiddleware<AppEnv>(async (c, next) => {
+  const role = c.get('role');
+  if (!isManager(role) || (role !== 'owner' && c.get('locationId'))) {
+    throw new AppError(403, 'forbidden', 'Business-wide manager role required');
+  }
   await next();
 });

@@ -5,7 +5,7 @@ import { getDb } from '../db/client.js';
 import { appointments, classSessions, services } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
 import { toServiceDto } from '../lib/mappers.js';
-import { requireManager, type AppEnv } from '../middleware/auth.js';
+import { requireBusinessManager, type AppEnv } from '../middleware/auth.js';
 
 export const serviceRoutes = new Hono<AppEnv>();
 
@@ -18,7 +18,7 @@ serviceRoutes.get('/services', async (c) => {
   return c.json(rows.map(toServiceDto));
 });
 
-serviceRoutes.post('/services', requireManager, async (c) => {
+serviceRoutes.post('/services', requireBusinessManager, async (c) => {
   const input = serviceInputSchema.parse(await c.req.json());
   const [row] = await getDb()
     .insert(services)
@@ -27,7 +27,7 @@ serviceRoutes.post('/services', requireManager, async (c) => {
   return c.json(toServiceDto(row!), 201);
 });
 
-serviceRoutes.put('/services/:id', requireManager, async (c) => {
+serviceRoutes.put('/services/:id', requireBusinessManager, async (c) => {
   const input = serviceInputSchema.parse(await c.req.json());
   const [row] = await getDb()
     .update(services)
@@ -39,7 +39,7 @@ serviceRoutes.put('/services/:id', requireManager, async (c) => {
 });
 
 /** Services with appointment history are deactivated instead of deleted. */
-serviceRoutes.delete('/services/:id', requireManager, async (c) => {
+serviceRoutes.delete('/services/:id', requireBusinessManager, async (c) => {
   const db = getDb();
   const id = c.req.param('id');
   const tenantId = c.get('tenantId');

@@ -4,6 +4,7 @@ import { spaceInputSchema } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { spaces } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
+import { guardRow, locationForWrite } from '../lib/locations.js';
 import { toSpaceDto } from '../lib/mappers.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
@@ -22,18 +23,24 @@ spaceRoutes.get('/spaces', async (c) => {
 
 spaceRoutes.post('/spaces', requireManager, async (c) => {
   const input = spaceInputSchema.parse(await c.req.json());
-  const [row] = await getDb()
+  const db = getDb();
+  const locationId = await locationForWrite(db, c, input.locationId, { create: true });
+  const [row] = await db
     .insert(spaces)
-    .values({ ...input, description: input.description ?? null, tenantId: c.get('tenantId') })
+    .values({ ...input, description: input.description ?? null, tenantId: c.get('tenantId'), locationId })
     .returning();
   return c.json(toSpaceDto(row!), 201);
 });
 
 spaceRoutes.put('/spaces/:id', requireManager, async (c) => {
   const input = spaceInputSchema.parse(await c.req.json());
-  const [row] = await getDb()
+  const db = getDb();
+  const current = await db.query.spaces.findFirst({ where: and(eq(spaces.id, c.req.param('id')), eq(spaces.tenantId, c.get('tenantId'))) });
+  if (!current) throw notFound('space');
+  const locationId = await locationForWrite(db, c, input.locationId, { current: current.locationId });
+  const [row] = await db
     .update(spaces)
-    .set({ ...input, description: input.description ?? null })
+    .set({ ...input, description: input.description ?? null, locationId })
     .where(and(eq(spaces.id, c.req.param('id')), eq(spaces.tenantId, c.get('tenantId'))))
     .returning();
   if (!row) throw notFound('space');
@@ -45,6 +52,9 @@ spaceRoutes.delete('/spaces/:id', requireManager, async (c) => {
   const db = getDb();
   const id = c.req.param('id');
   const tenantId = c.get('tenantId');
+  const current = await db.query.spaces.findFirst({ where: and(eq(spaces.id, id), eq(spaces.tenantId, tenantId)) });
+  if (!current) throw notFound('space');
+  guardRow(c, current.locationId);
   const used = await db.execute(sql`select 1 from appointments where tenant_id = ${tenantId} and space_id = ${id} limit 1`);
   if (used.rows.length) {
     const [row] = await db

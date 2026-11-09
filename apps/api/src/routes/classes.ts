@@ -7,7 +7,8 @@ import { appointments, classSessions, professionals, services, tenants } from '.
 import { queryAppointments } from '../lib/appointments.js';
 import { instructorBusy, lockSession, querySessions } from '../lib/classes.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { getScope } from '../lib/access.js';
+import { getScope, inScope, locationSql } from '../lib/access.js';
+import { guardRow, locationForWrite } from '../lib/locations.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -42,7 +43,7 @@ classRoutes.get('/class-sessions', async (c) => {
   const db = getDb();
   const scope = await getScope(db, c);
   // Instructors see the classes they teach.
-  const mine = scope.all ? sql`` : scope.professionalId ? sql`and cs.professional_id = ${scope.professionalId}` : sql`and false`;
+  const mine = !scope.personal ? locationSql(scope, 'cs') : scope.professionalId ? sql`and cs.professional_id = ${scope.professionalId}` : sql`and false`;
   return c.json(await querySessions(db, c.get('tenantId'), sql`cs.starts_at >= ${from} and cs.starts_at < ${to} ${mine}`));
 });
 
@@ -51,7 +52,10 @@ classRoutes.get('/class-sessions/:id', async (c) => {
   const tenantId = c.get('tenantId');
   const session = await one(db, tenantId, c.req.param('id'));
   const scope = await getScope(db, c);
-  if (!scope.all && session.professionalId !== scope.professionalId) throw notFound('class_session');
+  const visible = scope.personal
+    ? Boolean(scope.professionalId) && session.professionalId === scope.professionalId
+    : inScope(scope, { staffUserId: null, professionalId: session.professionalId, locationId: session.locationId });
+  if (!visible) throw notFound('class_session');
   const attendees = await queryAppointments(db, tenantId, sql`a.class_session_id = ${session.id}`, sql`order by c.name asc limit 1000`);
   return c.json({ session, attendees });
 });
@@ -61,6 +65,9 @@ classRoutes.post('/class-sessions', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const db = getDb();
   const svc = (await assertRefs(db, tenantId, input.serviceId, input.professionalId))!;
+  // The class takes place where its instructor works unless a location is given.
+  const pro = input.professionalId ? await db.query.professionals.findFirst({ where: eq(professionals.id, input.professionalId) }) : null;
+  const locationId = await locationForWrite(db, c, input.locationId ?? pro?.locationId, { create: true });
   const startsAt = new Date(input.startsAt);
   const endsAt = new Date(startsAt.getTime() + (input.durationMin ?? svc.durationMin) * MIN);
   const id = await db.transaction(async (tx) => {
@@ -78,6 +85,7 @@ classRoutes.post('/class-sessions', requireManager, async (c) => {
         endsAt,
         capacity: input.capacity,
         notes: input.notes ?? null,
+        locationId,
       })
       .returning({ id: classSessions.id });
     return row!.id;
@@ -93,6 +101,7 @@ classRoutes.patch('/class-sessions/:id', requireManager, async (c) => {
   await assertRefs(db, tenantId, undefined, input.professionalId);
   await db.transaction(async (tx) => {
     const { session, booked } = await lockSession(tx, tenantId, id);
+    guardRow(c, session.locationId);
     if (session.status !== 'scheduled') throw new AppError(422, 'class_cancelled', 'The class was cancelled');
     const startsAt = input.startsAt ? new Date(input.startsAt) : session.startsAt;
     const duration = input.durationMin ?? (session.endsAt.getTime() - session.startsAt.getTime()) / MIN;
@@ -131,7 +140,8 @@ classRoutes.post('/class-sessions/:id/cancel', requireManager, async (c) => {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   const stamp = `[${DateTime.now().setZone(tenant?.timezone ?? 'America/Mexico_City').toFormat('yyyy-MM-dd HH:mm')}] Clase cancelada por el negocio`;
   await db.transaction(async (tx) => {
-    await lockSession(tx, tenantId, id);
+    const { session } = await lockSession(tx, tenantId, id);
+    guardRow(c, session.locationId);
     await tx.update(classSessions).set({ status: 'cancelled' }).where(and(eq(classSessions.id, id), eq(classSessions.tenantId, tenantId)));
     await tx.execute(sql`
       update appointments set status = 'cancelled',
@@ -151,6 +161,7 @@ classRoutes.post('/class-sessions/:id/copy', requireManager, async (c) => {
     where: and(eq(classSessions.id, c.req.param('id')), eq(classSessions.tenantId, tenantId)),
   });
   if (!src) throw notFound('class_session');
+  guardRow(c, src.locationId);
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   const tz = tenant?.timezone ?? 'America/Mexico_City';
   // Same local wall-clock time even across DST changes.
@@ -163,7 +174,7 @@ classRoutes.post('/class-sessions/:id/copy', requireManager, async (c) => {
     }
     const [row] = await tx
       .insert(classSessions)
-      .values({ tenantId, serviceId: src.serviceId, professionalId: src.professionalId, startsAt, endsAt, capacity: src.capacity, notes: src.notes })
+      .values({ tenantId, serviceId: src.serviceId, professionalId: src.professionalId, startsAt, endsAt, capacity: src.capacity, notes: src.notes, locationId: src.locationId })
       .returning({ id: classSessions.id });
     return row!.id;
   });
@@ -175,6 +186,9 @@ classRoutes.delete('/class-sessions/:id', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();
+  const current = await db.query.classSessions.findFirst({ where: and(eq(classSessions.id, id), eq(classSessions.tenantId, tenantId)) });
+  if (!current) throw notFound('class_session');
+  guardRow(c, current.locationId);
   const used = await db.query.appointments.findFirst({
     where: and(eq(appointments.tenantId, tenantId), eq(appointments.classSessionId, id)),
     columns: { id: true },
