@@ -1,75 +1,326 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
-import { computeDepositCents, eligibleProfessionals, paymentSettingsOf, rentalSettingsOf, selfServiceOf, spacePriceCents, type AppointmentDto, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
+import { addDays, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
+import { computeDepositCents, eligibleProfessionals, paymentSettingsOf, rentalSettingsOf, selfServiceOf, spacePriceCents, type AppointmentDto, type BusinessHours, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
 import { useCustomers, useMyLocations, useProfessionals, useServices, useSpaces } from '../lib/queries';
 import { LocationSelect } from '../components/Locations';
+import { CalendarGrid, type CalColumn, type CalEvent } from '../components/CalendarGrid';
 
 const useTables = (enabled: boolean) =>
   useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables'), enabled });
 
+type View = 'day' | 'week' | 'team';
+const VIEW_KEY = 'agenda.view';
+const savedView = (): View | null => {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === 'day' || v === 'week' || v === 'team' ? v : null;
+  } catch {
+    return null;
+  }
+};
+const isSmallScreen = () => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767px)').matches;
+const toMin = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+};
+/** Opening range of one schedule in minutes; closing at or before opening means "past midnight". */
+const range = (h: BusinessHours): [number, number] => {
+  const open = toMin(h.open);
+  const close = toMin(h.close);
+  return [open, close <= open ? 24 * 60 : close];
+};
+const STATUS_ICON: Record<AppointmentDto['status'], string> = {
+  scheduled: '',
+  confirmed: '✓',
+  completed: '✔',
+  cancelled: '⊘',
+  no_show: '✕',
+};
+const BRAND = '#0f766e';
+
 export function AgendaPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { tenant } = useAuth();
   const { scoped, unlinked, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
   const [loc, setLoc] = useState('');
   const isRestaurant = tenant?.kind === 'reservations';
   const isRentals = tenant?.kind === 'rentals';
+  const isClasses = tenant?.kind === 'classes';
   const pros = useProfessionals(tenant?.kind === 'appointments');
   const spaces = useSpaces(isRentals);
+  const tables = useTables(isRestaurant && !scoped);
   const inLoc = (x: { locationId: string }) => !loc || x.locationId === loc;
   // Filter chips: one per professional (team) or space (rentals) of the selected location
   const resources = isRentals
-    ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#64748b' }))
+    ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#475569' }))
     : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color }));
   const [filter, setFilter] = useState('');
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
-  const [creating, setCreating] = useState<Date | null>(null);
+  // Columns of the "team" view: people, spaces or tables
+  const teamResources = (
+    isRestaurant
+      ? (tables.data ?? [])
+          .filter((x) => x.active && inLoc(x))
+          .map((x) => ({ id: x.id, name: x.name, color: BRAND, locationId: x.locationId, sub: t('tables.people', { count: x.seats }) as string }))
+      : isRentals
+        ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#475569', locationId: x.locationId, sub: '' }))
+        : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color, locationId: x.locationId, sub: '' }))
+  ).filter((r) => !filter || r.id === filter);
+  const teamAvailable = !scoped && !isClasses && (isRestaurant ? (tables.data ?? []).length > 1 : resources.length > 1);
+
+  // Businesses with several people/tables/spaces read best one column per resource (like Teams' schedule view).
+  const [viewPref, setViewPref] = useState<View | null>(() => savedView());
+  const preferred: View = viewPref ?? (teamAvailable ? 'team' : isSmallScreen() ? 'day' : 'week');
+  const view: View = preferred === 'team' && !teamAvailable ? 'day' : preferred;
+  const setView = (v: View) => {
+    setViewPref(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* private mode */
+    }
+  };
+  const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+  const [showCancelled, setShowCancelled] = useState(false);
+  const [creating, setCreating] = useState<{ at: Date; locationId?: string; preset?: Preset } | null>(null);
   const [selected, setSelected] = useState<AppointmentDto | null>(null);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
-  const to = addDays(weekStart, 7);
+  const [classGroup, setClassGroup] = useState<AppointmentDto[] | null>(null);
+  const weekStart = startOfWeek(anchor, { weekStartsOn: 1 });
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['appointments', weekStart.toISOString()],
     queryFn: () =>
       api<AppointmentDto[]>(
-        `/appointments?from=${encodeURIComponent(weekStart.toISOString())}&to=${encodeURIComponent(to.toISOString())}`,
+        `/appointments?from=${encodeURIComponent(weekStart.toISOString())}&to=${encodeURIComponent(addDays(weekStart, 7).toISOString())}`,
       ),
   });
 
   const today = new Date();
-  const newAt = (d: Date) => {
-    const base = isSameDay(d, today) ? new Date() : new Date(d.setHours(10, 0, 0, 0));
-    base.setMinutes(Math.ceil(base.getMinutes() / 30) * 30, 0, 0);
-    return base;
+  const loc0 = (l: string) => locs.byId.get(l);
+  const hoursOf = (locationId?: string): BusinessHours => (locationId && loc0(locationId)?.hours) || tenant!.settings.hours;
+  const visibleLocIds = loc ? [loc] : locs.list.map((l) => l.id);
+  const openFor = (date: Date, locIds: string[]): [number, number] | null => {
+    const wd = date.getDay() || 7;
+    const hs = (locIds.length ? locIds.map(hoursOf) : [tenant!.settings.hours]).filter((h) => h.days.includes(wd));
+    if (!hs.length) return null;
+    const rs = hs.map(range);
+    return [Math.min(...rs.map((r) => r[0])), Math.max(...rs.map((r) => r[1]))];
   };
+
+  const appts = (data ?? []).filter(
+    (a) => inLoc(a) && (!filter || a.professionalId === filter || a.spaceId === filter) && (showCancelled || a.status !== 'cancelled'),
+  );
+  const fmtTime = (d: Date) => format(d, i18n.language.startsWith('en') ? 'h:mm a' : 'HH:mm');
+  const fmtRange = (s: Date, e: Date) => `${fmtTime(s)} – ${fmtTime(e)}`;
+
+  const subtitleOf = (a: AppointmentDto) =>
+    a.tableId || (isRestaurant && a.partySize)
+      ? `${t('tables.people', { count: a.partySize ?? 0 })}${a.tableName ? ` · ${a.tableName}` : ''}`
+      : a.spaceName ?? a.serviceName;
+  const toEvent = (a: AppointmentDto, showPerson: boolean): CalEvent => {
+    const start = new Date(a.startsAt);
+    const end = new Date(a.endsAt);
+    const sub = isRentals ? a.serviceName : subtitleOf(a);
+    return {
+      id: a.id,
+      start,
+      end,
+      color: a.professionalColor ?? (isRentals ? '#475569' : BRAND),
+      title: a.customerName,
+      subtitle: sub,
+      detail: showPerson ? a.professionalName ?? a.spaceName : null,
+      icon: STATUS_ICON[a.status],
+      tone: a.status === 'cancelled' ? 'cancelled' : a.status === 'no_show' ? 'alert' : a.status === 'completed' ? 'muted' : 'normal',
+      label: [fmtRange(start, end), a.customerName, sub, a.professionalName ?? a.spaceName, t(`status.${a.status}`)].filter(Boolean).join(' · '),
+      onClick: () => setSelected(a),
+    };
+  };
+  /** Group class bookings into one block per class session. */
+  const toEvents = (list: AppointmentDto[], showPerson: boolean): CalEvent[] => {
+    const groups = new Map<string, AppointmentDto[]>();
+    const out: CalEvent[] = [];
+    for (const a of list) {
+      if (a.classSessionId) groups.set(a.classSessionId, [...(groups.get(a.classSessionId) ?? []), a]);
+      else out.push(toEvent(a, showPerson));
+    }
+    for (const [sid, g] of groups) {
+      const a = g[0]!;
+      const start = new Date(a.startsAt);
+      const end = new Date(a.endsAt);
+      const people = g.filter((x) => x.status !== 'cancelled').reduce((n, x) => n + (x.partySize ?? 1), 0);
+      const attendees = t('agenda.attendees', { count: people });
+      out.push({
+        id: `class-${sid}`,
+        start,
+        end,
+        color: a.professionalColor ?? BRAND,
+        title: a.serviceName,
+        subtitle: attendees,
+        detail: a.professionalName,
+        label: [fmtRange(start, end), a.serviceName, attendees, a.professionalName].filter(Boolean).join(' · '),
+        onClick: () => setClassGroup(g),
+      });
+    }
+    return out;
+  };
+
+  const onDay = (d: Date) => appts.filter((a) => isSameDay(new Date(a.startsAt), d));
+  const dayHeader = (d: Date, clickable: boolean) => {
+    const isToday = isSameDay(d, today);
+    const count = toEvents(onDay(d), false).length;
+    const inner = (
+      <>
+        <span className={`text-[11px] font-semibold uppercase tracking-wide ${isToday ? 'text-brand-700' : 'text-slate-500'}`}>
+          {format(d, 'EEE', { locale: dateLocale() })}
+        </span>
+        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-lg font-semibold ${isToday ? 'bg-brand-700 text-white' : 'text-slate-800'}`}>
+          {format(d, 'd')}
+        </span>
+        <span className="text-[11px] text-slate-500">{count ? t('agenda.count', { count }) : ' '}</span>
+      </>
+    );
+    return clickable ? (
+      <button type="button" className="flex w-full flex-col items-center rounded-md hover:bg-slate-50" onClick={() => { setAnchor(startOfDay(d)); setView('day'); }} aria-label={format(d, 'PPPP', { locale: dateLocale() })}>
+        {inner}
+      </button>
+    ) : (
+      <div className="flex flex-col items-center">{inner}</div>
+    );
+  };
+  const newAt = (at: Date, locationId?: string, preset?: Preset) => setCreating({ at, locationId: locationId ?? loc, preset });
+
+  let columns: CalColumn[];
+  if (view === 'team') {
+    const day = onDay(anchor);
+    const key = (a: AppointmentDto) => (isRestaurant ? a.tableId : isRentals ? a.spaceId : a.professionalId);
+    columns = teamResources.map((r) => ({
+      key: r.id,
+      date: anchor,
+      isToday: isSameDay(anchor, today),
+      open: openFor(anchor, [r.locationId]),
+      events: toEvents(day.filter((a) => key(a) === r.id), false),
+      onCreate: (at: Date) =>
+        newAt(at, r.locationId, isRestaurant ? { tableId: r.id } : isRentals ? { spaceId: r.id } : { professionalId: r.id }),
+      header: (
+        <div className="flex min-w-0 flex-col items-center px-1 text-center">
+          <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
+            <span className="truncate">{r.name}</span>
+          </span>
+          <span className="truncate text-[11px] text-slate-500">
+            {[r.sub, locs.multi && !loc ? loc0(r.locationId)?.name : ''].filter(Boolean).join(' · ') || t('agenda.count', { count: toEvents(day.filter((a) => key(a) === r.id), false).length })}
+          </span>
+        </div>
+      ),
+    }));
+    const unassigned = day.filter((a) => !key(a) || !teamResources.some((r) => r.id === key(a)));
+    if (unassigned.length && !filter) {
+      columns.push({
+        key: 'unassigned',
+        date: anchor,
+        isToday: isSameDay(anchor, today),
+        open: openFor(anchor, visibleLocIds),
+        events: toEvents(unassigned, true),
+        onCreate: (at) => newAt(at),
+        header: (
+          <div className="flex flex-col items-center text-center">
+            <span className="text-sm font-semibold text-slate-600">{isRestaurant ? t('agenda.noTable') : t('agenda.unassigned')}</span>
+            <span className="text-[11px] text-slate-500">{t('agenda.count', { count: unassigned.length })}</span>
+          </div>
+        ),
+      });
+    }
+  } else {
+    // Week view shows the days the business opens (plus any day that has bookings).
+    const days =
+      view === 'day'
+        ? [anchor]
+        : weekDays.filter((d) => openFor(d, visibleLocIds) || onDay(d).length > 0).length
+          ? weekDays.filter((d) => openFor(d, visibleLocIds) || onDay(d).length > 0)
+          : weekDays;
+    const showPerson = !filter && resources.length > 1;
+    columns = days.map((d) => ({
+      key: d.toISOString(),
+      date: d,
+      isToday: isSameDay(d, today),
+      open: openFor(d, visibleLocIds),
+      events: toEvents(onDay(d), showPerson),
+      onCreate: (at: Date) => newAt(at),
+      onMore: () => {
+        setAnchor(startOfDay(d));
+        setView(teamAvailable ? 'team' : 'day');
+      },
+      header: dayHeader(d, view === 'week'),
+    }));
+  }
+
+  // Visible hours: from the earliest opening to the latest closing, stretched to fit bookings.
+  const allHours = (visibleLocIds.length ? visibleLocIds.map(hoursOf) : [tenant!.settings.hours]).map(range);
+  const evMins = columns.flatMap((c) => c.events.flatMap((e) => [e.start.getHours() * 60 + e.start.getMinutes(), e.end.getHours() * 60 + e.end.getMinutes() || 24 * 60]));
+  const startMin = Math.max(0, Math.floor(Math.min(...allHours.map((r) => r[0]), ...evMins) / 60) * 60);
+  const endMin = Math.min(24 * 60, Math.ceil(Math.max(...allHours.map((r) => r[1]), ...evMins, startMin + 8 * 60) / 60) * 60);
+
+  const step = view === 'week' ? 7 : 1;
+  const rangeLabel =
+    view === 'week'
+      ? `${format(weekStart, 'd MMM', { locale: dateLocale() })} – ${format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}`
+      : format(anchor, t('agenda.dayFormat'), { locale: dateLocale() });
+  const teamLabel = isRestaurant ? t('agenda.viewTables') : isRentals ? t('agenda.viewSpaces') : t('agenda.viewTeam');
+  const views: [View, string][] = [['day', t('agenda.viewDay')], ['week', t('agenda.viewWeek')], ...(teamAvailable ? [['team', teamLabel] as [View, string]] : [])];
 
   return (
     <>
       <PageHeader
         title={isRestaurant ? t('nav.reservations') : isRentals ? t('nav.bookings') : t('agenda.title')}
         actions={
-          <>
-            <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="prev">‹</button>
-            <button className="btn-secondary" onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}>
-              {t('agenda.today')}
-            </button>
-            <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="next">›</button>
-            <button className="btn-primary" onClick={() => setCreating(newAt(new Date()))}>{isRestaurant ? t('tables.newReservation') : t('agenda.new')}</button>
-          </>
+          <button className="btn-primary" onClick={() => {
+            const at = isSameDay(anchor, today) ? new Date() : new Date(new Date(anchor).setHours(10, 0, 0, 0));
+            at.setMinutes(Math.ceil(at.getMinutes() / 30) * 30, 0, 0);
+            newAt(at);
+          }}>
+            {isRestaurant ? t('tables.newReservation') : t('agenda.new')}
+          </button>
         }
       />
-      <p className="-mt-4 mb-4 text-sm text-slate-500">
-        {format(weekStart, 'd MMM', { locale: dateLocale() })} – {format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}
-      </p>
       {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
-      {scoped && !unlinked && <p className="mb-4 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
+      {scoped && !unlinked && <p className="mb-3 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
+
+      {/* Toolbar: today, prev/next, range, view switch */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button className="btn-secondary !px-3 !py-1.5" onClick={() => setAnchor(startOfDay(new Date()))}>{t('agenda.today')}</button>
+        <div className="flex">
+          <button className="btn-secondary !rounded-r-none !px-3 !py-1.5" onClick={() => setAnchor(addDays(anchor, -step))} aria-label={t('agenda.prev')}>‹</button>
+          <button className="btn-secondary !-ml-px !rounded-l-none !px-3 !py-1.5" onClick={() => setAnchor(addDays(anchor, step))} aria-label={t('agenda.next')}>›</button>
+        </div>
+        <h2 className="min-w-0 text-base font-semibold text-slate-800 first-letter:uppercase sm:text-lg">{rangeLabel}</h2>
+        <div className="ml-auto flex items-center gap-3">
+          <label className="hidden items-center gap-1.5 text-sm text-slate-600 sm:flex">
+            <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} />
+            {t('agenda.showCancelled')}
+          </label>
+          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.view')}>
+            {views.map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => setView(v)}
+                className={`rounded-md px-3 py-1 text-sm font-medium ${view === v ? 'bg-brand-700 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {!scoped && locs.multi && (
         <div className="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('locations.title')}>
           {[{ id: '', name: t('locations.all') }, ...locs.list].map((l) => (
@@ -85,7 +336,7 @@ export function AgendaPage() {
         </div>
       )}
       {!scoped && resources.length > 1 && (
-        <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.filter')}>
+        <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.filter')}>
           <button
             onClick={() => setFilter('')}
             aria-pressed={!filter}
@@ -107,65 +358,75 @@ export function AgendaPage() {
         </div>
       )}
 
-      {isLoading ? (
-        <Loading />
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-7">
-          {days.map((d) => {
-            const items = (data ?? []).filter(
-              (a) => isSameDay(new Date(a.startsAt), d) && inLoc(a) && (!filter || a.professionalId === filter || a.spaceId === filter),
-            );
-            const isToday = isSameDay(d, today);
+      {/* Day strip to jump within the week (day and team views) */}
+      {view !== 'week' && (
+        <div className="-mx-1 mb-3 flex gap-1 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.pickDay')}>
+          {weekDays.map((d) => {
+            const sel = isSameDay(d, anchor);
+            const n = toEvents(onDay(d), false).length;
             return (
-              <div key={d.toISOString()} className={`rounded-xl border bg-white p-2 ${isToday ? 'border-brand-500' : 'border-slate-200'}`}>
-                <button
-                  className="mb-2 flex w-full items-baseline justify-between rounded px-1 text-left hover:bg-slate-50"
-                  onClick={() => setCreating(newAt(new Date(d)))}
-                  title={t('agenda.new')}
-                >
-                  <span className={`text-sm font-semibold capitalize ${isToday ? 'text-brand-700' : 'text-slate-700'}`}>
-                    {format(d, 'EEE d', { locale: dateLocale() })}
-                  </span>
-                  <span className="text-lg leading-none text-slate-400">+</span>
-                </button>
-                <div className="space-y-1.5">
-                  {items.length === 0 && <p className="px-1 text-xs text-slate-400">{t('agenda.empty')}</p>}
-                  {items.map((a) => (
-                    <button
-                      key={a.id}
-                      onClick={() => setSelected(a)}
-                      className="w-full rounded-lg border border-slate-200 p-2 text-left text-xs hover:border-brand-500"
-                      style={a.professionalColor ? { borderLeft: `4px solid ${a.professionalColor}` } : undefined}
-                    >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="font-semibold text-slate-800">{timeOnly(a.startsAt)}</span>
-                        <StatusBadge status={a.status} />
-                      </div>
-                      <div className="mt-1 truncate font-medium text-slate-700">{a.customerName}</div>
-                      <div className="truncate text-slate-500">
-                        {a.tableId || (isRestaurant && a.partySize)
-                          ? `${t('tables.people', { count: a.partySize ?? 0 })}${a.tableName ? ` · ${a.tableName}` : ''}`
-                          : a.spaceName
-                            ? `${a.spaceName} · ${Math.round((new Date(a.endsAt).getTime() - new Date(a.startsAt).getTime()) / 60000)} ${t('common.minutes')}`
-                            : a.serviceName}
-                      </div>
-                      {a.professionalName && <div className="truncate text-slate-400">{a.professionalName}</div>}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <button
+                key={d.toISOString()}
+                type="button"
+                onClick={() => setAnchor(startOfDay(d))}
+                aria-pressed={sel}
+                className={`flex min-w-[3.25rem] flex-1 flex-col items-center rounded-lg border px-2 py-1 ${sel ? 'border-brand-700 bg-brand-700 text-white' : isSameDay(d, today) ? 'border-brand-500 bg-white text-brand-700' : 'border-slate-200 bg-white text-slate-700'}`}
+              >
+                <span className="text-[11px] font-medium uppercase">{format(d, 'EEE', { locale: dateLocale() })}</span>
+                <span className="text-base font-semibold leading-tight">{format(d, 'd')}</span>
+                <span className={`text-[10px] ${sel ? 'text-white/80' : 'text-slate-400'}`}>{n || '·'}</span>
+              </button>
             );
           })}
         </div>
       )}
 
-      {creating && <NewAppointmentModal initial={creating} defaultLocation={loc} onClose={() => setCreating(null)} />}
+      {isLoading ? (
+        <Loading />
+      ) : columns.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">{t('agenda.empty')}</p>
+      ) : (
+        <CalendarGrid
+          columns={columns}
+          startMin={startMin}
+          endMin={endMin}
+          maxLanes={view === 'week' ? 3 : view === 'team' ? 3 : 6}
+          minColWidth={view === 'week' ? 120 : view === 'team' ? 150 : 200}
+          slotMinutes={tenant?.settings.hours.slotMinutes ?? 30}
+          formatHour={(h) => (i18n.language.startsWith('en') ? format(new Date(2000, 0, 1, h), 'h a') : `${String(h).padStart(2, '0')}:00`)}
+          formatRange={fmtRange}
+          formatTime={fmtTime}
+          createLabel={t('agenda.tapToCreate')}
+          moreLabel={(n) => t('agenda.more', { count: n })}
+        />
+      )}
+      <p className="mt-2 text-xs text-slate-500">{t('agenda.tapToCreate')}</p>
+
+      {creating && (
+        <NewAppointmentModal initial={creating.at} defaultLocation={creating.locationId ?? loc} preset={creating.preset} onClose={() => setCreating(null)} />
+      )}
       {selected && <AppointmentModal appt={selected} onClose={() => setSelected(null)} />}
+      {classGroup && (
+        <Modal open title={`${classGroup[0]!.serviceName} · ${fmtRange(new Date(classGroup[0]!.startsAt), new Date(classGroup[0]!.endsAt))}`} onClose={() => setClassGroup(null)}>
+          <ul className="divide-y divide-slate-100">
+            {classGroup.map((a) => (
+              <li key={a.id}>
+                <button type="button" className="flex w-full items-center justify-between gap-2 py-2 text-left hover:bg-slate-50" onClick={() => { setClassGroup(null); setSelected(a); }}>
+                  <span className="text-sm font-medium text-slate-800">{a.customerName}{(a.partySize ?? 1) > 1 ? ` ×${a.partySize}` : ''}</span>
+                  <StatusBadge status={a.status} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
     </>
   );
 }
 
-function NewAppointmentModal({ initial, defaultLocation, onClose }: { initial: Date; defaultLocation: string; onClose: () => void }) {
+type Preset = { professionalId?: string; spaceId?: string; tableId?: string };
+
+function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { initial: Date; defaultLocation: string; preset?: Preset; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { tenant, user } = useAuth();
@@ -182,10 +443,10 @@ function NewAppointmentModal({ initial, defaultLocation, onClose }: { initial: D
   const pros = useProfessionals(tenant?.kind === 'appointments');
   const spaces = useSpaces(isRentals);
   const durations = rentalSettingsOf(tenant!.settings).durations;
-  const [professionalId, setProfessionalId] = useState('');
-  const [spaceId, setSpaceId] = useState('');
+  const [professionalId, setProfessionalId] = useState(preset?.professionalId ?? '');
+  const [spaceId, setSpaceId] = useState(preset?.spaceId ?? '');
   const [partySize, setPartySize] = useState('2');
-  const [tableId, setTableId] = useState('');
+  const [tableId, setTableId] = useState(preset?.tableId ?? '');
   const services = useServices();
   const [search, setSearch] = useState('');
   const customers = useCustomers(search, 'name', scoped);

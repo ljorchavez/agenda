@@ -54,7 +54,15 @@ async function run(viewport, label) {
   await page.goto(`${BASE}/agenda`);
   await page.getByRole('heading', { name: 'Agenda' }).waitFor();
   await page.waitForTimeout(1000);
-  check(`[${label}] agenda shows appointments`, (await page.locator('main button:has(span.rounded-full)').count()) > 0);
+  await page.getByRole('button', { name: 'Semana', exact: true }).click();
+  await page.locator('[data-testid="calendar-event"]').first().waitFor({ timeout: 15000 }).catch(() => {});
+  check(`[${label}] agenda week grid shows appointments`, (await page.locator('[data-testid="calendar-event"]').count()) > 0);
+  check(`[${label}] agenda week grid has a column per open day`, (await page.locator('[data-testid="calendar-column"]').count()) >= 5);
+  await page.getByRole('button', { name: 'Día', exact: true }).click();
+  await page.waitForTimeout(500);
+  check(`[${label}] agenda day view has one column`, (await page.locator('[data-testid="calendar-column"]').count()) === 1);
+  await page.getByRole('button', { name: 'Semana', exact: true }).click();
+  await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/${label}-agenda.png`, fullPage: true });
 
   await page.goto(`${BASE}/customers`);
@@ -231,7 +239,9 @@ async function publicPages(viewport, label) {
   await page.goto(`${BASE}/agenda`);
   await page.getByRole('heading', { name: 'Reservaciones' }).waitFor({ timeout: 15000 }).catch(() => {});
   check(`[${label}] restaurant agenda is "Reservaciones"`, await page.getByRole('heading', { name: 'Reservaciones' }).isVisible());
+  await page.getByRole('button', { name: 'Mesas', exact: true }).click().catch(() => {});
   await page.waitForTimeout(1000);
+  check(`[${label}] restaurant agenda by table`, (await page.locator('[data-testid="calendar-column"]').count()) >= 8);
   await page.screenshot({ path: `${out}/${label}-restaurant-agenda.png`, fullPage: true });
   await page.goto(`${BASE}/tables`);
   await page.getByText('Mesa 8').waitFor({ timeout: 15000 }).catch(() => {});
@@ -311,6 +321,14 @@ async function newKinds(viewport, label) {
     await page.getByRole('button', { name: 'Todos' }).first().waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] agenda filter by barber`, await page.getByRole('button', { name: 'Todos' }).first().isVisible().catch(() => false));
     check(`[${label}] agenda filter by location`, await page.getByRole('button', { name: 'Todas las sucursales' }).isVisible().catch(() => false));
+    await page.getByRole('button', { name: 'Equipo', exact: true }).click().catch(() => {});
+    await page.waitForTimeout(800);
+    check(`[${label}] agenda team view: one column per barber`, (await page.locator('[data-testid="calendar-column"]').count()) >= 4);
+    await page.screenshot({ path: `${out}/${label}-barber-team-view.png`, fullPage: false });
+    // Tapping an empty spot opens "new booking" with that barber preselected
+    await page.locator('[data-testid="calendar-column"]').first().click({ position: { x: 20, y: 5 } });
+    check(`[${label}] tap on grid opens new booking`, await page.getByRole('heading', { name: 'Nueva cita' }).isVisible().catch(() => false));
+    await page.keyboard.press('Escape');
     await page.goto(`${BASE}/settings`);
     await page.getByRole('heading', { name: 'Sucursales' }).waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] settings lists locations and plan`, (await page.getByTestId('plan').innerText().catch(() => '')).includes('1 sucursal extra'));
