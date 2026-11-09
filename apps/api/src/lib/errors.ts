@@ -4,7 +4,7 @@ import { ZodError } from 'zod';
 
 export class AppError extends Error {
   constructor(
-    public status: 400 | 401 | 402 | 403 | 404 | 409 | 422 | 500 | 502,
+    public status: 400 | 401 | 402 | 403 | 404 | 409 | 422 | 429 | 500 | 502,
     public code: string,
     message?: string,
     public details?: unknown,

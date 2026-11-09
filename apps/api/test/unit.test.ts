@@ -28,7 +28,9 @@ describe('normalizeMxPhone', () => {
 describe('JWT', () => {
   it('round-trips claims', async () => {
     const token = await signToken({ sub: 'u1', tid: 't1', role: 'owner' });
-    await expect(verifyToken(token)).resolves.toEqual({ sub: 'u1', tid: 't1', role: 'owner' });
+    const claims = await verifyToken(token);
+    expect(claims).toMatchObject({ sub: 'u1', tid: 't1', role: 'owner' });
+    expect(claims.iat).toBeCloseTo(Date.now() / 1000, -1);
   });
   it('rejects tampered tokens', async () => {
     const token = await signToken({ sub: 'u1', tid: 't1', role: 'owner' });
