@@ -1,14 +1,10 @@
 name: Deploy
 
-# Deploys to AWS when main changes (after CI) or manually.
+# Deploys to AWS, manually only: production runs on Vercel (every push to main).
 # Setup (once): create an IAM role trusted by GitHub OIDC and save its ARN in the
 # repository secret AWS_DEPLOY_ROLE_ARN. See README → "Deploy to AWS".
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       stage:

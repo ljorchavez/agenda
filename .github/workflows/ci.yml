@@ -24,10 +24,9 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
-      # After your first local `pnpm install`, commit pnpm-lock.yaml and add --frozen-lockfile here.
-      - run: pnpm install
+          node-version: 22
+      # No lockfile committed yet: once pnpm-lock.yaml exists, add `cache: pnpm` above and --frozen-lockfile here.
+      - run: pnpm install --no-frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
         env:
