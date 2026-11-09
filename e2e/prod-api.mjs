@@ -207,7 +207,8 @@ for (let i = 0; i < 7 && !slots.length; i++) {
 }
 check('availability returns slots', slots.length > 0, r.text.slice(0, 200));
 const firstHourMx = slots[0] && new Date(slots[0]).toLocaleTimeString('en-GB', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' });
-check('first slot at 09:00 Mexico City', firstHourMx === '09:00', `${firstHourMx} (${slots[0]})`);
+// Opens at 09:00 Mexico City; earlier runs today may have taken the first few slots.
+check('first slot at/after 09:00 Mexico City, on the half hour', !!firstHourMx && firstHourMx >= '09:00' && /:(00|30)$/.test(firstHourMx), `${firstHourMx} (${slots[0]})`);
 r = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svc.id, startsAt: slots[0], name: 'Paciente Web QA', phone: '5511223344' });
 check('public booking', r.status === 201, r.text);
 check('booking returns 30% deposit with transfer data', r.body?.deposit?.amountCents === Math.round(svc.priceCents * 0.3) && r.body?.deposit?.method === 'transfer' && r.body?.deposit?.transfer?.clabe === '012180001234567899', JSON.stringify(r.body?.deposit));
