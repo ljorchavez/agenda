@@ -384,8 +384,11 @@ d('API (integration)', () => {
     expect(walkIn.status).toBe(201);
     expect(walkIn.body.resourceId).toBeNull();
 
-    // Cancelling frees the table for the next booking
+    // The walk-in without a table still takes a table's worth of room, so one cancellation isn't enough
     await call('PATCH', `/appointments/${seated[0]}`, { status: 'cancelled' }, tok);
+    expect((await call('POST', '/public/restaurante-prueba/bookings', { partySize: 2, startsAt: slot, name: 'Grupo 7', phone: '5500001197' })).status).toBe(409);
+    // Cancelling the walk-in too frees a table for the next booking
+    await call('PATCH', `/appointments/${walkIn.body.id}`, { status: 'cancelled' }, tok);
     expect((await call('POST', '/public/restaurante-prueba/bookings', { partySize: 2, startsAt: slot, name: 'Grupo 7', phone: '5500001197' })).status).toBe(201);
 
     // Customer reschedule keeps a table
@@ -556,7 +559,7 @@ d('API (integration)', () => {
     const avail = async (dur: number, space?: string) =>
       (await call('GET', `/public/padel-prueba/availability?durationMin=${dur}&date=${day.toISODate()}${space ? `&resourceId=${space}` : ''}`)).body.slots as string[];
     expect(await avail(90)).toContain(at(10));
-    expect((await call('GET', `/public/padel-prueba/availability?durationMin=45&date=${day.toISODate()}`)).status).toBe(400);
+    expect((await call('GET', `/public/padel-prueba/availability?durationMin=45&date=${day.toISODate()}`)).status).toBe(422);
 
     const r1 = await call('POST', '/public/padel-prueba/bookings', { resourceId: c1.id, durationMin: 90, startsAt: at(10), name: 'Jugador Uno', phone: '5566660001' });
     expect(r1.status).toBe(201);
@@ -681,9 +684,9 @@ d('API (integration)', () => {
     expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(3);
     await call('PATCH', `/users/${anaId}`, { role: 'staff' }, tok);
     expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(2);
-    // Unlinked team member sees nothing in a team business
+    // Unlinked team member works like front desk: sees the whole book of the business
     await call('PATCH', `/users/${anaId}`, { resourceId: null }, tok);
-    expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(0);
+    expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(3);
     // Removing the login revokes access right away
     expect((await call('DELETE', `/users/${anaId}`, undefined, tok)).status).toBe(204);
     expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).status).toBe(401);
