@@ -22,6 +22,7 @@ import { getDb, type Db } from '../db/client.js';
 import { appointments, customers, services, tenants, type Appointment, type Customer, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
+import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
 import { activeResources, assignResource, defaultService, pickResource, resourceBusy, type Need } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { hoursFor, listLocations, resolveLocation, toPublicLocation } from '../lib/locations.js';
@@ -279,7 +280,7 @@ publicRoutes.get('/public/:slug/classes', async (c) => {
 });
 
 async function findOrCreateCustomer(
-  tx: Pick<Db, 'query' | 'insert'>,
+  tx: Pick<Db, 'query' | 'insert' | 'execute'>,
   tenantId: string,
   input: { name: string; phone: string; email?: string },
 ) {
@@ -288,6 +289,7 @@ async function findOrCreateCustomer(
     where: and(eq(customers.tenantId, tenantId), eq(customers.phone, phone)),
   });
   if (existing) return existing;
+  await assertCanAddCustomer(tx, tenantId);
   const [created] = await tx
     .insert(customers)
     .values({ tenantId, name: input.name, phone, email: input.email || null })
@@ -363,6 +365,7 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
     assertRoom(session.capacity, booked, input.spots);
     const service = await tx.query.services.findFirst({ where: and(eq(services.id, session.serviceId), eq(services.tenantId, tenant.id)) });
     if (!service) throw notFound('service');
+    await assertCanAddBooking(tx, tenant.id);
     const customer = await findOrCreateCustomer(tx, tenant.id, input);
     const dup = await tx.execute(sql`
       select 1 from appointments where class_session_id = ${session.id} and customer_id = ${customer.id}
@@ -425,6 +428,7 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
     } else if (await hasOverlap(tx, tenant.id, startsAt, endsAt, { locationId: loc.id })) {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
+    await assertCanAddBooking(tx, tenant.id);
     const customer = await findOrCreateCustomer(tx, tenant.id, input);
     const [row] = await tx
       .insert(appointments)
