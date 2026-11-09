@@ -74,15 +74,14 @@ export function useAuth(): AuthState {
 /**
  * Mirrors the API's access rules (lib/access.ts):
  * - manager: owner or admin, sees and manages everything
- * - scoped: a colaborador who only sees their own bookings
- * - unlinked: a colaborador in a team business whose login isn't tied to a team member yet
+ * - scoped: a colaborador linked to a resource, who only sees its bookings
  */
 export function useAccess() {
-  const { user, tenant } = useAuth();
+  const { user } = useAuth();
   const manager = user?.role === 'owner' || user?.role === 'admin';
-  const perPerson = tenant?.kind === 'appointments' || tenant?.kind === 'classes';
-  const professionalId = user?.professionalId ?? null;
-  const scoped = !manager && (perPerson || Boolean(professionalId));
+  const resourceId = user?.resourceId ?? null;
+  /** Logins linked to a resource (barber, instructor) see only its bookings; front desk sees all. */
+  const scoped = !manager && Boolean(resourceId);
   /** Location this login is limited to (gerente de sucursal, host), or null */
   const locationId = user?.role === 'owner' ? null : user?.locationId ?? null;
   return {
@@ -90,8 +89,7 @@ export function useAccess() {
     /** Can change business-wide things: settings, services, locations */
     businessManager: manager && !locationId,
     scoped,
-    professionalId,
+    resourceId,
     locationId,
-    unlinked: scoped && !professionalId && perPerson,
   };
 }

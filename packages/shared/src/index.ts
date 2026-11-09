@@ -58,16 +58,55 @@ export const businessKind = (t: BusinessType): BusinessKind =>
         ? 'rentals'
         : 'appointments';
 
-/** Colours offered for professionals in the calendar. */
-export const PROFESSIONAL_COLORS = ['#0f766e', '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#ca8a04', '#16a34a', '#475569'] as const;
+/**
+ * Everything a business kind does differently lives here. The rest of the code (booking,
+ * calendar, resources, reports) is shared by every kind and reads these flags.
+ */
+export interface KindConfig {
+  /** Bookings carry a party size that must fit the resource capacity (restaurants) */
+  partySize: boolean;
+  /** Bookings are spots in group sessions (classes) */
+  sessions: boolean;
+  /** Customers pick a length instead of a service; price comes from the resource's hourly rate (rentals) */
+  durations: boolean;
+  /** A customer moving their booking keeps the same resource (their barber, their court); else any that fits */
+  keepResourceOnReschedule: boolean;
+}
+export const KIND_CONFIG: Record<BusinessKind, KindConfig> = {
+  appointments: { partySize: false, sessions: false, durations: false, keepResourceOnReschedule: true },
+  reservations: { partySize: true, sessions: false, durations: false, keepResourceOnReschedule: false },
+  classes: { partySize: false, sessions: true, durations: false, keepResourceOnReschedule: true },
+  rentals: { partySize: false, sessions: false, durations: true, keepResourceOnReschedule: true },
+};
+export const kindConfig = (k: BusinessKind): KindConfig => KIND_CONFIG[k];
 
-/** Professionals who perform a service (an empty list means they do every service). */
-export const eligibleProfessionals = <T extends { serviceIds: string[] }>(pros: T[], serviceId?: string | null): T[] =>
-  serviceId ? pros.filter((p) => !p.serviceIds.length || p.serviceIds.includes(serviceId)) : pros;
+/** Colours offered for resources (people, spaces, tables) in the calendar. */
+export const RESOURCE_COLORS = ['#0f766e', '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#ca8a04', '#16a34a', '#475569'] as const;
 
-/** Price of renting a space for `durationMin` at `pricePerHourCents`. */
-export const spacePriceCents = (pricePerHourCents: number, durationMin: number) =>
+/**
+ * Resources that can take a booking: they do the service (an empty list means every service)
+ * and fit the party (no capacity means no limit).
+ */
+export const eligibleResources = <T extends { serviceIds: string[]; capacity?: number | null }>(
+  list: T[],
+  opts: { serviceId?: string | null; partySize?: number | null } = {},
+): T[] =>
+  list.filter(
+    (r) =>
+      (!opts.serviceId || !r.serviceIds.length || r.serviceIds.includes(opts.serviceId)) &&
+      (!opts.partySize || r.capacity == null || r.capacity >= opts.partySize),
+  );
+
+/** Price for `durationMin` at `pricePerHourCents`. */
+export const hourlyPriceCents = (pricePerHourCents: number, durationMin: number) =>
   Math.round((pricePerHourCents * durationMin) / 60);
+
+/** A booking costs the resource's hourly rate when it has one, otherwise the service price. */
+export const bookingPriceCents = (
+  resource: { pricePerHourCents: number | null } | null | undefined,
+  servicePriceCents: number,
+  durationMin: number,
+) => (resource?.pricePerHourCents ? hourlyPriceCents(resource.pricePerHourCents, durationMin) : servicePriceCents);
 
 export const APPOINTMENT_STATUSES = [
   'scheduled',
@@ -432,85 +471,40 @@ export interface PlanDto {
   extraLocations: number;
 }
 
-// ---------- Restaurant tables ----------
+// ---------- Resources ----------
+// Whatever gets booked: a person (barber, doctor, instructor), a space (court, room) or a table.
+// They are one concept; KIND_CONFIG only decides how they are labelled and booked.
 
-export const tableInputSchema = z.object({
-  name: z.string().trim().min(1).max(60),
-  seats: z.number().int().min(1).max(50),
-  area: z.string().trim().max(60).nullable().optional(),
-  active: z.boolean().default(true),
-  /** Location (sucursal); defaults to the main one */
-  locationId: z.string().uuid().optional(),
-});
-export type TableInput = z.infer<typeof tableInputSchema>;
-
-export interface TableDto {
-  id: string;
-  name: string;
-  seats: number;
-  area: string | null;
-  active: boolean;
-  locationId: string;
-}
-
-// ---------- Professionals (per-person agendas) ----------
-
-export const professionalInputSchema = z.object({
+export const resourceInputSchema = z.object({
   name: z.string().trim().min(1).max(80),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#0f766e'),
   active: z.boolean().default(true),
-  /** Services this person performs; empty = all services */
+  /** Services it takes; empty = all services */
   serviceIds: z.array(z.string().uuid()).max(200).default([]),
-  /** Optional login linked to this professional */
+  /** Optional login linked to it (that person sees only its bookings) */
   userId: z.string().uuid().nullable().optional(),
+  /** People that fit at once (table seats, court players); null = no limit */
+  capacity: z.number().int().min(1).max(500).nullable().optional(),
+  /** When set, bookings are priced by the hour instead of by the service */
+  pricePerHourCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  description: z.string().trim().max(300).nullable().optional(),
   /** Location (sucursal); defaults to the main one */
   locationId: z.string().uuid().optional(),
 });
-export type ProfessionalInput = z.infer<typeof professionalInputSchema>;
+export type ResourceInput = z.infer<typeof resourceInputSchema>;
 
-export interface ProfessionalDto {
+export interface ResourceDto {
   id: string;
   name: string;
   color: string;
   active: boolean;
   serviceIds: string[];
   userId: string | null;
-  locationId: string;
-}
-
-// ---------- Spaces (rentals by the hour) ----------
-
-export const spaceInputSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  description: z.string().trim().max(300).nullable().optional(),
-  pricePerHourCents: z.number().int().min(0).max(100_000_000),
-  active: z.boolean().default(true),
-  /** Location (sucursal); defaults to the main one */
-  locationId: z.string().uuid().optional(),
-});
-export type SpaceInput = z.infer<typeof spaceInputSchema>;
-
-export interface SpaceDto {
-  id: string;
-  name: string;
+  capacity: number | null;
+  pricePerHourCents: number | null;
   description: string | null;
-  pricePerHourCents: number;
-  active: boolean;
   locationId: string;
 }
-
-export const publicRentalSchema = z.object({
-  locationId: z.string().uuid().optional(),
-  /** Omit to get any free space */
-  spaceId: z.string().uuid().nullable().optional(),
-  durationMin: z.number().int().min(15).max(720),
-  startsAt: z.string().datetime({ offset: true }),
-  name: z.string().trim().min(2).max(160),
-  phone: phoneSchema,
-  email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
-  notes: z.string().max(1000).optional(),
-});
-export type PublicRentalInput = z.infer<typeof publicRentalSchema>;
 
 // ---------- Group classes ----------
 
@@ -520,7 +514,8 @@ export type ClassSessionStatus = (typeof CLASS_SESSION_STATUSES)[number];
 export const classSessionInputSchema = z.object({
   /** The class type is a service (name, duration, price per spot) */
   serviceId: z.string().uuid(),
-  professionalId: z.string().uuid().nullable().optional(),
+  /** Instructor */
+  resourceId: z.string().uuid().nullable().optional(),
   startsAt: z.string().datetime({ offset: true }),
   durationMin: z.number().int().min(5).max(600).optional(),
   capacity: z.number().int().min(1).max(500),
@@ -533,7 +528,7 @@ export const classSessionInputSchema = z.object({
 export type ClassSessionInput = z.infer<typeof classSessionInputSchema>;
 
 export const classSessionUpdateSchema = z.object({
-  professionalId: z.string().uuid().nullable().optional(),
+  resourceId: z.string().uuid().nullable().optional(),
   startsAt: z.string().datetime({ offset: true }).optional(),
   durationMin: z.number().int().min(5).max(600).optional(),
   capacity: z.number().int().min(1).max(500).optional(),
@@ -545,9 +540,9 @@ export interface ClassSessionDto {
   id: string;
   serviceId: string;
   serviceName: string;
-  professionalId: string | null;
-  professionalName: string | null;
-  professionalColor: string | null;
+  resourceId: string | null;
+  resourceName: string | null;
+  resourceColor: string | null;
   startsAt: string;
   endsAt: string;
   capacity: number;
@@ -564,7 +559,7 @@ export interface PublicClassSessionDto {
   locationId: string;
   serviceId: string;
   serviceName: string;
-  professionalName: string | null;
+  resourceName: string | null;
   startsAt: string;
   endsAt: string;
   capacity: number;
@@ -582,17 +577,6 @@ export const publicClassBookingSchema = z.object({
 });
 export type PublicClassBookingInput = z.infer<typeof publicClassBookingSchema>;
 
-export const publicReservationSchema = z.object({
-  locationId: z.string().uuid().optional(),
-  partySize: z.number().int().min(1).max(50),
-  startsAt: z.string().datetime({ offset: true }),
-  name: z.string().trim().min(2).max(160),
-  phone: phoneSchema,
-  email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
-  notes: z.string().max(1000).optional(),
-});
-export type PublicReservationInput = z.infer<typeof publicReservationSchema>;
-
 export const mercadoPagoConnectSchema = z.object({
   accessToken: z.string().trim().min(20).max(300),
 });
@@ -602,8 +586,8 @@ export const staffCreateSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8).max(200),
   role: z.enum(ROLES).default('staff'),
-  /** Team member this login belongs to (their agenda) */
-  professionalId: z.string().uuid().nullable().optional(),
+  /** Resource (team member) this login belongs to (their agenda) */
+  resourceId: z.string().uuid().nullable().optional(),
   /** Limit this login to one location (null = all locations) */
   locationId: z.string().uuid().nullable().optional(),
 });
@@ -614,7 +598,7 @@ export const userUpdateSchema = z.object({
   role: z.enum(ROLES).optional(),
   /** Sets a new password (owners/admins resetting a team member's access) */
   password: z.string().min(8).max(200).optional(),
-  professionalId: z.string().uuid().nullable().optional(),
+  resourceId: z.string().uuid().nullable().optional(),
   locationId: z.string().uuid().nullable().optional(),
 });
 export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
@@ -634,9 +618,9 @@ export interface UserDto {
   name: string;
   email: string;
   role: Role;
-  /** Linked team member, if any */
-  professionalId: string | null;
-  professionalName: string | null;
+  /** Linked resource (team member), if any */
+  resourceId: string | null;
+  resourceName: string | null;
   /** Null = all locations */
   locationId: string | null;
   locationName: string | null;
@@ -685,16 +669,13 @@ export const appointmentCreateSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   /** Skip the double-booking check (e.g. businesses with several chairs) */
   allowOverlap: z.boolean().optional(),
-  /** Restaurants: number of people; a table is assigned automatically unless tableId is given */
+  /** Number of people (must fit the resource capacity; class spots) */
   partySize: z.number().int().min(1).max(50).optional(),
-  tableId: z.string().uuid().nullable().optional(),
-  /** Businesses with a team: who attends; auto-assigned when omitted */
-  professionalId: z.string().uuid().nullable().optional(),
-  /** Rentals: which space; auto-assigned when omitted */
-  spaceId: z.string().uuid().nullable().optional(),
+  /** Who or what takes the booking; auto-assigned when omitted */
+  resourceId: z.string().uuid().nullable().optional(),
   /** Classes: add the customer to this session (partySize = spots) */
   classSessionId: z.string().uuid().optional(),
-  /** Location (sucursal); inferred from the professional/table/space/class, else the main one */
+  /** Location (sucursal); inferred from the resource/class, else the main one */
   locationId: z.string().uuid().optional(),
 }).refine((x) => Boolean(x.startsAt || x.classSessionId), { path: ['startsAt'], message: 'startsAt required' });
 export type AppointmentCreateInput = z.infer<typeof appointmentCreateSchema>;
@@ -708,9 +689,7 @@ export const appointmentUpdateSchema = z.object({
   staffUserId: z.string().uuid().nullable().optional(),
   allowOverlap: z.boolean().optional(),
   partySize: z.number().int().min(1).max(50).optional(),
-  tableId: z.string().uuid().nullable().optional(),
-  professionalId: z.string().uuid().nullable().optional(),
-  spaceId: z.string().uuid().nullable().optional(),
+  resourceId: z.string().uuid().nullable().optional(),
   /**
    * When marking as completed, registers a paid payment for the outstanding balance
    * with this method in the same request.
@@ -746,11 +725,17 @@ export type PaymentLinkInput = z.infer<typeof paymentLinkSchema>;
 
 // ---------- Public booking ----------
 
+/** One booking request for every kind (classes use publicClassBookingSchema). KIND_CONFIG says which fields apply. */
 export const publicBookingSchema = z.object({
   locationId: z.string().uuid().optional(),
-  serviceId: z.string().uuid(),
+  /** Required unless the kind books by duration or party size */
+  serviceId: z.string().uuid().optional(),
   /** Omit for "any available" */
-  professionalId: z.string().uuid().nullable().optional(),
+  resourceId: z.string().uuid().nullable().optional(),
+  /** Kinds with party size */
+  partySize: z.number().int().min(1).max(50).optional(),
+  /** Kinds that book by duration */
+  durationMin: z.number().int().min(15).max(720).optional(),
   startsAt: z.string().datetime({ offset: true }),
   name: z.string().trim().min(2).max(160),
   phone: phoneSchema,
@@ -766,8 +751,8 @@ export interface SessionUser {
   name: string;
   email: string;
   role: Role;
-  /** Team member linked to this login (staff only see this person's bookings) */
-  professionalId: string | null;
+  /** Resource linked to this login (staff only see its bookings) */
+  resourceId: string | null;
   /** Location this login is limited to in the current business (null = all) */
   locationId: string | null;
 }
@@ -844,15 +829,11 @@ export interface AppointmentDto {
   paidCents: number;
   /** Private customer link to reschedule/cancel: /c/<token> */
   managePath: string;
-  /** Restaurants only */
+  /** People in the booking (party size, class spots) */
   partySize: number | null;
-  tableId: string | null;
-  tableName: string | null;
-  professionalId: string | null;
-  professionalName: string | null;
-  professionalColor: string | null;
-  spaceId: string | null;
-  spaceName: string | null;
+  resourceId: string | null;
+  resourceName: string | null;
+  resourceColor: string | null;
   classSessionId: string | null;
 }
 
@@ -906,8 +887,7 @@ export const reportQuerySchema = z
     granularity: z.enum(REPORT_GRANULARITIES).optional(),
     serviceId: z.string().uuid().optional(),
     staffUserId: z.string().uuid().optional(),
-    professionalId: z.string().uuid().optional(),
-    spaceId: z.string().uuid().optional(),
+    resourceId: z.string().uuid().optional(),
     locationId: z.string().uuid().optional(),
     source: z.enum(APPOINTMENT_SOURCES).optional(),
   })
@@ -950,10 +930,8 @@ export interface ReportDto {
   series: ReportPoint[];
   previousSeries: ReportPoint[];
   byService: { id: string; name: string; count: number; revenueCents: number }[];
-  /** Completed bookings per professional (businesses with a team) */
-  byProfessional: { id: string; name: string; color: string; count: number; revenueCents: number }[];
-  /** Completed bookings per space (rentals) */
-  bySpace: { id: string; name: string; count: number; revenueCents: number }[];
+  /** Completed bookings per resource (person, space, table) */
+  byResource: { id: string; name: string; color: string; count: number; revenueCents: number }[];
   /** Completed bookings per location (sucursal) */
   byLocation: { id: string; name: string; count: number; revenueCents: number }[];
   byMethod: { method: PaymentMethod; count: number; revenueCents: number }[];
@@ -978,7 +956,7 @@ export interface ManageAppointmentDto {
     status: AppointmentStatus;
     customerFirstName: string;
     partySize: number | null;
-    /** Professional or space name, if any */
+    /** Resource name, if any */
     resourceName: string | null;
   };
   canReschedule: boolean;
@@ -1011,10 +989,9 @@ export interface PublicBusinessDto {
   lng: number | null;
   /** Restaurants: largest party bookable online */
   maxPartySize: number | null;
-  /** Active professionals (empty when the business works as a single agenda) */
-  professionals: { id: string; name: string; color: string; serviceIds: string[]; locationId: string }[];
-  /** Rentals: bookable spaces and allowed durations */
-  spaces: { id: string; name: string; description: string | null; pricePerHourCents: number; locationId: string }[];
+  /** Active resources (empty when the business works as a single agenda) */
+  resources: Pick<ResourceDto, 'id' | 'name' | 'color' | 'serviceIds' | 'capacity' | 'pricePerHourCents' | 'description' | 'locationId'>[];
+  /** Kinds that book by duration: the lengths offered */
   rentalDurations: number[] | null;
   /** Active locations; the booking page asks which one when there are several */
   locations: PublicLocationDto[];
@@ -1027,7 +1004,7 @@ export interface PublicBookingResult {
   serviceName: string;
   businessName: string;
   partySize: number | null;
-  /** Professional or space assigned, if any */
+  /** Resource assigned, if any */
   resourceName: string | null;
   /** Total price of the booking */
   priceCents: number;

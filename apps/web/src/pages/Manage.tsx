@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
-import type { ManageAppointmentDto } from '@agenda/shared';
+import { kindConfig, type ManageAppointmentDto } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
 import { ErrorText, Loading, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
@@ -40,7 +40,7 @@ export function ManagePage() {
     const open = q.data?.business.hours.days ?? [];
     const all = Array.from({ length: 28 }, (_, i) => addDays(new Date(), i));
     // Classes can be scheduled any day; other kinds follow opening days.
-    return q.data?.business.kind === 'classes' ? all : all.filter((d) => open.includes(((d.getDay() + 6) % 7) + 1));
+    return q.data && kindConfig(q.data.business.kind).sessions ? all : all.filter((d) => open.includes(((d.getDay() + 6) % 7) + 1));
   }, [q.data]);
 
   const slots = useQuery({
@@ -102,10 +102,12 @@ export function ManagePage() {
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="font-semibold text-slate-900">
-                  {business.kind === 'reservations' && a.partySize ? t('booking.tableFor', { count: a.partySize }) : a.serviceName}
-                  {business.kind === 'classes' && (a.partySize ?? 1) > 1 && <span className="font-normal text-slate-500"> · {t('classes.spotsN', { count: a.partySize ?? 1 })}</span>}
+                  {[
+                    !kindConfig(business.kind).partySize && !kindConfig(business.kind).durations && a.serviceName,
+                    a.partySize != null && (a.partySize > 1 || kindConfig(business.kind).partySize) && t('booking.people', { count: a.partySize }),
+                  ].filter(Boolean).join(' · ') || a.serviceName}
                 </div>
-                {a.resourceName && <div className="text-sm text-slate-600">{business.kind === 'rentals' ? a.resourceName : t('manage.with', { name: a.resourceName })}</div>}
+                {a.resourceName && <div className="text-sm text-slate-600">{t('manage.with', { name: a.resourceName })}</div>}
                 <div className="text-slate-700">{dateTime(a.startsAt, tz)}</div>
               </div>
               <StatusBadge status={a.status} />

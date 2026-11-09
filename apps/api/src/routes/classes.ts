@@ -3,9 +3,9 @@ import { and, eq, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { appointmentListQuerySchema, classSessionInputSchema, classSessionUpdateSchema } from '@agenda/shared';
 import { getDb, type Db } from '../db/client.js';
-import { appointments, classSessions, professionals, services, tenants } from '../db/schema.js';
+import { appointments, classSessions, resources, services, tenants } from '../db/schema.js';
 import { queryAppointments } from '../lib/appointments.js';
-import { instructorBusy, lockSession, querySessions } from '../lib/classes.js';
+import { resourceBusyAt, lockSession, querySessions } from '../lib/classes.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { getScope, inScope, locationSql } from '../lib/access.js';
 import { guardRow, locationForWrite } from '../lib/locations.js';
@@ -20,16 +20,14 @@ export const classRoutes = new Hono<AppEnv>();
 
 const MIN = 60_000;
 
-async function assertRefs(db: Db, tenantId: string, serviceId: string | undefined, professionalId: string | null | undefined) {
-  const [svc, pro] = await Promise.all([
+async function assertRefs(db: Db, tenantId: string, serviceId: string | undefined, resourceId: string | null | undefined) {
+  const [svc, res] = await Promise.all([
     serviceId ? db.query.services.findFirst({ where: and(eq(services.id, serviceId), eq(services.tenantId, tenantId)) }) : null,
-    professionalId
-      ? db.query.professionals.findFirst({ where: and(eq(professionals.id, professionalId), eq(professionals.tenantId, tenantId)) })
-      : null,
+    resourceId ? db.query.resources.findFirst({ where: and(eq(resources.id, resourceId), eq(resources.tenantId, tenantId)) }) : null,
   ]);
   if (serviceId && !svc) throw notFound('service');
-  if (professionalId && !pro) throw notFound('professional');
-  return svc;
+  if (resourceId && !res) throw notFound('resource');
+  return { svc, res };
 }
 
 async function one(db: Db, tenantId: string, id: string) {
@@ -43,7 +41,7 @@ classRoutes.get('/class-sessions', async (c) => {
   const db = getDb();
   const scope = await getScope(db, c);
   // Instructors see the classes they teach.
-  const mine = !scope.personal ? locationSql(scope, 'cs') : scope.professionalId ? sql`and cs.professional_id = ${scope.professionalId}` : sql`and false`;
+  const mine = !scope.personal ? locationSql(scope, 'cs') : scope.resourceId ? sql`and cs.resource_id = ${scope.resourceId}` : sql`and false`;
   return c.json(await querySessions(db, c.get('tenantId'), sql`cs.starts_at >= ${from} and cs.starts_at < ${to} ${mine}`));
 });
 
@@ -53,8 +51,8 @@ classRoutes.get('/class-sessions/:id', async (c) => {
   const session = await one(db, tenantId, c.req.param('id'));
   const scope = await getScope(db, c);
   const visible = scope.personal
-    ? Boolean(scope.professionalId) && session.professionalId === scope.professionalId
-    : inScope(scope, { staffUserId: null, professionalId: session.professionalId, locationId: session.locationId });
+    ? Boolean(scope.resourceId) && session.resourceId === scope.resourceId
+    : inScope(scope, { staffUserId: null, resourceId: session.resourceId, locationId: session.locationId });
   if (!visible) throw notFound('class_session');
   const attendees = await queryAppointments(db, tenantId, sql`a.class_session_id = ${session.id}`, sql`order by c.name asc limit 1000`);
   return c.json({ session, attendees });
@@ -64,23 +62,23 @@ classRoutes.post('/class-sessions', requireManager, async (c) => {
   const input = classSessionInputSchema.parse(await c.req.json());
   const tenantId = c.get('tenantId');
   const db = getDb();
-  const svc = (await assertRefs(db, tenantId, input.serviceId, input.professionalId))!;
+  const { svc: found, res } = await assertRefs(db, tenantId, input.serviceId, input.resourceId);
+  const svc = found!;
   // The class takes place where its instructor works unless a location is given.
-  const pro = input.professionalId ? await db.query.professionals.findFirst({ where: eq(professionals.id, input.professionalId) }) : null;
-  const locationId = await locationForWrite(db, c, input.locationId ?? pro?.locationId, { create: true });
+  const locationId = await locationForWrite(db, c, input.locationId ?? res?.locationId, { create: true });
   const startsAt = new Date(input.startsAt);
   const endsAt = new Date(startsAt.getTime() + (input.durationMin ?? svc.durationMin) * MIN);
   const id = await db.transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${tenantId} for update`);
-    if (input.professionalId && !input.allowOverlap && (await instructorBusy(tx, tenantId, input.professionalId, startsAt, endsAt))) {
-      throw conflict('instructor_busy', 'The instructor has another class or appointment at that time');
+    if (input.resourceId && !input.allowOverlap && (await resourceBusyAt(tx, tenantId, input.resourceId, startsAt, endsAt))) {
+      throw conflict('resource_busy', 'The instructor has another class or appointment at that time');
     }
     const [row] = await tx
       .insert(classSessions)
       .values({
         tenantId,
         serviceId: svc.id,
-        professionalId: input.professionalId ?? null,
+        resourceId: input.resourceId ?? null,
         startsAt,
         endsAt,
         capacity: input.capacity,
@@ -98,7 +96,7 @@ classRoutes.patch('/class-sessions/:id', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();
-  await assertRefs(db, tenantId, undefined, input.professionalId);
+  await assertRefs(db, tenantId, undefined, input.resourceId);
   await db.transaction(async (tx) => {
     const { session, booked } = await lockSession(tx, tenantId, id);
     guardRow(c, session.locationId);
@@ -108,15 +106,15 @@ classRoutes.patch('/class-sessions/:id', requireManager, async (c) => {
     const endsAt = new Date(startsAt.getTime() + duration * MIN);
     const capacity = input.capacity ?? session.capacity;
     if (capacity < booked) throw new AppError(422, 'capacity_below_booked', `${booked} spots are already taken`);
-    const professionalId = input.professionalId === undefined ? session.professionalId : input.professionalId;
+    const resourceId = input.resourceId === undefined ? session.resourceId : input.resourceId;
     const timeChanged = startsAt.getTime() !== session.startsAt.getTime() || endsAt.getTime() !== session.endsAt.getTime();
-    if (professionalId && !input.allowOverlap && (timeChanged || professionalId !== session.professionalId) &&
-        (await instructorBusy(tx, tenantId, professionalId, startsAt, endsAt, id))) {
-      throw conflict('instructor_busy', 'The instructor has another class or appointment at that time');
+    if (resourceId && !input.allowOverlap && (timeChanged || resourceId !== session.resourceId) &&
+        (await resourceBusyAt(tx, tenantId, resourceId, startsAt, endsAt, id))) {
+      throw conflict('resource_busy', 'The instructor has another class or appointment at that time');
     }
     await tx
       .update(classSessions)
-      .set({ startsAt, endsAt, capacity, professionalId, notes: input.notes === undefined ? session.notes : input.notes })
+      .set({ startsAt, endsAt, capacity, resourceId, notes: input.notes === undefined ? session.notes : input.notes })
       .where(and(eq(classSessions.id, id), eq(classSessions.tenantId, tenantId)));
     // Attendees follow the class (and get a fresh reminder if the time changed).
     await tx
@@ -124,7 +122,7 @@ classRoutes.patch('/class-sessions/:id', requireManager, async (c) => {
       .set({
         startsAt,
         endsAt,
-        professionalId,
+        resourceId,
         ...(timeChanged ? { reminderSentAt: null } : {}),
       })
       .where(and(eq(appointments.classSessionId, id), eq(appointments.tenantId, tenantId)));
@@ -169,12 +167,12 @@ classRoutes.post('/class-sessions/:id/copy', requireManager, async (c) => {
   const endsAt = new Date(startsAt.getTime() + (src.endsAt.getTime() - src.startsAt.getTime()));
   const id = await db.transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${tenantId} for update`);
-    if (src.professionalId && (await instructorBusy(tx, tenantId, src.professionalId, startsAt, endsAt))) {
-      throw conflict('instructor_busy', 'The instructor has another class or appointment at that time');
+    if (src.resourceId && (await resourceBusyAt(tx, tenantId, src.resourceId, startsAt, endsAt))) {
+      throw conflict('resource_busy', 'The instructor has another class or appointment at that time');
     }
     const [row] = await tx
       .insert(classSessions)
-      .values({ tenantId, serviceId: src.serviceId, professionalId: src.professionalId, startsAt, endsAt, capacity: src.capacity, notes: src.notes, locationId: src.locationId })
+      .values({ tenantId, serviceId: src.serviceId, resourceId: src.resourceId, startsAt, endsAt, capacity: src.capacity, notes: src.notes, locationId: src.locationId })
       .returning({ id: classSessions.id });
     return row!.id;
   });

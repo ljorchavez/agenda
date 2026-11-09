@@ -74,67 +74,8 @@ export const tenants = pgTable(
   ],
 );
 
-/** Restaurant tables (bookable resources with a seat count). */
-export const diningTables = pgTable(
-  'dining_tables',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    seats: integer('seats').notNull(),
-    area: text('area'),
-    active: boolean('active').notNull().default(true),
-    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
-    locationId: uuid('location_id').notNull().default(sql`null`),
-    ...timestamps,
-  },
-  (t) => [index('dining_tables_tenant_idx').on(t.tenantId)],
-);
 
-/** People who attend appointments (barbers, doctors, instructors). Optional per business. */
-export const professionals = pgTable(
-  'professionals',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    color: text('color').notNull().default('#0f766e'),
-    active: boolean('active').notNull().default(true),
-    /** Services this person performs; empty = all */
-    serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
-    userId: uuid('user_id'),
-    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
-    locationId: uuid('location_id').notNull().default(sql`null`),
-    ...timestamps,
-  },
-  (t) => [
-    index('professionals_tenant_idx').on(t.tenantId),
-    uniqueIndex('professionals_user_uq').on(t.tenantId, t.userId).where(sql`user_id is not null`),
-  ],
-);
 
-/** Spaces rented by the hour (courts, meeting rooms, studios). */
-export const spaces = pgTable(
-  'spaces',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    description: text('description'),
-    pricePerHourCents: integer('price_per_hour_cents').notNull().default(0),
-    active: boolean('active').notNull().default(true),
-    /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
-    locationId: uuid('location_id').notNull().default(sql`null`),
-    ...timestamps,
-  },
-  (t) => [index('spaces_tenant_idx').on(t.tenantId)],
-);
 
 export const users = pgTable(
   'users',
@@ -232,6 +173,39 @@ export const services = pgTable(
   (t) => [index('services_tenant_idx').on(t.tenantId)],
 );
 
+/**
+ * Whatever gets booked: a person (barber, doctor, instructor), a space (court, room) or a table.
+ * One concept for every kind of business; capacity and hourly price are optional for all.
+ */
+export const resources = pgTable(
+  'resources',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** Filled by a DB trigger with the primary location when omitted */
+    locationId: uuid('location_id').notNull().default(sql`null`),
+    name: text('name').notNull(),
+    color: text('color').notNull().default('#0f766e'),
+    active: boolean('active').notNull().default(true),
+    /** Services it takes; empty = all */
+    serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
+    /** Login linked to it (that person sees only its bookings) */
+    userId: uuid('user_id'),
+    /** People that fit at once (table seats, court players); null = no limit */
+    capacity: integer('capacity'),
+    /** When set, bookings are priced by the hour */
+    pricePerHourCents: integer('price_per_hour_cents'),
+    description: text('description'),
+    ...timestamps,
+  },
+  (t) => [
+    index('resources_tenant_idx').on(t.tenantId, t.locationId),
+    uniqueIndex('resources_user_uq').on(t.tenantId, t.userId).where(sql`user_id is not null`),
+  ],
+);
+
 /** One occurrence of a group class with limited spots. Attendees are appointments. */
 export const classSessions = pgTable(
   'class_sessions',
@@ -243,7 +217,8 @@ export const classSessions = pgTable(
     serviceId: uuid('service_id')
       .notNull()
       .references(() => services.id, { onDelete: 'restrict' }),
-    professionalId: uuid('professional_id').references(() => professionals.id, { onDelete: 'set null' }),
+    /** Instructor */
+    resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'set null' }),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
     endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
     capacity: integer('capacity').notNull(),
@@ -279,9 +254,7 @@ export const appointments = pgTable(
     notes: text('notes'),
     /** Restaurants: number of people and assigned table */
     partySize: integer('party_size'),
-    tableId: uuid('table_id').references(() => diningTables.id, { onDelete: 'set null' }),
-    professionalId: uuid('professional_id').references(() => professionals.id, { onDelete: 'set null' }),
-    spaceId: uuid('space_id').references(() => spaces.id, { onDelete: 'set null' }),
+    resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'set null' }),
     classSessionId: uuid('class_session_id').references(() => classSessions.id, { onDelete: 'cascade' }),
     /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
     locationId: uuid('location_id').notNull().default(sql`null`),
@@ -292,8 +265,7 @@ export const appointments = pgTable(
     index('appointments_tenant_starts_idx').on(t.tenantId, t.startsAt),
     index('appointments_customer_idx').on(t.customerId),
     index('appointments_reminder_idx').on(t.startsAt, t.reminderSentAt),
-    index('appointments_professional_starts_idx').on(t.professionalId, t.startsAt),
-    index('appointments_space_starts_idx').on(t.spaceId, t.startsAt),
+    index('appointments_resource_starts_idx').on(t.resourceId, t.startsAt),
     index('appointments_class_session_idx').on(t.classSessionId),
   ],
 );
@@ -365,7 +337,5 @@ export type Customer = typeof customers.$inferSelect;
 export type Service = typeof services.$inferSelect;
 export type Appointment = typeof appointments.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
-export type DiningTable = typeof diningTables.$inferSelect;
-export type Professional = typeof professionals.$inferSelect;
-export type Space = typeof spaces.$inferSelect;
+export type Resource = typeof resources.$inferSelect;
 export type ClassSession = typeof classSessions.$inferSelect;

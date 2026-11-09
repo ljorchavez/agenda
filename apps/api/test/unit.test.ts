@@ -1,12 +1,11 @@
 import crypto from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { businessKind, computeDepositCents, DEFAULT_PAYMENT_SETTINGS, isValidClabe, normalizeMxPhone, rentalSettingsOf, spacePriceCents } from '@agenda/shared';
+import { bookingPriceCents, businessKind, computeDepositCents, DEFAULT_PAYMENT_SETTINGS, eligibleResources, hourlyPriceCents, isValidClabe, KIND_CONFIG, normalizeMxPhone, rentalSettingsOf } from '@agenda/shared';
 import { decryptSecret, encryptSecret, manageToken, verifyManageToken } from '../src/lib/crypto.js';
 import { DateTime } from 'luxon';
 import { defaultGranularity, previousRange } from '../src/routes/reports.js';
 import { policy } from '../src/routes/manage.js';
-import { pickTable } from '../src/lib/tables.js';
-import { eligibleFor, pickProfessional, pickSpace } from '../src/lib/resources.js';
+import { pickResource } from '../src/lib/resources.js';
 import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 
@@ -124,29 +123,6 @@ describe('self-service policy', () => {
   });
 });
 
-describe('restaurant table assignment', () => {
-  const tables = [
-    { id: 't4', name: 'Mesa 4', seats: 4 },
-    { id: 't2', name: 'Mesa 2', seats: 2 },
-    { id: 't10', name: 'Mesa 10', seats: 2 },
-    { id: 't6', name: 'Mesa 6', seats: 6 },
-  ];
-  const at = (h: number) => new Date(Date.UTC(2026, 4, 10, h));
-  it('picks the smallest table that fits, by natural name order', () => {
-    expect(pickTable(tables, [], 2, at(20), at(21))?.id).toBe('t2');
-    expect(pickTable(tables, [], 3, at(20), at(21))?.id).toBe('t4');
-    expect(pickTable(tables, [], 7, at(20), at(21))).toBeNull();
-  });
-  it('skips busy tables and frees them after the reservation ends', () => {
-    const busy = [
-      { tableId: 't2', s: at(19), e: at(21) },
-      { tableId: 't10', s: at(20), e: at(22) },
-    ];
-    expect(pickTable(tables, busy, 2, at(20), at(21))?.id).toBe('t4');
-    expect(pickTable(tables, busy, 2, at(21), at(22))?.id).toBe('t2');
-  });
-});
-
 describe('business kinds', () => {
   it('maps business types to how they book', () => {
     expect(businessKind('barbershop')).toBe('appointments');
@@ -158,46 +134,57 @@ describe('business kinds', () => {
   });
 });
 
-describe('pickProfessional', () => {
+// One assignment engine for every kind of business: people, courts and tables.
+describe('pickResource', () => {
   const at = (h: number) => new Date(Date.UTC(2026, 0, 10, h));
   const pros = [
-    { id: 'p1', name: 'Ana', serviceIds: [] as string[] },
-    { id: 'p2', name: 'Beto', serviceIds: ['s1'] },
+    { id: 'p1', name: 'Ana', serviceIds: [] as string[], capacity: null },
+    { id: 'p2', name: 'Beto', serviceIds: ['s1'], capacity: null },
   ];
-  it('filters by service (empty list = all services)', () => {
-    expect(eligibleFor(pros, 's1').map((p) => p.id)).toEqual(['p1', 'p2']);
-    expect(eligibleFor(pros, 's2').map((p) => p.id)).toEqual(['p1']);
+  const tables = [
+    { id: 't4', name: 'Mesa 4', serviceIds: [] as string[], capacity: 4 },
+    { id: 't2', name: 'Mesa 2', serviceIds: [] as string[], capacity: 2 },
+    { id: 't10', name: 'Mesa 10', serviceIds: [] as string[], capacity: 2 },
+    { id: 't6', name: 'Mesa 6', serviceIds: [] as string[], capacity: 6 },
+  ];
+  it('filters by service (empty list = all services) and by capacity (null = no limit)', () => {
+    expect(eligibleResources(pros, { serviceId: 's1' }).map((p) => p.id)).toEqual(['p1', 'p2']);
+    expect(eligibleResources(pros, { serviceId: 's2' }).map((p) => p.id)).toEqual(['p1']);
+    expect(eligibleResources(pros, { partySize: 8 }).map((p) => p.id)).toEqual(['p1', 'p2']);
+    expect(eligibleResources(tables, { partySize: 3 }).map((t) => t.id)).toEqual(['t4', 't6']);
   });
   it('picks a free person, spreading the load', () => {
-    expect(pickProfessional(pros, [], at(10), at(11))?.id).toBe('p1');
-    const busy = [{ pid: 'p1', s: at(8), e: at(9) }];
-    expect(pickProfessional(pros, busy, at(10), at(11))?.id).toBe('p2');
-    expect(pickProfessional(pros, [{ pid: 'p1', s: at(10), e: at(11) }], at(10), at(11))?.id).toBe('p2');
-    const both = [{ pid: 'p1', s: at(10), e: at(11) }, { pid: 'p2', s: at(10), e: at(12) }];
-    expect(pickProfessional(pros, both, at(10), at(11))).toBeNull();
+    expect(pickResource(pros, [], at(10), at(11))?.id).toBe('p1');
+    expect(pickResource(pros, [{ rid: 'p1', s: at(8), e: at(9) }], at(10), at(11))?.id).toBe('p2');
+    expect(pickResource(pros, [{ rid: 'p1', s: at(10), e: at(11) }], at(10), at(11))?.id).toBe('p2');
+    const both = [{ rid: 'p1', s: at(10), e: at(11) }, { rid: 'p2', s: at(10), e: at(12) }];
+    expect(pickResource(pros, both, at(10), at(11))).toBeNull();
   });
-  it('treats appointments without a professional as blocking everyone', () => {
-    expect(pickProfessional(pros, [{ pid: null, s: at(10), e: at(11) }], at(10), at(11))).toBeNull();
-    expect(pickProfessional(pros, [{ pid: null, s: at(10), e: at(11) }], at(11), at(12))?.id).toBe('p1');
+  it('picks the smallest table that fits, by natural name order, and skips busy ones', () => {
+    expect(pickResource(eligibleResources(tables, { partySize: 2 }), [], at(20), at(21))?.id).toBe('t2');
+    expect(pickResource(eligibleResources(tables, { partySize: 3 }), [], at(20), at(21))?.id).toBe('t4');
+    expect(pickResource(eligibleResources(tables, { partySize: 7 }), [], at(20), at(21))).toBeNull();
+    const busy = [{ rid: 't2', s: at(19), e: at(21) }, { rid: 't10', s: at(20), e: at(22) }];
+    expect(pickResource(eligibleResources(tables, { partySize: 2 }), busy, at(20), at(21))?.id).toBe('t4');
+    expect(pickResource(eligibleResources(tables, { partySize: 2 }), busy, at(21), at(22))?.id).toBe('t2');
   });
-});
-
-describe('spaces', () => {
-  const at = (h: number) => new Date(Date.UTC(2026, 0, 10, h));
-  const list = [
-    { id: 'c2', name: 'Cancha 2', pricePerHourCents: 40000 },
-    { id: 'c10', name: 'Cancha 10', pricePerHourCents: 40000 },
-    { id: 'c1', name: 'Cancha 1', pricePerHourCents: 50000 },
-  ];
-  it('picks the first free space by natural name order, or the requested one', () => {
-    expect(pickSpace(list, [], at(10), at(11))?.id).toBe('c1');
-    expect(pickSpace(list, [{ sid: 'c1', s: at(9), e: at(11) }], at(10), at(11))?.id).toBe('c2');
-    expect(pickSpace(list, [{ sid: 'c10', s: at(10), e: at(11) }], at(10), at(11), 'c10')).toBeNull();
-    expect(pickSpace(list, [{ sid: 'c10', s: at(10), e: at(11) }], at(11), at(12), 'c10')?.id).toBe('c10');
+  it('counts each booking without a resource as one resource taken', () => {
+    const one = [{ rid: null, s: at(10), e: at(11) }];
+    expect(pickResource(pros, one, at(10), at(11))?.id).toBe('p1');
+    expect(pickResource(pros, [...one, { rid: null, s: at(10), e: at(11) }], at(10), at(11))).toBeNull();
+    expect(pickResource([pros[0]!], one, at(10), at(11))).toBeNull();
   });
-  it('prices by the hour', () => {
-    expect(spacePriceCents(40000, 60)).toBe(40000);
-    expect(spacePriceCents(40000, 90)).toBe(60000);
-    expect(spacePriceCents(45000, 45)).toBe(33750);
+  it('prices by the hour when the resource has an hourly rate, else by service', () => {
+    expect(hourlyPriceCents(40000, 90)).toBe(60000);
+    expect(hourlyPriceCents(45000, 45)).toBe(33750);
+    expect(bookingPriceCents({ pricePerHourCents: 40000 }, 25000, 60)).toBe(40000);
+    expect(bookingPriceCents({ pricePerHourCents: null }, 25000, 60)).toBe(25000);
+    expect(bookingPriceCents(null, 25000, 60)).toBe(25000);
+  });
+  it('keeps the per-kind differences in one config', () => {
+    expect(KIND_CONFIG.reservations.partySize).toBe(true);
+    expect(KIND_CONFIG.classes.sessions).toBe(true);
+    expect(KIND_CONFIG.rentals.durations).toBe(true);
+    expect(KIND_CONFIG.reservations.keepResourceOnReschedule).toBe(false);
   });
 });

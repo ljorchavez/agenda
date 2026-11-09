@@ -22,10 +22,9 @@ import {
   type UserDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { diningTables, memberships, professionals, services, spaces, tenants, users, type Tenant, type User } from '../db/schema.js';
+import { memberships, resources, services, tenants, users, type Tenant, type User } from '../db/schema.js';
 import type { Db } from '../db/client.js';
-import { defaultSpaces, RENTAL_SERVICE_NAME } from '../lib/resources.js';
-import { DEFAULT_TABLES } from '../lib/tables.js';
+import { starterResources } from '../lib/resources.js';
 import { hashPassword, signToken, slugify, verifyPassword } from '../lib/auth.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { encryptSecret } from '../lib/crypto.js';
@@ -36,13 +35,13 @@ import { resolveLocation } from '../lib/locations.js';
 
 export const authRoutes = new Hono<AppEnv>();
 
-/** Team member linked to a login, if any. */
-async function linkedProfessional(db: Pick<Db, 'query'>, tenantId: string, userId: string): Promise<string | null> {
-  const p = await db.query.professionals.findFirst({
-    where: and(eq(professionals.tenantId, tenantId), eq(professionals.userId, userId)),
+/** Resource (team member) linked to a login, if any. */
+async function linkedResource(db: Pick<Db, 'query'>, tenantId: string, userId: string): Promise<string | null> {
+  const r = await db.query.resources.findFirst({
+    where: and(eq(resources.tenantId, tenantId), eq(resources.userId, userId)),
     columns: { id: true },
   });
-  return p?.id ?? null;
+  return r?.id ?? null;
 }
 
 async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 'email'>, tenantId: string) {
@@ -56,7 +55,7 @@ async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 
     name: u.name,
     email: u.email,
     role: m.role,
-    professionalId: await linkedProfessional(db, tenantId, u.id),
+    resourceId: await linkedResource(db, tenantId, u.id),
     locationId: m.role === 'owner' ? null : m.locationId,
   };
 }
@@ -125,15 +124,16 @@ async function createBusiness(
       durationMin: DEFAULT_RESERVATION_SETTINGS.durationMin,
       priceCents: 0,
     });
-    await tx.insert(diningTables).values(DEFAULT_TABLES.map((t) => ({ ...t, tenantId: tenant!.id })));
   } else if (kind === 'rentals') {
     // Spaces can be booked right away; the owner sets names and prices.
-    await tx.insert(services).values({ tenantId: tenant!.id, name: RENTAL_SERVICE_NAME, durationMin: 60, priceCents: 0 });
-    await tx.insert(spaces).values(defaultSpaces(input.businessType).map((x) => ({ ...x, tenantId: tenant!.id })));
+    await tx.insert(services).values({ tenantId: tenant!.id, name: 'Renta de espacio', durationMin: 60, priceCents: 0 });
   } else if (kind === 'classes') {
     // A first class type so the owner can schedule sessions immediately.
     await tx.insert(services).values({ tenantId: tenant!.id, name: 'Clase grupal', durationMin: 60, priceCents: 0 });
   }
+  // Tables or spaces so online booking works right away.
+  const starter = starterResources(kind, input.businessType);
+  if (starter.length) await tx.insert(resources).values(starter.map((r) => ({ ...r, tenantId: tenant!.id })));
   return tenant!;
 }
 
@@ -288,15 +288,15 @@ authRoutes.delete('/tenant/mercadopago', requireAuth, requireOwner, async (c) =>
 async function listUsers(db: Db, tenantId: string, locationId: string | null = null): Promise<UserDto[]> {
   const loc = locationId ? sql`and m.location_id = ${locationId}` : sql``;
   const res = await db.execute<{
-    id: string; name: string; email: string; role: Role; professional_id: string | null; professional_name: string | null;
+    id: string; name: string; email: string; role: Role; resource_id: string | null; resource_name: string | null;
     location_id: string | null; location_name: string | null; shared: boolean;
   }>(sql`
-    select u.id, u.name, u.email, m.role, p.id as professional_id, p.name as professional_name,
+    select u.id, u.name, u.email, m.role, r.id as resource_id, r.name as resource_name,
            m.location_id, l.name as location_name,
            exists (select 1 from memberships o where o.user_id = u.id and o.tenant_id <> m.tenant_id) as shared
     from memberships m
     join users u on u.id = m.user_id
-    left join professionals p on p.user_id = u.id and p.tenant_id = m.tenant_id
+    left join resources r on r.user_id = u.id and r.tenant_id = m.tenant_id
     left join locations l on l.id = m.location_id and l.tenant_id = m.tenant_id
     where m.tenant_id = ${tenantId} ${loc}
     order by case m.role when 'owner' then 0 when 'admin' then 1 else 2 end, u.name`);
@@ -305,32 +305,26 @@ async function listUsers(db: Db, tenantId: string, locationId: string | null = n
     name: r.name,
     email: r.email,
     role: r.role,
-    professionalId: r.professional_id,
-    professionalName: r.professional_name,
+    resourceId: r.resource_id,
+    resourceName: r.resource_name,
     locationId: r.role === 'owner' ? null : r.location_id,
     locationName: r.role === 'owner' ? null : r.location_name,
     sharedAccount: r.shared,
   }));
 }
 
-/** Links a login to a team member (one login per member), or unlinks it with null. */
-async function linkProfessional(db: Pick<Db, 'query' | 'update'>, tenantId: string, userId: string, professionalId: string | null) {
-  if (professionalId) {
-    const p = await db.query.professionals.findFirst({
-      where: and(eq(professionals.id, professionalId), eq(professionals.tenantId, tenantId)),
+/** Links a login to a resource (one login per resource), or unlinks it with null. */
+async function linkResource(db: Pick<Db, 'query' | 'update'>, tenantId: string, userId: string, resourceId: string | null) {
+  if (resourceId) {
+    const r = await db.query.resources.findFirst({
+      where: and(eq(resources.id, resourceId), eq(resources.tenantId, tenantId)),
       columns: { id: true },
     });
-    if (!p) throw notFound('professional');
+    if (!r) throw notFound('resource');
   }
-  await db
-    .update(professionals)
-    .set({ userId: null })
-    .where(and(eq(professionals.tenantId, tenantId), eq(professionals.userId, userId)));
-  if (professionalId) {
-    await db
-      .update(professionals)
-      .set({ userId })
-      .where(and(eq(professionals.id, professionalId), eq(professionals.tenantId, tenantId)));
+  await db.update(resources).set({ userId: null }).where(and(eq(resources.tenantId, tenantId), eq(resources.userId, userId)));
+  if (resourceId) {
+    await db.update(resources).set({ userId }).where(and(eq(resources.id, resourceId), eq(resources.tenantId, tenantId)));
   }
 }
 
@@ -391,7 +385,7 @@ authRoutes.post('/users', requireAuth, requireManager, async (c) => {
           .values({ email: input.email, name: input.name, passwordHash: await hashPassword(input.password) })
           .returning({ id: users.id }))[0]!.id;
     await tx.insert(memberships).values({ tenantId, userId, role: input.role, locationId });
-    if (input.professionalId) await linkProfessional(tx, tenantId, userId, input.professionalId);
+    if (input.resourceId) await linkResource(tx, tenantId, userId, input.resourceId);
     return userId;
   });
   return c.json((await listUsers(db, tenantId)).find((u) => u.id === id), 201);
@@ -432,7 +426,7 @@ authRoutes.patch('/users/:id', requireAuth, requireManager, async (c) => {
     if (locationId !== undefined) mPatch.locationId = locationId;
     if (nextRole === 'owner') mPatch.locationId = null;
     if (Object.keys(mPatch).length) await tx.update(memberships).set(mPatch).where(eq(memberships.id, target.id));
-    if (input.professionalId !== undefined) await linkProfessional(tx, tenantId, id, input.professionalId);
+    if (input.resourceId !== undefined) await linkResource(tx, tenantId, id, input.resourceId);
   });
   return c.json((await listUsers(db, tenantId)).find((u) => u.id === id));
 });
@@ -455,7 +449,7 @@ authRoutes.delete('/users/:id', requireAuth, requireManager, async (c) => {
         .where(and(eq(memberships.tenantId, tenantId), eq(memberships.role, 'owner'), ne(memberships.userId, id)));
       if (!owners.length) throw new AppError(422, 'last_owner', 'The business needs at least one owner');
     }
-    await tx.update(professionals).set({ userId: null }).where(and(eq(professionals.tenantId, tenantId), eq(professionals.userId, id)));
+    await tx.update(resources).set({ userId: null }).where(and(eq(resources.tenantId, tenantId), eq(resources.userId, id)));
     await tx.delete(memberships).where(eq(memberships.id, target.id));
     const others = await tx.select({ id: memberships.id }).from(memberships).where(eq(memberships.userId, id)).limit(1);
     if (!others.length) await tx.delete(users).where(eq(users.id, id));

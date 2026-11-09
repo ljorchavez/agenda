@@ -12,9 +12,9 @@ type Row = {
   service_id: string;
   service_name: string;
   price_cents: number | string;
-  professional_id: string | null;
-  professional_name: string | null;
-  professional_color: string | null;
+  resource_id: string | null;
+  resource_name: string | null;
+  resource_color: string | null;
   starts_at: Date | string;
   ends_at: Date | string;
   capacity: number | string;
@@ -28,23 +28,23 @@ type Row = {
 export async function querySessions(db: Pick<Db, 'execute'>, tenantId: string, where: SQL, limit = 1000): Promise<ClassSessionDto[]> {
   const res = await db.execute<Row>(sql`
     select cs.id, cs.service_id, s.name as service_name, s.price_cents,
-           cs.professional_id, p.name as professional_name, p.color as professional_color,
+           cs.resource_id, r.name as resource_name, r.color as resource_color,
            cs.starts_at, cs.ends_at, cs.capacity, cs.status, cs.notes, cs.location_id,
            coalesce((select sum(coalesce(a.party_size, 1)) from appointments a
                      where a.class_session_id = cs.id and a.tenant_id = cs.tenant_id
                        and a.status in ${HOLDS_SPOT}), 0) as booked
     from class_sessions cs
     join services s on s.id = cs.service_id and s.tenant_id = cs.tenant_id
-    left join professionals p on p.id = cs.professional_id and p.tenant_id = cs.tenant_id
+    left join resources r on r.id = cs.resource_id and r.tenant_id = cs.tenant_id
     where cs.tenant_id = ${tenantId} and ${where}
     order by cs.starts_at asc limit ${limit}`);
   return res.rows.map((r) => ({
     id: r.id,
     serviceId: r.service_id,
     serviceName: r.service_name,
-    professionalId: r.professional_id,
-    professionalName: r.professional_name,
-    professionalColor: r.professional_color,
+    resourceId: r.resource_id,
+    resourceName: r.resource_name,
+    resourceColor: r.resource_color,
     startsAt: new Date(r.starts_at).toISOString(),
     endsAt: new Date(r.ends_at).toISOString(),
     capacity: Number(r.capacity),
@@ -61,7 +61,7 @@ export const toPublicSession = (s: ClassSessionDto): PublicClassSessionDto => ({
   locationId: s.locationId,
   serviceId: s.serviceId,
   serviceName: s.serviceName,
-  professionalName: s.professionalName,
+  resourceName: s.resourceName,
   startsAt: s.startsAt,
   endsAt: s.endsAt,
   capacity: s.capacity,
@@ -80,7 +80,7 @@ export async function lockSession(
   excludeAppointmentId?: string,
 ): Promise<{ session: ClassSession; booked: number }> {
   const res = await tx.execute<{
-    id: string; tenant_id: string; service_id: string; professional_id: string | null;
+    id: string; tenant_id: string; service_id: string; resource_id: string | null;
     starts_at: Date | string; ends_at: Date | string; capacity: number; status: string; notes: string | null;
     created_at: Date | string; updated_at: Date | string; location_id: string;
   }>(sql`select * from class_sessions where id = ${id} and tenant_id = ${tenantId} for update`);
@@ -95,7 +95,7 @@ export async function lockSession(
       id: r.id,
       tenantId: r.tenant_id,
       serviceId: r.service_id,
-      professionalId: r.professional_id,
+      resourceId: r.resource_id,
       startsAt: new Date(r.starts_at),
       endsAt: new Date(r.ends_at),
       capacity: Number(r.capacity),
@@ -116,11 +116,11 @@ export function assertRoom(capacity: number, booked: number, spots: number) {
   }
 }
 
-/** True if the instructor teaches or attends something else in [start, end). */
-export async function instructorBusy(
+/** True if the resource (instructor) runs a class or has a booking in [start, end). */
+export async function resourceBusyAt(
   db: Pick<Db, 'execute'>,
   tenantId: string,
-  professionalId: string,
+  resourceId: string,
   start: Date,
   end: Date,
   excludeSessionId?: string,
@@ -128,11 +128,11 @@ export async function instructorBusy(
   const exclude = excludeSessionId ? sql`and id <> ${excludeSessionId}` : sql``;
   const res = await db.execute(sql`
     select 1 from class_sessions
-    where tenant_id = ${tenantId} and professional_id = ${professionalId} and status = 'scheduled'
+    where tenant_id = ${tenantId} and resource_id = ${resourceId} and status = 'scheduled'
       and starts_at < ${end.toISOString()} and ends_at > ${start.toISOString()} ${exclude}
     union all
     select 1 from appointments
-    where tenant_id = ${tenantId} and professional_id = ${professionalId}
+    where tenant_id = ${tenantId} and resource_id = ${resourceId}
       and status in ('scheduled', 'confirmed') and class_session_id is null
       and starts_at < ${end.toISOString()} and ends_at > ${start.toISOString()}
     limit 1`);

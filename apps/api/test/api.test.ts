@@ -336,11 +336,11 @@ d('API (integration)', () => {
     expect(reg.status).toBe(201);
     const tok = reg.body.token;
     expect(reg.body.tenant.kind).toBe('reservations');
-    const tables = await call('GET', '/tables', undefined, tok);
-    expect(tables.body.map((t: { seats: number }) => t.seats)).toEqual([2, 2, 4, 4, 6]);
+    const tables = await call('GET', '/resources', undefined, tok);
+    expect(tables.body.map((t: { capacity: number }) => t.capacity)).toEqual([2, 2, 4, 4, 6]);
     // B can't see A's tables
-    expect((await call('GET', '/tables', undefined, b.token)).body).toHaveLength(0);
-    expect((await call('PUT', `/tables/${tables.body[0].id}`, { name: 'x', seats: 2 }, b.token)).status).toBe(404);
+    expect((await call('GET', '/resources', undefined, b.token)).body).toHaveLength(0);
+    expect((await call('PUT', `/resources/${tables.body[0].id}`, { name: 'x', capacity: 2 }, b.token)).status).toBe(404);
 
     const pub = await call('GET', '/public/restaurante-prueba');
     expect(pub.body.kind).toBe('reservations');
@@ -368,26 +368,26 @@ d('API (integration)', () => {
     expect((await call('POST', '/public/restaurante-prueba/bookings', { partySize: 12, startsAt: slot, name: 'Grande', phone: '5500001198' })).status).toBe(422);
 
     const list = await call('GET', `/appointments?from=${day.startOf('day').toISO()}&to=${day.endOf('day').toISO()}`, undefined, tok);
-    const names = list.body.map((a: { tableName: string }) => a.tableName).sort();
+    const names = list.body.map((a: { resourceName: string }) => a.resourceName).sort();
     expect(names).toEqual(['Mesa 1', 'Mesa 2', 'Mesa 3', 'Mesa 4', 'Mesa 5']);
-    expect(new Set(list.body.map((a: { tableId: string }) => a.tableId)).size).toBe(5);
+    expect(new Set(list.body.map((a: { resourceId: string }) => a.resourceId)).size).toBe(5);
 
     // Staff reservation at the same time has no table left -> 409; with allowOverlap it's saved without a table
     const cust = await call('POST', '/customers', { name: 'Walk In', phone: '5512345000' }, tok);
     const svc = (await call('GET', '/services', undefined, tok)).body[0];
     const noRoom = await call('POST', '/appointments', { customerId: cust.body.id, serviceId: svc.id, startsAt: slot, partySize: 2 }, tok);
     expect(noRoom.status).toBe(409);
-    expect(noRoom.body.error).toBe('no_table_available');
+    expect(noRoom.body.error).toBe('no_resource_available');
     const walkIn = await call('POST', '/appointments', { customerId: cust.body.id, serviceId: svc.id, startsAt: slot, partySize: 2, allowOverlap: true }, tok);
     expect(walkIn.status).toBe(201);
-    expect(walkIn.body.tableId).toBeNull();
+    expect(walkIn.body.resourceId).toBeNull();
 
     // Cancelling frees the table for the next booking
     await call('PATCH', `/appointments/${seated[0]}`, { status: 'cancelled' }, tok);
     expect((await call('POST', '/public/restaurante-prueba/bookings', { partySize: 2, startsAt: slot, name: 'Grupo 7', phone: '5500001197' })).status).toBe(201);
 
     // Customer reschedule keeps a table
-    const one = (await call('GET', `/appointments?from=${day.startOf('day').toISO()}&to=${day.endOf('day').toISO()}`, undefined, tok)).body.find((a: { tableId: string | null; status: string }) => a.tableId && a.status === 'scheduled');
+    const one = (await call('GET', `/appointments?from=${day.startOf('day').toISO()}&to=${day.endOf('day').toISO()}`, undefined, tok)).body.find((a: { resourceId: string | null; status: string }) => a.resourceId && a.status === 'scheduled');
     const later = av.body.slots[av.body.slots.length - 1];
     const moved = await call('POST', `/public/manage/${one.managePath.slice(3)}/reschedule`, { startsAt: later });
     expect(moved.status).toBe(200);
@@ -408,21 +408,21 @@ d('API (integration)', () => {
 
     // A single-agenda appointment made before the team existed...
     const pre = (await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, startsAt: at(10) }, tok)).body;
-    const p1 = await call('POST', '/professionals', { name: 'Toño', color: '#2563eb' }, tok);
+    const p1 = await call('POST', '/resources', { name: 'Toño', color: '#2563eb' }, tok);
     expect(p1.status).toBe(201);
     // ...goes to the first professional
-    expect((await call('GET', `/appointments/${pre.id}`, undefined, tok)).body.professionalName).toBe('Toño');
-    const p2 = (await call('POST', '/professionals', { name: 'Memo', serviceIds: [corte.id] }, tok)).body;
+    expect((await call('GET', `/appointments/${pre.id}`, undefined, tok)).body.resourceName).toBe('Toño');
+    const p2 = (await call('POST', '/resources', { name: 'Memo', serviceIds: [corte.id] }, tok)).body;
     expect(p2.serviceIds).toEqual([corte.id]);
-    expect((await call('GET', '/professionals', undefined, b.token)).body).toHaveLength(0);
-    expect((await call('PUT', `/professionals/${p2.id}`, { name: 'x' }, b.token)).status).toBe(404);
-    expect((await call('POST', '/professionals', { name: 'Raro', serviceIds: [corte.id] }, b.token)).status).toBe(404);
+    expect((await call('GET', '/resources', undefined, b.token)).body).toHaveLength(0);
+    expect((await call('PUT', `/resources/${p2.id}`, { name: 'x' }, b.token)).status).toBe(404);
+    expect((await call('POST', '/resources', { name: 'Raro', serviceIds: [corte.id] }, b.token)).status).toBe(404);
 
     const pub = await call('GET', '/public/barberia-equipo');
-    expect(pub.body.professionals.map((p: { name: string }) => p.name)).toEqual(['Memo', 'Toño']);
-    expect(JSON.stringify(pub.body.professionals)).not.toContain('userId');
+    expect(pub.body.resources.map((p: { name: string }) => p.name)).toEqual(['Memo', 'Toño']);
+    expect(JSON.stringify(pub.body.resources)).not.toContain('userId');
     const avail = async (svc: string, pro?: string) =>
-      (await call('GET', `/public/barberia-equipo/availability?serviceId=${svc}&date=${day.toISODate()}${pro ? `&professionalId=${pro}` : ''}`)).body.slots as string[];
+      (await call('GET', `/public/barberia-equipo/availability?serviceId=${svc}&date=${day.toISODate()}${pro ? `&resourceId=${pro}` : ''}`)).body.slots as string[];
     expect(await avail(corte.id)).toContain(at(10)); // Memo is free
     expect(await avail(corte.id, p1.body.id)).not.toContain(at(10));
     expect(await avail(barba.id)).not.toContain(at(10)); // only Toño does beards
@@ -432,19 +432,19 @@ d('API (integration)', () => {
     expect(any.status).toBe(201);
     expect(any.body.resourceName).toBe('Memo');
     expect((await call('POST', '/public/barberia-equipo/bookings', { serviceId: corte.id, startsAt: at(10), name: 'Beto', phone: '5533330002' })).status).toBe(409);
-    const specific = await call('POST', '/public/barberia-equipo/bookings', { serviceId: corte.id, professionalId: p2.id, startsAt: at(10, 30), name: 'Caro', phone: '5533330003' });
+    const specific = await call('POST', '/public/barberia-equipo/bookings', { serviceId: corte.id, resourceId: p2.id, startsAt: at(10, 30), name: 'Caro', phone: '5533330003' });
     expect(specific.body.resourceName).toBe('Memo');
 
     // Staff: busy professional -> 409; allowOverlap -> saved; wrong service -> 422
-    const busy = await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, professionalId: p1.body.id, startsAt: at(10) }, tok);
+    const busy = await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, resourceId: p1.body.id, startsAt: at(10) }, tok);
     expect(busy.status).toBe(409);
-    expect(busy.body.error).toBe('professional_busy');
-    expect((await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, professionalId: p1.body.id, startsAt: at(10), allowOverlap: true }, tok)).status).toBe(201);
-    const wrong = await call('POST', '/appointments', { customerId: cust.id, serviceId: barba.id, professionalId: p2.id, startsAt: at(12) }, tok);
+    expect(busy.body.error).toBe('resource_busy');
+    expect((await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, resourceId: p1.body.id, startsAt: at(10), allowOverlap: true }, tok)).status).toBe(201);
+    const wrong = await call('POST', '/appointments', { customerId: cust.id, serviceId: barba.id, resourceId: p2.id, startsAt: at(12) }, tok);
     expect(wrong.status).toBe(422);
-    expect(wrong.body.error).toBe('professional_service');
+    expect(wrong.body.error).toBe('resource_service');
     const auto = await call('POST', '/appointments', { customerId: cust.id, serviceId: barba.id, startsAt: at(12) }, tok);
-    expect(auto.body.professionalName).toBe('Toño');
+    expect(auto.body.resourceName).toBe('Toño');
     // Moving Toño's beard to a time Toño is busy fails; moving it to a free time works
     expect((await call('PATCH', `/appointments/${auto.body.id}`, { startsAt: at(10) }, tok)).status).toBe(409);
     expect((await call('PATCH', `/appointments/${auto.body.id}`, { startsAt: at(13) }, tok)).status).toBe(200);
@@ -454,11 +454,11 @@ d('API (integration)', () => {
     expect(moved.status).toBe(200);
     expect(moved.body.appointment.resourceName).toBe('Memo');
 
-    const rep = await call('GET', `/reports?from=${day.minus({ days: 30 }).toISODate()}&to=${day.toISODate()}&professionalId=${p2.id}`, undefined, tok);
+    const rep = await call('GET', `/reports?from=${day.minus({ days: 30 }).toISODate()}&to=${day.toISODate()}&resourceId=${p2.id}`, undefined, tok);
     expect(rep.status).toBe(200);
-    expect(Array.isArray(rep.body.byProfessional)).toBe(true);
+    expect(Array.isArray(rep.body.byResource)).toBe(true);
     // Professionals with history are deactivated, not deleted
-    expect((await call('DELETE', `/professionals/${p2.id}`, undefined, tok)).body.deactivated).toBe(true);
+    expect((await call('DELETE', `/resources/${p2.id}`, undefined, tok)).body.deactivated).toBe(true);
   });
 
   it('classes: sessions with capacity, public signup, move and cancel', async () => {
@@ -469,16 +469,16 @@ d('API (integration)', () => {
     expect(reg.body.tenant.kind).toBe('classes');
     expect((await call('GET', '/services', undefined, tok)).body.map((s: { name: string }) => s.name)).toContain('Clase grupal');
     const svc = (await call('POST', '/services', { name: 'Vinyasa', durationMin: 60, priceCents: 15000 }, tok)).body;
-    const inst = (await call('POST', '/professionals', { name: 'Lau' }, tok)).body;
+    const inst = (await call('POST', '/resources', { name: 'Lau' }, tok)).body;
     const day = DateTime.now().setZone('America/Mexico_City').plus({ days: 3 }).set({ hour: 8, minute: 0, second: 0, millisecond: 0 });
 
-    const s1 = await call('POST', '/class-sessions', { serviceId: svc.id, professionalId: inst.id, startsAt: day.toISO(), capacity: 2 }, tok);
+    const s1 = await call('POST', '/class-sessions', { serviceId: svc.id, resourceId: inst.id, startsAt: day.toISO(), capacity: 2 }, tok);
     expect(s1.status).toBe(201);
     expect(s1.body.booked).toBe(0);
     expect(new Date(s1.body.endsAt).getTime() - new Date(s1.body.startsAt).getTime()).toBe(3600e3);
-    const clash = await call('POST', '/class-sessions', { serviceId: svc.id, professionalId: inst.id, startsAt: day.plus({ minutes: 30 }).toISO(), capacity: 5 }, tok);
+    const clash = await call('POST', '/class-sessions', { serviceId: svc.id, resourceId: inst.id, startsAt: day.plus({ minutes: 30 }).toISO(), capacity: 5 }, tok);
     expect(clash.status).toBe(409);
-    expect(clash.body.error).toBe('instructor_busy');
+    expect(clash.body.error).toBe('resource_busy');
     const copy = await call('POST', `/class-sessions/${s1.body.id}/copy`, { days: 1 }, tok);
     expect(copy.status).toBe(201);
     expect(new Date(copy.body.startsAt).getTime() - new Date(s1.body.startsAt).getTime()).toBe(86400e3);
@@ -486,7 +486,7 @@ d('API (integration)', () => {
 
     const list = (await call('GET', '/public/estudio-prueba/classes')).body;
     const pubS1 = list.find((x: { id: string }) => x.id === s1.body.id);
-    expect(pubS1).toMatchObject({ spotsLeft: 2, priceCents: 15000, professionalName: 'Lau', serviceName: 'Vinyasa' });
+    expect(pubS1).toMatchObject({ spotsLeft: 2, priceCents: 15000, resourceName: 'Lau', serviceName: 'Vinyasa' });
     const b1 = await call('POST', '/public/estudio-prueba/bookings', { classSessionId: s1.body.id, name: 'Alumna Uno', phone: '5544440001' });
     expect(b1.status).toBe(201);
     expect(b1.body).toMatchObject({ priceCents: 15000, resourceName: 'Lau', partySize: 1 });
@@ -536,27 +536,27 @@ d('API (integration)', () => {
     });
     const tok = reg.body.token;
     expect(reg.body.tenant.kind).toBe('rentals');
-    const list = (await call('GET', '/spaces', undefined, tok)).body;
+    const list = (await call('GET', '/resources', undefined, tok)).body;
     expect(list.map((x: { name: string }) => x.name)).toEqual(['Cancha 1', 'Cancha 2']);
     const [c1, c2] = list;
-    await call('PUT', `/spaces/${c1.id}`, { name: 'Cancha 1', pricePerHourCents: 40000 }, tok);
-    await call('PUT', `/spaces/${c2.id}`, { name: 'Cancha 2', pricePerHourCents: 50000 }, tok);
-    expect((await call('GET', '/spaces', undefined, b.token)).body).toHaveLength(0);
-    expect((await call('PUT', `/spaces/${c1.id}`, { name: 'x', pricePerHourCents: 1 }, b.token)).status).toBe(404);
+    await call('PUT', `/resources/${c1.id}`, { name: 'Cancha 1', pricePerHourCents: 40000 }, tok);
+    await call('PUT', `/resources/${c2.id}`, { name: 'Cancha 2', pricePerHourCents: 50000 }, tok);
+    expect((await call('GET', '/resources', undefined, b.token)).body).toHaveLength(0);
+    expect((await call('PUT', `/resources/${c1.id}`, { name: 'x', pricePerHourCents: 1 }, b.token)).status).toBe(404);
 
     const pub = (await call('GET', '/public/padel-prueba')).body;
     expect(pub).toMatchObject({ kind: 'rentals', rentalDurations: [60, 90, 120], services: [] });
-    expect(pub.spaces.map((x: { pricePerHourCents: number }) => x.pricePerHourCents)).toEqual([40000, 50000]);
+    expect(pub.resources.map((x: { pricePerHourCents: number }) => x.pricePerHourCents)).toEqual([40000, 50000]);
 
     let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 });
     while (day.weekday === 7) day = day.plus({ days: 1 });
     const at = (h: number, m = 0) => day.set({ hour: h, minute: m, second: 0, millisecond: 0 }).toISO()!;
     const avail = async (dur: number, space?: string) =>
-      (await call('GET', `/public/padel-prueba/availability?durationMin=${dur}&date=${day.toISODate()}${space ? `&spaceId=${space}` : ''}`)).body.slots as string[];
+      (await call('GET', `/public/padel-prueba/availability?durationMin=${dur}&date=${day.toISODate()}${space ? `&resourceId=${space}` : ''}`)).body.slots as string[];
     expect(await avail(90)).toContain(at(10));
     expect((await call('GET', `/public/padel-prueba/availability?durationMin=45&date=${day.toISODate()}`)).status).toBe(400);
 
-    const r1 = await call('POST', '/public/padel-prueba/bookings', { spaceId: c1.id, durationMin: 90, startsAt: at(10), name: 'Jugador Uno', phone: '5566660001' });
+    const r1 = await call('POST', '/public/padel-prueba/bookings', { resourceId: c1.id, durationMin: 90, startsAt: at(10), name: 'Jugador Uno', phone: '5566660001' });
     expect(r1.status).toBe(201);
     expect(r1.body).toMatchObject({ priceCents: 60000, resourceName: 'Cancha 1' });
     const c1Slots = await avail(60, c1.id);
@@ -569,12 +569,12 @@ d('API (integration)', () => {
     expect((await call('POST', '/public/padel-prueba/bookings', { durationMin: 45, startsAt: at(15), name: 'Jugador Tres', phone: '5566660003' })).status).toBe(422);
 
     const cust = (await call('POST', '/customers', { name: 'Socio', phone: '5566660009' }, tok)).body;
-    const taken = await call('POST', '/appointments', { customerId: cust.id, spaceId: c1.id, startsAt: at(10, 30), durationMin: 60 }, tok);
+    const taken = await call('POST', '/appointments', { customerId: cust.id, resourceId: c1.id, startsAt: at(10, 30), durationMin: 60 }, tok);
     expect(taken.status).toBe(409);
-    expect(taken.body.error).toBe('space_taken');
+    expect(taken.body.error).toBe('resource_busy');
     const staff = await call('POST', '/appointments', { customerId: cust.id, startsAt: at(12), durationMin: 120 }, tok);
     expect(staff.status).toBe(201);
-    expect(staff.body).toMatchObject({ spaceName: 'Cancha 1', priceCents: 80000 });
+    expect(staff.body).toMatchObject({ resourceName: 'Cancha 1', priceCents: 80000 });
 
     const mv = await call('POST', `/public/manage/${r1.body.managePath.slice(3)}/reschedule`, { startsAt: at(15) });
     expect(mv.status).toBe(200);
@@ -583,7 +583,7 @@ d('API (integration)', () => {
     const settings = { ...reg.body.tenant.settings, rentals: { durations: [60] } };
     expect((await call('PATCH', '/tenant', { settings }, tok)).body.settings.rentals.durations).toEqual([60]);
     const rep = await call('GET', `/reports?from=${day.minus({ days: 1 }).toISODate()}&to=${day.toISODate()}`, undefined, tok);
-    expect(Array.isArray(rep.body.bySpace)).toBe(true);
+    expect(Array.isArray(rep.body.byResource)).toBe(true);
   });
 
   it('roles: owner, admin and team members only see their own bookings', async () => {
@@ -591,28 +591,28 @@ d('API (integration)', () => {
       businessName: 'Barberia Roles', businessType: 'barbershop', name: 'Dueña', email: 'roles-owner@test.mx', password: 'password123',
     })).body as AuthResponse;
     const tok = owner.token;
-    expect(owner.user).toMatchObject({ role: 'owner', professionalId: null });
+    expect(owner.user).toMatchObject({ role: 'owner', resourceId: null });
     const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
-    const pA = (await call('POST', '/professionals', { name: 'Ana' }, tok)).body;
-    const pB = (await call('POST', '/professionals', { name: 'Beto' }, tok)).body;
+    const pA = (await call('POST', '/resources', { name: 'Ana' }, tok)).body;
+    const pB = (await call('POST', '/resources', { name: 'Beto' }, tok)).body;
 
     // Owner creates an admin and a team member linked to Ana
     const admin = await call('POST', '/users', { name: 'Recepción', email: 'roles-admin@test.mx', password: 'password123', role: 'admin' }, tok);
     expect(admin.status).toBe(201);
-    const staff = await call('POST', '/users', { name: 'Ana', email: 'roles-ana@test.mx', password: 'password123', role: 'staff', professionalId: pA.id }, tok);
-    expect(staff.body).toMatchObject({ role: 'staff', professionalId: pA.id, professionalName: 'Ana' });
+    const staff = await call('POST', '/users', { name: 'Ana', email: 'roles-ana@test.mx', password: 'password123', role: 'staff', resourceId: pA.id }, tok);
+    expect(staff.body).toMatchObject({ role: 'staff', resourceId: pA.id, resourceName: 'Ana' });
     const adminTok = (await call('POST', '/auth/login', { email: 'roles-admin@test.mx', password: 'password123' })).body.token;
     const anaLogin = (await call('POST', '/auth/login', { email: 'roles-ana@test.mx', password: 'password123' })).body;
-    expect(anaLogin.user).toMatchObject({ role: 'staff', professionalId: pA.id });
+    expect(anaLogin.user).toMatchObject({ role: 'staff', resourceId: pA.id });
     const anaTok = anaLogin.token;
 
     // Admin can only create team members, not other admins/owners
     expect((await call('POST', '/users', { name: 'Equis', email: 'roles-x@test.mx', password: 'password123', role: 'admin' }, adminTok)).status).toBe(403);
-    expect((await call('POST', '/users', { name: 'Beto', email: 'roles-beto@test.mx', password: 'password123', role: 'staff', professionalId: pB.id }, adminTok)).status).toBe(201);
+    expect((await call('POST', '/users', { name: 'Beto', email: 'roles-beto@test.mx', password: 'password123', role: 'staff', resourceId: pB.id }, adminTok)).status).toBe(201);
     // Team members can't see or manage logins, catalog or team
     expect((await call('GET', '/users', undefined, anaTok)).status).toBe(403);
     expect((await call('POST', '/services', { name: 'Tinte', durationMin: 60, priceCents: 1 }, anaTok)).status).toBe(403);
-    expect((await call('POST', '/professionals', { name: 'Nadie' }, anaTok)).status).toBe(403);
+    expect((await call('POST', '/resources', { name: 'Nadie' }, anaTok)).status).toBe(403);
     expect((await call('PATCH', '/tenant', { name: 'Hackeado' }, anaTok)).status).toBe(403);
     // Admin runs the business but can't touch payment settings or Mercado Pago
     expect((await call('POST', '/services', { name: 'Tinte', durationMin: 60, priceCents: 50000 }, adminTok)).status).toBe(201);
@@ -622,10 +622,10 @@ d('API (integration)', () => {
     const cust1 = (await call('POST', '/customers', { name: 'Cliente Ana', phone: '5560000001' }, tok)).body;
     const cust2 = (await call('POST', '/customers', { name: 'Cliente Beto', phone: '5560000002' }, tok)).body;
     const at = DateTime.now().plus({ days: 3 }).set({ hour: 11, minute: 0, second: 0, millisecond: 0 });
-    const apA = (await call('POST', '/appointments', { customerId: cust1.id, serviceId: svc.id, professionalId: pA.id, startsAt: at.toISO() }, tok)).body;
-    const apB = (await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, professionalId: pB.id, startsAt: at.toISO() }, tok)).body;
-    expect(apA.professionalId).toBe(pA.id);
-    expect(apB.professionalId).toBe(pB.id);
+    const apA = (await call('POST', '/appointments', { customerId: cust1.id, serviceId: svc.id, resourceId: pA.id, startsAt: at.toISO() }, tok)).body;
+    const apB = (await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, resourceId: pB.id, startsAt: at.toISO() }, tok)).body;
+    expect(apA.resourceId).toBe(pA.id);
+    expect(apB.resourceId).toBe(pB.id);
     const range = `from=${encodeURIComponent(at.minus({ days: 1 }).toISO()!)}&to=${encodeURIComponent(at.plus({ days: 1 }).toISO()!)}`;
 
     expect((await call('GET', `/appointments?${range}`, undefined, tok)).body).toHaveLength(2);
@@ -634,13 +634,13 @@ d('API (integration)', () => {
     expect(mine.map((x: { id: string }) => x.id)).toEqual([apA.id]);
     expect((await call('GET', `/appointments/${apB.id}`, undefined, anaTok)).status).toBe(404);
     expect((await call('PATCH', `/appointments/${apB.id}`, { status: 'cancelled' }, anaTok)).status).toBe(404);
-    expect((await call('PATCH', `/appointments/${apA.id}`, { professionalId: pB.id }, anaTok)).status).toBe(403);
+    expect((await call('PATCH', `/appointments/${apA.id}`, { resourceId: pB.id }, anaTok)).status).toBe(403);
     expect((await call('DELETE', `/appointments/${apA.id}`, undefined, anaTok)).status).toBe(403);
     // Ana books into her own agenda only
-    expect((await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, professionalId: pB.id, startsAt: at.plus({ hours: 2 }).toISO() }, anaTok)).status).toBe(403);
+    expect((await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, resourceId: pB.id, startsAt: at.plus({ hours: 2 }).toISO() }, anaTok)).status).toBe(403);
     const own = await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, startsAt: at.plus({ hours: 2 }).toISO() }, anaTok);
     expect(own.status).toBe(201);
-    expect(own.body.professionalId).toBe(pA.id);
+    expect(own.body.resourceId).toBe(pA.id);
     // Completing her own booking with a payment
     const done = await call('PATCH', `/appointments/${apA.id}`, { status: 'completed', paymentMethod: 'cash' }, anaTok);
     expect(done.status).toBe(200);
@@ -665,9 +665,9 @@ d('API (integration)', () => {
     expect((await call('POST', '/payments', { customerId: cust2.id, appointmentId: apB.id, amountCents: 100, method: 'cash', status: 'paid' }, anaTok)).status).toBe(403);
     const day = at.toISODate()!;
     const today = DateTime.now().toISODate()!;
-    const rep = (await call('GET', `/reports?from=${today}&to=${day}&professionalId=${pB.id}`, undefined, anaTok)).body;
+    const rep = (await call('GET', `/reports?from=${today}&to=${day}&resourceId=${pB.id}`, undefined, anaTok)).body;
     expect(rep.kpis.completed).toBe(1);
-    expect(rep.byProfessional.map((x: { name: string }) => x.name)).toEqual(['Ana']);
+    expect(rep.byResource.map((x: { name: string }) => x.name)).toEqual(['Ana']);
     const repAll = (await call('GET', `/reports?from=${today}&to=${day}`, undefined, adminTok)).body;
     expect(repAll.kpis.completed).toBe(2);
 
@@ -680,7 +680,7 @@ d('API (integration)', () => {
     await call('PATCH', `/users/${anaId}`, { role: 'staff' }, tok);
     expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(2);
     // Unlinked team member sees nothing in a team business
-    await call('PATCH', `/users/${anaId}`, { professionalId: null }, tok);
+    await call('PATCH', `/users/${anaId}`, { resourceId: null }, tok);
     expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(0);
     // Removing the login revokes access right away
     expect((await call('DELETE', `/users/${anaId}`, undefined, tok)).status).toBe(204);
@@ -736,7 +736,7 @@ d('API (integration)', () => {
     expect(second.status).toBe(201);
     expect(second.body.tenant.kind).toBe('reservations');
     expect(second.body.businesses.map((x: { name: string }) => x.name).sort()).toEqual(['Multi Dos', 'Multi Uno']);
-    expect((await call('GET', '/tables', undefined, second.body.token)).body.length).toBeGreaterThan(0);
+    expect((await call('GET', '/resources', undefined, second.body.token)).body.length).toBeGreaterThan(0);
     // Switch back and forth; other people's businesses are off limits
     const back = await call('POST', '/auth/switch', { tenantId: reg.tenant.id }, second.body.token);
     expect(back.status).toBe(200);
@@ -762,11 +762,11 @@ d('API (integration)', () => {
     const pol = created.body.location;
     expect((await call('PUT', `/locations/${main.id}`, { name: main.name, active: false }, tok)).body.error).toBe('primary_location');
     // Another business can't use this location
-    expect((await call('POST', '/professionals', { name: 'Intruso', locationId: pol.id }, b.token)).status).toBe(404);
+    expect((await call('POST', '/resources', { name: 'Intruso', locationId: pol.id }, b.token)).status).toBe(404);
 
     const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
-    const pMain = (await call('POST', '/professionals', { name: 'Centro Uno' }, tok)).body;
-    const pPol = (await call('POST', '/professionals', { name: 'Polanco Uno', locationId: pol.id }, tok)).body;
+    const pMain = (await call('POST', '/resources', { name: 'Centro Uno' }, tok)).body;
+    const pPol = (await call('POST', '/resources', { name: 'Polanco Uno', locationId: pol.id }, tok)).body;
     expect(pMain.locationId).toBe(main.id);
     expect(pPol.locationId).toBe(pol.id);
 
@@ -774,7 +774,7 @@ d('API (integration)', () => {
     await call('PATCH', '/tenant', { settings: { ...reg.tenant.settings, onlineBookingEnabled: true } }, tok);
     const pub = (await call('GET', `/public/${reg.tenant.slug}`)).body;
     expect(pub.locations.map((l: { name: string }) => l.name).sort()).toEqual(['Polanco', 'Principal']);
-    expect(pub.professionals.find((p: { id: string }) => p.id === pPol.id).locationId).toBe(pol.id);
+    expect(pub.resources.find((p: { id: string }) => p.id === pPol.id).locationId).toBe(pol.id);
     const day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 }).toISODate()!;
     const slots = (await call('GET', `/public/${reg.tenant.slug}/availability?serviceId=${svc.id}&date=${day}&locationId=${pol.id}`)).body.slots as string[];
     expect(slots.length).toBe(4);
@@ -790,7 +790,7 @@ d('API (integration)', () => {
     const at = DateTime.now().plus({ days: 2 }).set({ hour: 11, minute: 0, second: 0, millisecond: 0 });
     const apMain = (await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: at.toISO() }, tok)).body;
     expect(apMain.locationId).toBe(main.id);
-    expect(apMain.professionalId).toBe(pMain.id);
+    expect(apMain.resourceId).toBe(pMain.id);
 
     // A manager limited to Polanco (gerente de sucursal)
     const ger = await call('POST', '/users', { name: 'Gerente', email: 'gerente@test.mx', password: 'password123', role: 'admin', locationId: pol.id }, tok);
@@ -802,14 +802,14 @@ d('API (integration)', () => {
     expect(gList[0].locationId).toBe(pol.id);
     expect((await call('GET', `/appointments?${range}`, undefined, tok)).body.length).toBe(2);
     expect((await call('GET', `/appointments/${apMain.id}`, undefined, gTok)).status).toBe(404);
-    expect((await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, professionalId: pMain.id, startsAt: at.plus({ hours: 2 }).toISO() }, gTok)).status).toBe(403);
+    expect((await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, resourceId: pMain.id, startsAt: at.plus({ hours: 2 }).toISO() }, gTok)).status).toBe(403);
     const gBook = await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: at.set({ hour: 16 }).toISO() }, gTok);
     expect(gBook.status).toBe(201);
     expect(gBook.body.locationId).toBe(pol.id);
     expect((await call('PATCH', '/tenant', { name: 'Hackeado' }, gTok)).status).toBe(403);
     expect((await call('POST', '/locations', { name: 'Otra' }, gTok)).status).toBe(403);
     expect((await call('POST', '/services', { name: 'X', durationMin: 30, priceCents: 1 }, gTok)).status).toBe(403);
-    expect((await call('PUT', `/professionals/${pMain.id}`, { name: 'Robado' }, gTok)).status).toBe(403);
+    expect((await call('PUT', `/resources/${pMain.id}`, { name: 'Robado' }, gTok)).status).toBe(403);
     expect((await call('POST', '/users', { name: 'Otro', email: 'otro@test.mx', password: 'password123', role: 'staff', locationId: main.id }, gTok)).status).toBe(403);
     const gUsers = (await call('GET', '/users', undefined, gTok)).body as { email: string }[];
     expect(gUsers.map((u) => u.email)).toEqual(['gerente@test.mx']);

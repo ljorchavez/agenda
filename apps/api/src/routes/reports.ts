@@ -51,15 +51,14 @@ function filters(q: ReportQuery): SQL {
   const parts: SQL[] = [];
   if (q.serviceId) parts.push(sql`and a.service_id = ${q.serviceId}`);
   if (q.staffUserId) parts.push(sql`and a.staff_user_id = ${q.staffUserId}`);
-  if (q.professionalId) parts.push(sql`and a.professional_id = ${q.professionalId}`);
-  if (q.spaceId) parts.push(sql`and a.space_id = ${q.spaceId}`);
+  if (q.resourceId) parts.push(sql`and a.resource_id = ${q.resourceId}`);
   if (q.locationId) parts.push(sql`and a.location_id = ${q.locationId}`);
   if (q.source) parts.push(sql`and a.source = ${q.source}`);
   return parts.length ? sql.join(parts, sql` `) : sql``;
 }
 
 function paymentFilter(q: ReportQuery, f: SQL): SQL {
-  if (!q.serviceId && !q.staffUserId && !q.professionalId && !q.spaceId && !q.source && !q.locationId) return sql``;
+  if (!q.serviceId && !q.staffUserId && !q.resourceId && !q.source && !q.locationId) return sql``;
   return sql`and exists (select 1 from appointments a where a.id = p.appointment_id and a.tenant_id = p.tenant_id ${f})`;
 }
 
@@ -171,9 +170,8 @@ reportRoutes.get('/reports', async (c) => {
   const scope = await getScope(db, c);
   if (scope.locationId) q.locationId = scope.locationId;
   if (scope.personal) {
-    q.staffUserId = scope.professionalId ? undefined : scope.userId;
-    q.professionalId = scope.professionalId ?? undefined;
-    q.spaceId = undefined;
+    q.staffUserId = scope.resourceId ? undefined : scope.userId;
+    q.resourceId = scope.resourceId ?? undefined;
   }
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   if (!tenant) throw notFound('tenant');
@@ -193,7 +191,7 @@ reportRoutes.get('/reports', async (c) => {
   const T = end.toUTC().toISO()!;
   const f = filters(q);
 
-  const [k, pk, s, ps, svc, method, source, weekday, heat, top, pro, spc, loc] = await Promise.all([
+  const [k, pk, s, ps, svc, method, source, weekday, heat, top, res, loc] = await Promise.all([
     kpis(db, tenantId, q, cur),
     kpis(db, tenantId, q, prev),
     series(db, tenantId, tz, q, cur, g),
@@ -234,17 +232,11 @@ reportRoutes.get('/reports', async (c) => {
         and p.paid_at >= ${F}::timestamptz and p.paid_at < ${T}::timestamptz ${paymentFilter(q, f)}
       group by c.id order by total desc limit 10`),
     db.execute(sql`
-      select pr.id, pr.name, pr.color, count(a.id) as count, coalesce(sum(a.price_cents), 0) as revenue
-      from appointments a join professionals pr on pr.id = a.professional_id and pr.tenant_id = a.tenant_id
+      select r.id, r.name, r.color, count(a.id) as count, coalesce(sum(a.price_cents), 0) as revenue
+      from appointments a join resources r on r.id = a.resource_id and r.tenant_id = a.tenant_id
       where a.tenant_id = ${tenantId} and a.status = 'completed'
         and a.starts_at >= ${F}::timestamptz and a.starts_at < ${T}::timestamptz ${f}
-      group by pr.id order by revenue desc, pr.name`),
-    db.execute(sql`
-      select sp.id, sp.name, count(a.id) as count, coalesce(sum(a.price_cents), 0) as revenue
-      from appointments a join spaces sp on sp.id = a.space_id and sp.tenant_id = a.tenant_id
-      where a.tenant_id = ${tenantId} and a.status = 'completed'
-        and a.starts_at >= ${F}::timestamptz and a.starts_at < ${T}::timestamptz ${f}
-      group by sp.id order by revenue desc, sp.name`),
+      group by r.id order by revenue desc, r.name`),
     db.execute(sql`
       select l.id, l.name, count(a.id) as count, coalesce(sum(a.price_cents), 0) as revenue
       from appointments a join locations l on l.id = a.location_id and l.tenant_id = a.tenant_id
@@ -262,8 +254,7 @@ reportRoutes.get('/reports', async (c) => {
     series: s,
     previousSeries: ps,
     byService: svc.rows.map((r) => ({ id: String(r.id), name: String(r.name), count: n(r.count), revenueCents: n(r.revenue) })),
-    byProfessional: pro.rows.map((r) => ({ id: String(r.id), name: String(r.name), color: String(r.color), count: n(r.count), revenueCents: n(r.revenue) })),
-    bySpace: spc.rows.map((r) => ({ id: String(r.id), name: String(r.name), count: n(r.count), revenueCents: n(r.revenue) })),
+    byResource: res.rows.map((r) => ({ id: String(r.id), name: String(r.name), color: String(r.color), count: n(r.count), revenueCents: n(r.revenue) })),
     byLocation: loc.rows.map((r) => ({ id: String(r.id), name: String(r.name), count: n(r.count), revenueCents: n(r.revenue) })),
     byMethod: method.rows.map((r) => ({ method: r.method as PaymentMethod, count: n(r.count), revenueCents: n(r.revenue) })),
     bySource: source.rows.map((r) => ({ source: r.source as AppointmentSource, count: n(r.count) })),

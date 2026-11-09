@@ -1,126 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
 import { paymentSettingsOf, type AppointmentDto, type ClassSessionDto, type CustomerDto } from '@agenda/shared';
-import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
+import { ErrorText, Loading, Modal, StatusBadge } from './ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
-import { dateLocale, dateTime, money, timeOnly, toLocalInput } from '../lib/format';
-import { useCustomers, useMyLocations, useProfessionals, useServices } from '../lib/queries';
-import { LocationSelect } from '../components/Locations';
+import { dateTime, money, timeOnly, toLocalInput } from '../lib/format';
+import { useCustomers, useMyLocations, useResources, useServices } from '../lib/queries';
+import { LocationSelect } from './Locations';
 
-/** Week view of group classes; each class shows spots taken and opens its attendee list. */
-export function ClassesPage() {
-  const { t } = useTranslation();
-  // Colaboradores (instructors) see only their own classes and can't schedule new ones.
-  const { manager, unlinked, scoped, locationId: ownLocation } = useAccess();
-  const locs = useMyLocations(ownLocation);
-  const [loc, setLoc] = useState('');
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
-  const [creating, setCreating] = useState<Date | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
-  const to = addDays(weekStart, 7);
-  const sessions = useQuery({
-    queryKey: ['class-sessions', weekStart.toISOString()],
-    queryFn: () =>
-      api<ClassSessionDto[]>(`/class-sessions?from=${encodeURIComponent(weekStart.toISOString())}&to=${encodeURIComponent(to.toISOString())}`),
-  });
-  const today = new Date();
-  const newAt = (d: Date) => {
-    const base = new Date(d);
-    if (isSameDay(base, today)) base.setHours(today.getHours() + 1, 0, 0, 0);
-    else base.setHours(8, 0, 0, 0);
-    return base;
-  };
+/** Group classes: schedule one, and manage one (attendees, edit, copy, cancel). Opened from the calendar. */
 
-  return (
-    <>
-      <PageHeader
-        title={t('classes.title')}
-        actions={
-          <>
-            <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="prev">‹</button>
-            <button className="btn-secondary" onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}>{t('agenda.today')}</button>
-            <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="next">›</button>
-            {manager && <button className="btn-primary" onClick={() => setCreating(newAt(new Date()))}>{t('classes.new')}</button>}
-          </>
-        }
-      />
-      <p className="-mt-4 mb-4 text-sm text-slate-500">
-        {format(weekStart, 'd MMM', { locale: dateLocale() })} – {format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}
-      </p>
-      {!scoped && locs.multi && (
-        <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('locations.title')}>
-          {[{ id: '', name: t('locations.all') }, ...locs.list].map((l) => (
-            <button
-              key={l.id || 'all'}
-              onClick={() => setLoc(l.id)}
-              aria-pressed={loc === l.id}
-              className={`whitespace-nowrap rounded-lg border px-3 py-1 text-sm ${loc === l.id ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
-            >
-              {l.id ? '⌂ ' : ''}{l.name}
-            </button>
-          ))}
-        </div>
-      )}
-      {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
-      {!manager && !unlinked && <p className="mb-4 text-sm text-slate-500">{t('roles.onlyYourClasses')}</p>}
-      {sessions.isLoading ? (
-        <Loading />
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-7">
-          {days.map((d) => {
-            const items = (sessions.data ?? []).filter((s) => isSameDay(new Date(s.startsAt), d) && (!loc || s.locationId === loc));
-            const isToday = isSameDay(d, today);
-            return (
-              <div key={d.toISOString()} className={`rounded-xl border bg-white p-2 ${isToday ? 'border-brand-500' : 'border-slate-200'}`}>
-                <button className="mb-2 flex w-full items-baseline justify-between rounded px-1 text-left hover:bg-slate-50" onClick={() => setCreating(newAt(d))} title={t('classes.new')}>
-                  <span className={`text-sm font-semibold capitalize ${isToday ? 'text-brand-700' : 'text-slate-700'}`}>{format(d, 'EEE d', { locale: dateLocale() })}</span>
-                  <span className="text-lg leading-none text-slate-400">+</span>
-                </button>
-                <div className="space-y-1.5">
-                  {items.length === 0 && <p className="px-1 text-xs text-slate-400">{t('classes.empty')}</p>}
-                  {items.map((s) => {
-                    const pct = Math.min(100, Math.round((s.booked / s.capacity) * 100));
-                    const cancelled = s.status === 'cancelled';
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => setSelected(s.id)}
-                        className={`w-full rounded-lg border border-slate-200 p-2 text-left text-xs hover:border-brand-500 ${cancelled ? 'opacity-50' : ''}`}
-                        style={{ borderLeft: `4px solid ${s.professionalColor ?? '#94a3b8'}` }}
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-semibold text-slate-800">{timeOnly(s.startsAt)}</span>
-                          <span className={`font-medium ${s.booked >= s.capacity ? 'text-rose-700' : 'text-slate-600'}`}>
-                            {cancelled ? t('classes.cancelled') : `${s.booked}/${s.capacity}`}
-                          </span>
-                        </div>
-                        <div className={`mt-1 truncate font-medium text-slate-700 ${cancelled ? 'line-through' : ''}`}>{s.serviceName}</div>
-                        {s.professionalName && <div className="truncate text-slate-500">{s.professionalName}</div>}
-                        {!cancelled && (
-                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                            <div className={`h-full ${pct >= 100 ? 'bg-rose-500' : pct >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} />
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {creating && <NewSessionModal initial={creating} defaultLocation={loc} onClose={() => setCreating(null)} />}
-      {selected && <SessionModal id={selected} onClose={() => setSelected(null)} onOpen={setSelected} />}
-    </>
-  );
-}
-
-function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date; defaultLocation: string; onClose: () => void }) {
+export function NewSessionModal({ initial, defaultLocation, resourceId: preset, onClose }: { initial: Date; defaultLocation: string; resourceId?: string; onClose: () => void }) {
   const { t } = useTranslation();
   const { locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
@@ -128,12 +19,12 @@ function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date;
   const effectiveLoc = locationId || locs.list[0]?.id || '';
   const qc = useQueryClient();
   const services = useServices();
-  const pros = useProfessionals();
+  const pros = useResources();
   const active = (services.data ?? []).filter((s) => s.active);
   const [serviceId, setServiceId] = useState('');
   const [startsAt, setStartsAt] = useState(toLocalInput(initial));
   const [duration, setDuration] = useState('');
-  const [professionalId, setProfessionalId] = useState('');
+  const [resourceId, setResourceId] = useState(preset ?? '');
   const [capacity, setCapacity] = useState('12');
   const [notes, setNotes] = useState('');
   const svc = active.find((s) => s.id === (serviceId || active[0]?.id));
@@ -145,7 +36,7 @@ function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date;
           serviceId: svc!.id,
           startsAt: new Date(startsAt).toISOString(),
           durationMin: duration ? Number(duration) : undefined,
-          professionalId: professionalId || null,
+          resourceId: resourceId || null,
           locationId: effectiveLoc || undefined,
           capacity: Number(capacity),
           notes: notes || null,
@@ -162,7 +53,7 @@ function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date;
         {locs.multi && (
           <div>
             <label className="label" htmlFor="cs-loc">{t('locations.location')}</label>
-            <LocationSelect id="cs-loc" value={effectiveLoc} onChange={(v) => { setLocationId(v); setProfessionalId(''); }} list={locs.list} />
+            <LocationSelect id="cs-loc" value={effectiveLoc} onChange={(v) => { setLocationId(v); setResourceId(''); }} list={locs.list} />
           </div>
         )}
         <div>
@@ -187,7 +78,7 @@ function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date;
         </div>
         <div>
           <label className="label">{t('classes.instructor')}</label>
-          <select className="input" value={professionalId} onChange={(e) => setProfessionalId(e.target.value)}>
+          <select className="input" value={resourceId} onChange={(e) => setResourceId(e.target.value)}>
             <option value="">{t('classes.noInstructor')}</option>
             {(pros.data ?? []).filter((p) => p.active && (!effectiveLoc || p.locationId === effectiveLoc)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -206,12 +97,12 @@ function NewSessionModal({ initial, defaultLocation, onClose }: { initial: Date;
   );
 }
 
-function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen: (id: string) => void }) {
+export function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen: (id: string) => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { tenant } = useAuth();
   const { manager } = useAccess();
-  const pros = useProfessionals();
+  const pros = useResources();
   const pay = paymentSettingsOf(tenant!.settings);
   const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
   const methods = inPerson.length ? inPerson : (['cash', 'card', 'transfer'] as const);
@@ -220,7 +111,7 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
     queryKey: ['class-session', id],
     queryFn: () => api<{ session: ClassSessionDto; attendees: AppointmentDto[] }>(`/class-sessions/${id}`),
   });
-  const [edit, setEdit] = useState<{ startsAt: string; capacity: string; professionalId: string } | null>(null);
+  const [edit, setEdit] = useState<{ startsAt: string; capacity: string; resourceId: string } | null>(null);
   const [adding, setAdding] = useState(false);
 
   const refresh = () => {
@@ -268,10 +159,10 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
     <Modal open title={s.serviceName} onClose={onClose}>
       <div className="space-y-1">
         <div className="text-sm text-slate-600">{dateTime(s.startsAt)} – {timeOnly(s.endsAt)}</div>
-        {s.professionalName && (
+        {s.resourceName && (
           <div className="flex items-center gap-2 text-sm text-slate-700">
-            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: s.professionalColor ?? '#94a3b8' }} />
-            {s.professionalName}
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: s.resourceColor ?? '#94a3b8' }} />
+            {s.resourceName}
           </div>
         )}
         <div className="mt-2 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm">
@@ -288,7 +179,7 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
           <button className="btn-secondary" onClick={() => setAdding(!adding)}>{t('classes.addAttendee')}</button>
           {manager && (
             <>
-              <button className="btn-secondary" onClick={() => setEdit(edit ? null : { startsAt: toLocalInput(new Date(s.startsAt)), capacity: String(s.capacity), professionalId: s.professionalId ?? '' })}>{t('common.edit')}</button>
+              <button className="btn-secondary" onClick={() => setEdit(edit ? null : { startsAt: toLocalInput(new Date(s.startsAt)), capacity: String(s.capacity), resourceId: s.resourceId ?? '' })}>{t('common.edit')}</button>
               <button className="btn-secondary" disabled={copy.isPending} onClick={() => copy.mutate()}>{t('classes.copyNextWeek')}</button>
               <button className="btn-secondary text-rose-700" onClick={() => window.confirm(t('classes.cancelConfirm')) && cancel.mutate()}>{t('classes.cancelClass')}</button>
             </>
@@ -301,14 +192,14 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
           className="mt-3 grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-3"
           onSubmit={(e) => {
             e.preventDefault();
-            patchSession.mutate({ startsAt: new Date(edit.startsAt).toISOString(), capacity: Number(edit.capacity), professionalId: edit.professionalId || null });
+            patchSession.mutate({ startsAt: new Date(edit.startsAt).toISOString(), capacity: Number(edit.capacity), resourceId: edit.resourceId || null });
           }}
         >
           <input type="datetime-local" required className="input sm:col-span-3" value={edit.startsAt} onChange={(e) => setEdit({ ...edit, startsAt: e.target.value })} />
           <input type="number" min={1} max={500} required className="input" aria-label={t('classes.capacity')} value={edit.capacity} onChange={(e) => setEdit({ ...edit, capacity: e.target.value })} />
-          <select className="input" value={edit.professionalId} onChange={(e) => setEdit({ ...edit, professionalId: e.target.value })} aria-label={t('classes.instructor')}>
+          <select className="input" value={edit.resourceId} onChange={(e) => setEdit({ ...edit, resourceId: e.target.value })} aria-label={t('classes.instructor')}>
             <option value="">{t('classes.noInstructor')}</option>
-            {(pros.data ?? []).filter((p) => p.active || p.id === s.professionalId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {(pros.data ?? []).filter((p) => p.active || p.id === s.resourceId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <button className="btn-primary" disabled={patchSession.isPending}>{t('common.save')}</button>
           <div className="sm:col-span-3"><ErrorText error={patchSession.error} ns="classes" /></div>

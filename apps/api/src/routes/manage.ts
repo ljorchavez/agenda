@@ -3,20 +3,20 @@ import { and, eq, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
   businessKind,
+  kindConfig,
   manageRescheduleSchema,
   selfServiceOf,
   type Locale,
   type ManageAppointmentDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, locations, professionals, services, spaces, tenants, type Appointment, type Location, type Service, type Tenant } from '../db/schema.js';
+import { appointments, customers, locations, resources, services, tenants, type Appointment, type Location, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { verifyManageToken } from '../lib/crypto.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { activeProfessionals, assignProfessional, assignSpace } from '../lib/resources.js';
-import { computeClassSlots, computeSlots, computeSpaceSlots, computeTableSlots } from './public.js';
-import { assignTable } from '../lib/tables.js';
+import { activeResources, assignResource } from '../lib/resources.js';
+import { computeClassSlots, computeSlots } from './public.js';
 
 /**
  * Customer self-service via the private link /c/<token> (sent after booking or by the business).
@@ -26,7 +26,9 @@ import { assignTable } from '../lib/tables.js';
 export const manageRoutes = new Hono();
 
 type Loaded = { appt: Appointment; tenant: Tenant; service: Service; customerName: string; resourceName: string | null; location: Location | null };
-const isTables = (l: Loaded) => businessKind(l.tenant.businessType) === 'reservations';
+/** The resource a moved booking must keep (kinds where customers choose who/what), else any that fits. */
+const keptResource = (l: Loaded) =>
+  kindConfig(businessKind(l.tenant.businessType)).keepResourceOnReschedule ? l.appt.resourceId : null;
 const durationOf = (a: Appointment) => Math.round((a.endsAt.getTime() - a.startsAt.getTime()) / 60000);
 
 /** Free start times for moving this booking, following the rules of its kind. */
@@ -41,12 +43,11 @@ async function slotsFor(l: Loaded, date: string, minStart: DateTime): Promise<st
     });
     return list.map((s) => s.startsAt);
   }
-  if (appt.spaceId) return computeSpaceSlots(tenant, durationOf(appt), date, minStart, { excludeId: appt.id, spaceId: appt.spaceId, locationId: appt.locationId });
-  if (isTables(l)) return computeTableSlots(tenant, appt.partySize ?? 2, date, minStart, { excludeId: appt.id, durationMin: durationOf(appt), locationId: appt.locationId });
   return computeSlots(tenant, durationOf(appt), date, minStart, {
     excludeId: appt.id,
     serviceId: appt.serviceId,
-    professionalId: appt.professionalId,
+    partySize: appt.partySize,
+    resourceId: keptResource(l),
     locationId: appt.locationId,
   });
 }
@@ -63,11 +64,9 @@ async function load(token: string): Promise<Loaded> {
     db.query.customers.findFirst({ where: and(eq(customers.id, appt.customerId), eq(customers.tenantId, appt.tenantId)) }),
   ]);
   if (!tenant || !service || !customer) throw notFound('appointment');
-  const resource = appt.professionalId
-    ? await db.query.professionals.findFirst({ where: and(eq(professionals.id, appt.professionalId), eq(professionals.tenantId, appt.tenantId)) })
-    : appt.spaceId
-      ? await db.query.spaces.findFirst({ where: and(eq(spaces.id, appt.spaceId), eq(spaces.tenantId, appt.tenantId)) })
-      : null;
+  const resource = appt.resourceId
+    ? await db.query.resources.findFirst({ where: and(eq(resources.id, appt.resourceId), eq(resources.tenantId, appt.tenantId)) })
+    : null;
   const location = (await db.query.locations.findFirst({ where: and(eq(locations.id, appt.locationId), eq(locations.tenantId, appt.tenantId)) })) ?? null;
   return { appt, tenant, service, customerName: customer.name, resourceName: resource?.name ?? null, location };
 }
@@ -168,8 +167,7 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
 
   await getDb().transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${l.tenant.id} for update`);
-    let tableId = l.appt.tableId;
-    let professionalId = l.appt.professionalId;
+    let resourceId = l.appt.resourceId;
     let classSessionId = l.appt.classSessionId;
     if (targetSession) {
       const { session, booked } = await lockSession(tx, l.tenant.id, targetSession);
@@ -180,28 +178,18 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
         throw conflict('slot_unavailable', 'This class is full');
       }
       classSessionId = session.id;
-      professionalId = session.professionalId;
+      resourceId = session.resourceId;
       startsAt = session.startsAt;
       endsAt = session.endsAt;
-    } else if (l.appt.spaceId) {
+    } else if ((await activeResources(tx, l.tenant.id, l.appt.locationId)).length) {
       try {
-        await assignSpace(tx, l.tenant.id, startsAt, endsAt, { spaceId: l.appt.spaceId, excludeId: l.appt.id, locationId: l.appt.locationId });
-      } catch {
-        throw conflict('slot_unavailable', 'This time is no longer available');
-      }
-    } else if (!isTables(l) && (await activeProfessionals(tx, l.tenant.id, l.appt.locationId)).length) {
-      try {
-        professionalId = (await assignProfessional(tx, l.tenant.id, l.appt.serviceId, startsAt, endsAt, {
-          professionalId: l.appt.professionalId,
+        resourceId = (await assignResource(tx, l.tenant.id, startsAt, endsAt, {
+          resourceId: keptResource(l),
+          serviceId: l.appt.serviceId,
+          partySize: l.appt.partySize,
           excludeId: l.appt.id,
           locationId: l.appt.locationId,
         })).id;
-      } catch {
-        throw conflict('slot_unavailable', 'This time is no longer available');
-      }
-    } else if (isTables(l)) {
-      try {
-        tableId = (await assignTable(tx, l.tenant.id, l.appt.partySize ?? 2, startsAt, endsAt, { excludeId: l.appt.id, locationId: l.appt.locationId })).id;
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
@@ -216,8 +204,7 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
         endsAt,
         status: 'scheduled',
         reminderSentAt: null,
-        tableId,
-        professionalId,
+        resourceId,
         classSessionId,
         notes: appendNote(l.appt.notes, stamp(l.tenant, `Reagendada por el cliente (antes: ${previous})`)),
       })

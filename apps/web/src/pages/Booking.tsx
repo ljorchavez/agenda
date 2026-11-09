@@ -4,8 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
 import {
-  eligibleProfessionals,
-  spacePriceCents,
+  bookingPriceCents,
+  eligibleResources,
+  kindConfig,
   type PublicBookingResult,
   type PublicBusinessDto,
   type PublicClassSessionDto,
@@ -16,7 +17,7 @@ import { api } from '../lib/api';
 import { dateLocale, dateTime, money } from '../lib/format';
 
 type Book = (body: Record<string, unknown>) => void;
-/** `loc` is the chosen location (sucursal); `business` already shows only its team, spaces and hours. */
+/** `loc` is the chosen location (sucursal); `business` already shows only its resources and hours. */
 type FlowProps = { business: PublicBusinessDto; loc: string; onBook: Book; pending: boolean; error: unknown; resetKey: number };
 
 /** Public page where end customers book by themselves: /b/:slug */
@@ -64,8 +65,7 @@ export function BookingPage() {
         state: location.state,
         lat: location.lat,
         lng: location.lng,
-        professionals: full.professionals.filter((p) => p.locationId === location.id),
-        spaces: full.spaces.filter((x) => x.locationId === location.id),
+        resources: full.resources.filter((r) => r.locationId === location.id),
       }
     : full;
   const pickLocation = (id: string) => {
@@ -81,12 +81,7 @@ export function BookingPage() {
       : business.address
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([business.address, business.neighborhood, business.city].filter(Boolean).join(', '))}`
         : null;
-  const subtitle = {
-    reservations: t('booking.titleTable'),
-    classes: t('booking.titleClasses'),
-    rentals: t('booking.titleRentals'),
-    appointments: t('booking.title'),
-  }[business.kind];
+  const subtitle = t(`kinds.${business.kind}.publicTitle`);
   const loc = location?.id ?? '';
   const flowProps: FlowProps = { business, loc, onBook: (b) => book.mutate({ ...b, ...(loc ? { locationId: loc } : {}) }), pending: book.isPending, error: book.error, resetKey };
 
@@ -138,15 +133,7 @@ export function BookingPage() {
           <Success business={business} result={book.data} onAnother={() => book.reset()} />
         ) : (
           <div className="card space-y-6" key={loc}>
-            {business.kind === 'reservations' ? (
-              <TablesFlow {...flowProps} />
-            ) : business.kind === 'classes' ? (
-              <ClassesFlow {...flowProps} />
-            ) : business.kind === 'rentals' ? (
-              <RentalsFlow {...flowProps} />
-            ) : (
-              <ServicesFlow {...flowProps} />
-            )}
+            {kindConfig(business.kind).sessions ? <ClassesFlow {...flowProps} /> : <BookingFlow {...flowProps} />}
           </div>
         )}
       </div>
@@ -259,72 +246,150 @@ function useResetOnError(resetKey: number, clear: () => void) {
   }, [resetKey]);
 }
 
-// ---------- Services (optionally with a professional) ----------
+// ---------- Bookings (every kind except group classes) ----------
 
-function ServicesFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
+/**
+ * One flow for every kind: what (service, party size or length) → who/where (resource, optional)
+ * → day → time → contact details. KIND_CONFIG decides which of the first steps apply.
+ */
+function BookingFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
   const { t } = useTranslation();
+  const kind = business.kind;
+  const cfg = kindConfig(kind);
+  const needsService = !cfg.partySize && !cfg.durations;
+  // Tables are assigned by the system (best fit for the party); people and spaces can be chosen.
+  const pickResource = !cfg.partySize;
+  const durations = business.rentalDurations ?? [60];
   const [serviceId, setServiceId] = useState('');
-  const [proId, setProId] = useState('');
+  const [partySize, setPartySize] = useState(2);
+  const [duration, setDuration] = useState(durations[0]!);
+  const [resourceId, setResourceId] = useState('');
   const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [slot, setSlot] = useState('');
   const days = useOpenDays(business, 21);
   const service = business.services.find((s) => s.id === serviceId);
-  const pros = eligibleProfessionals(business.professionals, serviceId || null);
+  const ready = needsService ? Boolean(service) : true;
+  const eligible = eligibleResources(business.resources, { serviceId: needsService ? serviceId || null : null, partySize: cfg.partySize ? partySize : null });
+  const resource = business.resources.find((r) => r.id === resourceId);
+  const minutes = cfg.durations ? duration : service?.durationMin ?? 0;
+  const total = bookingPriceCents(resource, service?.priceCents ?? 0, minutes);
+  const rates = business.resources.map((r) => r.pricePerHourCents).filter((x): x is number => x != null);
+  const qs = new URLSearchParams({ date });
+  if (needsService) qs.set('serviceId', serviceId);
+  if (cfg.partySize) qs.set('partySize', String(partySize));
+  if (cfg.durations) qs.set('durationMin', String(duration));
+  if (resourceId) qs.set('resourceId', resourceId);
+  if (loc) qs.set('locationId', loc);
   const slots = useQuery({
-    queryKey: ['slots', business.slug, loc, serviceId, proId, date],
-    queryFn: () =>
-      api<{ slots: string[] }>(`/public/${business.slug}/availability?serviceId=${serviceId}&date=${date}${proId ? `&professionalId=${proId}` : ''}${loc ? `&locationId=${loc}` : ''}`),
-    enabled: Boolean(serviceId && date),
+    queryKey: ['slots', business.slug, qs.toString()],
+    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?${qs.toString()}`),
+    enabled: ready && Boolean(date),
   });
   useResetOnError(resetKey, () => { setSlot(''); void slots.refetch(); });
+  const reset = () => setSlot('');
+
+  if (cfg.durations && !business.resources.length) return <p className="text-sm text-slate-500">{t('booking.noSpaces')}</p>;
 
   return (
     <>
-      <Section title={t('booking.chooseService')}>
-        <div className="grid gap-2">
-          {business.services.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => { setServiceId(s.id); setSlot(''); if (proId && !eligibleProfessionals(business.professionals, s.id).some((p) => p.id === proId)) setProId(''); }}
-              className={`flex justify-between rounded-lg border p-3 text-left text-sm ${serviceId === s.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-400'}`}
-            >
-              <span className="font-medium">{s.name}</span>
-              <span className="text-right text-slate-600">
-                {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}
-                {business.deposit && s.priceCents > 0 && (
-                  <span className="block text-xs text-amber-700">
-                    {t('booking.depositOf', {
-                      amount: money(business.deposit.type === 'percent' ? Math.round((s.priceCents * business.deposit.value) / 100) : Math.min(business.deposit.value, s.priceCents)),
-                    })}
+      {cfg.partySize && (
+        <Section title={t('booking.choosePeople')}>
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: business.maxPartySize ?? 8 }, (_, i) => i + 1).map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => { setPartySize(n); reset(); }}
+                className={`h-11 min-w-11 rounded-lg border px-3 text-sm font-medium ${partySize === n ? 'border-brand-600 bg-brand-700 text-white' : 'border-slate-200 hover:border-slate-400'}`}
+                aria-pressed={partySize === n}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">{t('booking.largerGroups')}</p>
+        </Section>
+      )}
+
+      {needsService && (
+        <Section title={t('booking.chooseService')}>
+          <div className="grid gap-2">
+            {business.services.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => {
+                  setServiceId(s.id);
+                  reset();
+                  if (resourceId && !eligibleResources(business.resources, { serviceId: s.id }).some((r) => r.id === resourceId)) setResourceId('');
+                }}
+                className={`flex justify-between rounded-lg border p-3 text-left text-sm ${serviceId === s.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-400'}`}
+              >
+                <span className="font-medium">{s.name}</span>
+                <span className="text-right text-slate-600">
+                  {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}
+                  {business.deposit && s.priceCents > 0 && (
+                    <span className="block text-xs text-amber-700">
+                      {t('booking.depositOf', {
+                        amount: money(business.deposit.type === 'percent' ? Math.round((s.priceCents * business.deposit.value) / 100) : Math.min(business.deposit.value, s.priceCents)),
+                      })}
+                    </span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {ready && pickResource && eligible.length > 0 && (
+        <Section title={t(`kinds.${kind}.chooseResource`)}>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {eligible.length > 1 && (
+              <Chip on={!resourceId} onClick={() => { setResourceId(''); reset(); }}>
+                <span className="font-medium">{t('booking.anyResource')}</span>
+                {rates.length > 0 && <span className="block text-xs text-slate-500">{t('booking.fromPerHour', { price: money(Math.min(...rates)) })}</span>}
+              </Chip>
+            )}
+            {eligible.map((r) => (
+              <Chip key={r.id} on={resourceId === r.id} onClick={() => { setResourceId(r.id); reset(); }}>
+                <span className="flex items-center gap-2 font-medium">
+                  <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
+                  {r.name}
+                </span>
+                {(r.pricePerHourCents != null || r.description) && (
+                  <span className="block text-xs text-slate-500">
+                    {[r.pricePerHourCents != null && t('resources.perHour', { price: money(r.pricePerHourCents) }), r.description].filter(Boolean).join(' · ')}
                   </span>
                 )}
-              </span>
-            </button>
-          ))}
-        </div>
-      </Section>
-
-      {service && pros.length > 0 && (
-        <Section title={t('booking.chooseProfessional')}>
-          <div className="flex flex-wrap gap-2">
-            <Chip on={!proId} onClick={() => { setProId(''); setSlot(''); }}>{t('booking.anyProfessional')}</Chip>
-            {pros.map((p) => (
-              <Chip key={p.id} on={proId === p.id} onClick={() => { setProId(p.id); setSlot(''); }}>
-                <span className="flex items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: p.color }} />
-                  {p.name}
-                </span>
               </Chip>
             ))}
           </div>
         </Section>
       )}
 
-      {service && (
+      {cfg.durations && (
+        <Section title={t('booking.chooseDuration')}>
+          <div className="flex flex-wrap gap-2">
+            {durations.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => { setDuration(m); reset(); }}
+                aria-pressed={duration === m}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium ${duration === m ? 'border-brand-600 bg-brand-700 text-white' : 'border-slate-200 hover:border-slate-400'}`}
+              >
+                {m % 60 === 0 ? t('booking.hoursN', { count: m / 60 }) : `${m} ${t('common.minutes')}`}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {ready && (
         <>
           <Section title={t('booking.chooseDate')}>
-            <DayPicker days={days} value={date} onChange={(v) => { setDate(v); setSlot(''); }} />
+            <DayPicker days={days} value={date} onChange={(v) => { setDate(v); reset(); }} />
           </Section>
           <Section title={t('booking.chooseTime')}>
             <SlotGrid loading={slots.isLoading} slots={slots.data?.slots} value={slot} onChange={setSlot} tz={business.timezone} />
@@ -332,59 +397,34 @@ function ServicesFlow({ business, loc, onBook, pending, error, resetKey }: FlowP
         </>
       )}
 
-      {slot && service && (
+      {slot && ready && (
         <CustomerForm
           pending={pending}
           error={error}
-          cta={t('booking.confirm')}
-          onSubmit={(f) => onBook({ serviceId, professionalId: proId || null, startsAt: slot, ...f })}
+          cta={t(`kinds.${kind}.confirm`)}
+          summary={
+            <p className="rounded-lg bg-slate-50 p-3 text-sm">
+              {[
+                service?.name,
+                cfg.partySize && t('booking.people', { count: partySize }),
+                resource?.name ?? (pickResource && eligible.length > 1 ? t('booking.anyResource') : null),
+                dateTime(slot, business.timezone),
+                cfg.durations && `${duration} ${t('common.minutes')}`,
+              ].filter(Boolean).join(' · ')}
+              {total > 0 && <> · <b>{money(total)}</b></>}
+            </p>
+          }
+          onSubmit={(f) =>
+            onBook({
+              ...(needsService ? { serviceId } : {}),
+              ...(cfg.partySize ? { partySize } : {}),
+              ...(cfg.durations ? { durationMin: duration } : {}),
+              resourceId: resourceId || null,
+              startsAt: slot,
+              ...f,
+            })
+          }
         />
-      )}
-    </>
-  );
-}
-
-// ---------- Restaurant tables ----------
-
-function TablesFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
-  const { t } = useTranslation();
-  const [partySize, setPartySize] = useState(2);
-  const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
-  const [slot, setSlot] = useState('');
-  const days = useOpenDays(business, 21);
-  const slots = useQuery({
-    queryKey: ['slots', business.slug, loc, `p${partySize}`, date],
-    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?partySize=${partySize}&date=${date}${loc ? `&locationId=${loc}` : ''}`),
-    enabled: Boolean(date),
-  });
-  useResetOnError(resetKey, () => { setSlot(''); void slots.refetch(); });
-
-  return (
-    <>
-      <Section title={t('booking.choosePeople')}>
-        <div className="flex flex-wrap gap-2">
-          {Array.from({ length: business.maxPartySize ?? 8 }, (_, i) => i + 1).map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => { setPartySize(n); setSlot(''); }}
-              className={`h-11 min-w-11 rounded-lg border px-3 text-sm font-medium ${partySize === n ? 'border-brand-600 bg-brand-700 text-white' : 'border-slate-200 hover:border-slate-400'}`}
-              aria-pressed={partySize === n}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-slate-500">{t('booking.largerGroups')}</p>
-      </Section>
-      <Section title={t('booking.chooseDate')}>
-        <DayPicker days={days} value={date} onChange={(v) => { setDate(v); setSlot(''); }} />
-      </Section>
-      <Section title={t('booking.chooseTime')}>
-        <SlotGrid loading={slots.isLoading} slots={slots.data?.slots} value={slot} onChange={setSlot} tz={business.timezone} />
-      </Section>
-      {slot && (
-        <CustomerForm pending={pending} error={error} cta={t('booking.confirmTable')} onSubmit={(f) => onBook({ partySize, startsAt: slot, ...f })} />
       )}
     </>
   );
@@ -446,7 +486,7 @@ function ClassesFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
                   <span className="font-semibold">{fmt.format(new Date(c.startsAt))}</span>
                   <span className="text-slate-500"> – {fmt.format(new Date(c.endsAt))}</span>
                   <span className="block font-medium">{c.serviceName}</span>
-                  {c.professionalName && <span className="block text-xs text-slate-500">{t('booking.withInstructor', { name: c.professionalName })}</span>}
+                  {c.resourceName && <span className="block text-xs text-slate-500">{t('booking.withInstructor', { name: c.resourceName })}</span>}
                 </span>
                 <span className="text-right">
                   <span className="block text-slate-700">{money(c.priceCents)}</span>
@@ -480,88 +520,9 @@ function ClassesFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
         <CustomerForm
           pending={pending}
           error={error}
-          cta={t('booking.confirmClass')}
+          cta={t(`kinds.${business.kind}.confirm`)}
           summary={chosen.priceCents > 0 && <p className="rounded-lg bg-slate-50 p-3 text-sm">{t('booking.total')}: <b>{money(chosen.priceCents * spots)}</b></p>}
           onSubmit={(f) => onBook({ classSessionId: chosen.id, spots, ...f })}
-        />
-      )}
-    </>
-  );
-}
-
-// ---------- Space rentals ----------
-
-function RentalsFlow({ business, loc, onBook, pending, error, resetKey }: FlowProps) {
-  const { t } = useTranslation();
-  const durations = business.rentalDurations ?? [60];
-  const [spaceId, setSpaceId] = useState('');
-  const [duration, setDuration] = useState(durations[0]!);
-  const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
-  const [slot, setSlot] = useState('');
-  const days = useOpenDays(business, 21);
-  const space = business.spaces.find((s) => s.id === spaceId);
-  const minPrice = Math.min(...business.spaces.map((s) => s.pricePerHourCents));
-  const slots = useQuery({
-    queryKey: ['slots', business.slug, loc, spaceId, duration, date],
-    queryFn: () => api<{ slots: string[] }>(`/public/${business.slug}/availability?durationMin=${duration}&date=${date}${spaceId ? `&spaceId=${spaceId}` : ''}${loc ? `&locationId=${loc}` : ''}`),
-    enabled: Boolean(date),
-  });
-  useResetOnError(resetKey, () => { setSlot(''); void slots.refetch(); });
-  const total = space ? spacePriceCents(space.pricePerHourCents, duration) : null;
-
-  if (!business.spaces.length) return <p className="text-sm text-slate-500">{t('booking.noSpaces')}</p>;
-
-  return (
-    <>
-      <Section title={t('booking.chooseSpace')}>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {business.spaces.length > 1 && (
-            <Chip on={!spaceId} onClick={() => { setSpaceId(''); setSlot(''); }}>
-              <span className="font-medium">{t('booking.anySpace')}</span>
-              <span className="block text-xs text-slate-500">{t('booking.fromPerHour', { price: money(minPrice) })}</span>
-            </Chip>
-          )}
-          {business.spaces.map((s) => (
-            <Chip key={s.id} on={spaceId === s.id} onClick={() => { setSpaceId(s.id); setSlot(''); }}>
-              <span className="font-medium">{s.name}</span>
-              <span className="block text-xs text-slate-500">{t('spaces.perHour', { price: money(s.pricePerHourCents) })}{s.description ? ` · ${s.description}` : ''}</span>
-            </Chip>
-          ))}
-        </div>
-      </Section>
-      <Section title={t('booking.chooseDuration')}>
-        <div className="flex flex-wrap gap-2">
-          {durations.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => { setDuration(m); setSlot(''); }}
-              aria-pressed={duration === m}
-              className={`rounded-lg border px-3 py-2 text-sm font-medium ${duration === m ? 'border-brand-600 bg-brand-700 text-white' : 'border-slate-200 hover:border-slate-400'}`}
-            >
-              {m % 60 === 0 ? t('booking.hoursN', { count: m / 60 }) : `${m} ${t('common.minutes')}`}
-            </button>
-          ))}
-        </div>
-      </Section>
-      <Section title={t('booking.chooseDate')}>
-        <DayPicker days={days} value={date} onChange={(v) => { setDate(v); setSlot(''); }} />
-      </Section>
-      <Section title={t('booking.chooseStart')}>
-        <SlotGrid loading={slots.isLoading} slots={slots.data?.slots} value={slot} onChange={setSlot} tz={business.timezone} />
-      </Section>
-      {slot && (
-        <CustomerForm
-          pending={pending}
-          error={error}
-          cta={t('booking.confirmRental')}
-          summary={
-            <p className="rounded-lg bg-slate-50 p-3 text-sm">
-              {space ? space.name : t('booking.anySpace')} · {dateTime(slot, business.timezone)} · {duration} {t('common.minutes')}
-              {total != null && total > 0 && <> · <b>{money(total)}</b></>}
-            </p>
-          }
-          onSubmit={(f) => onBook({ spaceId: spaceId || null, durationMin: duration, startsAt: slot, ...f })}
         />
       )}
     </>
@@ -574,25 +535,24 @@ function Success({ business, result, onAnother }: { business: PublicBusinessDto;
   const { t } = useTranslation();
   const when = dateTime(result.startsAt, business.timezone);
   const minutes = Math.round((new Date(result.endsAt).getTime() - new Date(result.startsAt).getTime()) / 60000);
-  const [title, detail] =
-    business.kind === 'reservations'
-      ? [t('booking.successTitleTable'), t('booking.successTable', { count: result.partySize ?? 0, date: when })]
-      : business.kind === 'classes'
-        ? [t('booking.successClassTitle'), t('booking.successClass', { service: result.serviceName, date: when, count: result.partySize ?? 1 })]
-        : business.kind === 'rentals'
-          ? [t('booking.successRentalTitle'), t('booking.successRental', { space: result.resourceName ?? result.serviceName, date: when, minutes })]
-          : [
-              t('booking.success'),
-              result.resourceName
-                ? t('booking.successDetailWith', { service: result.serviceName, date: when, name: result.resourceName })
-                : t('booking.successDetail', { service: result.serviceName, date: when }),
-            ];
+  const cfg = kindConfig(business.kind);
+  // Same confirmation for every kind; only the title wording changes.
+  const detail = [
+    !cfg.partySize && !cfg.durations && result.serviceName,
+    result.partySize != null && (cfg.sessions ? t('classes.spotsN', { count: result.partySize }) : t('booking.people', { count: result.partySize })),
+    result.resourceName,
+    when,
+    cfg.durations && `${minutes} ${t('common.minutes')}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const title = t(`kinds.${business.kind}.successTitle`);
   return (
     <div className="card text-center">
       <div className="mb-2 text-4xl">✓</div>
       <h2 className="text-xl font-semibold">{title}</h2>
       <p className="mt-2 text-slate-600">{detail}</p>
-      {result.priceCents > 0 && business.kind !== 'appointments' && (
+      {result.priceCents > 0 && (
         <p className="mt-1 text-sm text-slate-500">{t('booking.total')}: {money(result.priceCents)}</p>
       )}
       {result.deposit && <DepositBox deposit={result.deposit} />}

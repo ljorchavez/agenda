@@ -1,154 +1,114 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
+import { eligibleResources, RESOURCE_COLORS, reservationSettingsOf, type BusinessKind } from '@agenda/shared';
 import type { Db } from '../db/client.js';
-import { professionals, services, spaces, type Professional, type Service, type Space, type Tenant } from '../db/schema.js';
+import { resources, services, type Resource, type Service, type Tenant } from '../db/schema.js';
 import { AppError } from './errors.js';
+
+/**
+ * Booking engine shared by every kind of business. A resource is whatever gets booked (a person,
+ * a court, a table). A booking needs one that is active in the location, takes the service, fits
+ * the party and is free at that time.
+ */
 
 type Q = Pick<Db, 'select' | 'execute'>;
 export type Interval = { s: Date; e: Date };
-export type ProBusy = Interval & { pid: string | null };
-export type SpaceBusy = Interval & { sid: string };
-export type ProLite = Pick<Professional, 'id' | 'name' | 'serviceIds'>;
-export type SpaceLite = Pick<Space, 'id' | 'name' | 'pricePerHourCents'>;
+/** Busy time of one resource (`rid`), or of the location when the booking has no resource (`rid` null). */
+export type Busy = Interval & { rid: string | null };
+export type ResourceLite = Pick<Resource, 'id' | 'name' | 'serviceIds' | 'capacity'>;
+export type Need = { serviceId?: string | null; partySize?: number | null };
 
 const overlaps = (b: Interval, start: Date, end: Date) => b.s < end && b.e > start;
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'es', { numeric: true });
 
-// ---------- Professionals ----------
-
-/** Active professionals of a location (empty = that location works as a single agenda). */
-export function activeProfessionals(db: Pick<Db, 'select'>, tenantId: string, locationId?: string): Promise<Professional[]> {
-  return db
+/** Active resources of a location (none = that location works as a single agenda). */
+export async function activeResources(db: Pick<Db, 'select'>, tenantId: string, locationId?: string): Promise<Resource[]> {
+  const rows = await db
     .select()
-    .from(professionals)
-    .where(and(
-      eq(professionals.tenantId, tenantId),
-      eq(professionals.active, true),
-      locationId ? eq(professionals.locationId, locationId) : undefined,
-    ))
-    .orderBy(asc(professionals.name));
-}
-
-/** Professionals who perform the service (an empty service list means "all services"). */
-export function eligibleFor<T extends Pick<Professional, 'serviceIds'>>(pros: T[], serviceId: string | null | undefined): T[] {
-  if (!serviceId) return pros;
-  return pros.filter((p) => !p.serviceIds?.length || p.serviceIds.includes(serviceId));
+    .from(resources)
+    .where(and(eq(resources.tenantId, tenantId), eq(resources.active, true), locationId ? eq(resources.locationId, locationId) : undefined))
+    .orderBy(asc(resources.name));
+  return rows.sort(byName);
 }
 
 /**
- * Free professional for [start, end), preferring whoever has the fewest bookings that day
- * (spreads the work), ties broken by name. Appointments without a professional block everyone.
- * Pure function so it can be unit-tested.
+ * Best free resource for [start, end), or null. Pure, so it can be unit-tested.
+ * Order: smallest capacity that fits (best table for the party), then the least busy (spreads the
+ * work), then by name. Bookings without a resource use up one resource each.
  */
-export function pickProfessional(pros: ProLite[], busy: ProBusy[], start: Date, end: Date): ProLite | null {
-  if (busy.some((b) => b.pid === null && overlaps(b, start, end))) return null;
-  const free = pros.filter((p) => !busy.some((b) => b.pid === p.id && overlaps(b, start, end)));
-  if (!free.length) return null;
-  const load = (id: string) => busy.filter((b) => b.pid === id).length;
-  return [...free].sort((a, b) => load(a.id) - load(b.id) || a.name.localeCompare(b.name, 'es'))[0]!;
+export function pickResource<T extends ResourceLite>(list: T[], busy: Busy[], start: Date, end: Date): T | null {
+  const free = list.filter((r) => !busy.some((b) => b.rid === r.id && overlaps(b, start, end)));
+  const unassigned = busy.filter((b) => b.rid === null && overlaps(b, start, end)).length;
+  if (free.length <= unassigned) return null;
+  const load = (id: string) => busy.filter((b) => b.rid === id).length;
+  const cap = (r: T) => r.capacity ?? Number.MAX_SAFE_INTEGER;
+  return [...free].sort((a, b) => cap(a) - cap(b) || load(a.id) - load(b.id) || byName(a, b))[0]!;
 }
 
 /**
- * Busy intervals per professional in [from, to): their appointments (not classes or rentals)
- * plus the classes they teach.
+ * Busy intervals in [from, to): bookings (class sign-ups excluded, the class itself counts) and
+ * the classes each resource runs. Unassigned bookings only count in their own location.
  */
-export async function professionalBusy(
+export async function resourceBusy(
   db: Pick<Db, 'execute'>,
   tenantId: string,
   from: Date,
   to: Date,
-  excludeId?: string,
-  locationId?: string,
-): Promise<ProBusy[]> {
-  const exclude = excludeId ? sql`and id <> ${excludeId}` : sql``;
-  // Unassigned appointments only block the team of their own location.
-  const loc = locationId ? sql`and (professional_id is not null or location_id = ${locationId})` : sql``;
-  const res = await db.execute<{ pid: string | null; s: Date | string; e: Date | string }>(sql`
-    select professional_id as pid, starts_at as s, ends_at as e from appointments
-    where tenant_id = ${tenantId} and status in ('scheduled', 'confirmed')
-      and class_session_id is null and space_id is null and table_id is null
+  opts: { excludeId?: string; locationId?: string } = {},
+): Promise<Busy[]> {
+  const exclude = opts.excludeId ? sql`and id <> ${opts.excludeId}` : sql``;
+  const loc = opts.locationId ? sql`and (resource_id is not null or location_id = ${opts.locationId})` : sql``;
+  const res = await db.execute<{ rid: string | null; s: Date | string; e: Date | string }>(sql`
+    select resource_id as rid, starts_at as s, ends_at as e from appointments
+    where tenant_id = ${tenantId} and status in ('scheduled', 'confirmed') and class_session_id is null
       and starts_at < ${to.toISOString()} and ends_at > ${from.toISOString()} ${exclude} ${loc}
     union all
-    select professional_id as pid, starts_at as s, ends_at as e from class_sessions
-    where tenant_id = ${tenantId} and status = 'scheduled' and professional_id is not null
+    select resource_id as rid, starts_at as s, ends_at as e from class_sessions
+    where tenant_id = ${tenantId} and status = 'scheduled' and resource_id is not null
       and starts_at < ${to.toISOString()} and ends_at > ${from.toISOString()}`);
-  return res.rows.map((r) => ({ pid: r.pid, s: new Date(r.s), e: new Date(r.e) }));
+  return res.rows.map((r) => ({ rid: r.rid, s: new Date(r.s), e: new Date(r.e) }));
 }
 
 /**
- * Picks (or validates) the professional for a booking. Call inside the tenant lock.
- * Throws 404 unknown professional, 422 if they don't do the service, 409 if busy / nobody free.
+ * Picks (or validates) the resource for a booking. Call inside the tenant lock.
+ * 404 unknown resource · 422 doesn't take the service / too small · 409 busy or nothing free.
  */
-export async function assignProfessional(
+export async function assignResource(
   db: Q,
   tenantId: string,
-  serviceId: string,
   start: Date,
   end: Date,
-  opts: { professionalId?: string | null; excludeId?: string; locationId?: string } = {},
-): Promise<Professional> {
-  const pros = await activeProfessionals(db, tenantId, opts.locationId);
+  opts: Need & { resourceId?: string | null; excludeId?: string; locationId?: string } = {},
+): Promise<Resource> {
+  const list = await activeResources(db, tenantId, opts.locationId);
   // A ±12 h window also gives a rough per-day load for spreading bookings.
-  const busy = await professionalBusy(
-    db, tenantId, new Date(start.getTime() - 12 * 3600e3), new Date(end.getTime() + 12 * 3600e3), opts.excludeId, opts.locationId,
-  );
-  if (opts.professionalId) {
-    const p = pros.find((x) => x.id === opts.professionalId);
-    if (!p) throw new AppError(404, 'professional_not_found', 'Professional not found or inactive');
-    if (!eligibleFor([p], serviceId).length) throw new AppError(422, 'professional_service', 'That professional does not perform this service');
-    if (busy.some((b) => (b.pid === p.id || b.pid === null) && overlaps(b, start, end))) {
-      throw new AppError(409, 'professional_busy', 'That professional is busy at that time');
-    }
-    return p;
+  const busy = await resourceBusy(db, tenantId, new Date(start.getTime() - 12 * 3600e3), new Date(end.getTime() + 12 * 3600e3), opts);
+  if (opts.resourceId) {
+    const r = list.find((x) => x.id === opts.resourceId);
+    if (!r) throw new AppError(404, 'resource_not_found', 'Not found or inactive');
+    if (!eligibleResources([r], { serviceId: opts.serviceId }).length) throw new AppError(422, 'resource_service', 'It does not take this service');
+    if (!eligibleResources([r], { partySize: opts.partySize }).length) throw new AppError(422, 'resource_too_small', 'Too small for the party');
+    if (!pickResource([r], busy, start, end)) throw new AppError(409, 'resource_busy', 'Busy at that time');
+    return r;
   }
-  const chosen = pickProfessional(eligibleFor(pros, serviceId), busy, start, end);
-  if (!chosen) throw new AppError(409, 'no_professional_available', 'Nobody is available at that time');
-  return pros.find((p) => p.id === chosen.id)!;
+  const chosen = pickResource(eligibleResources(list, opts), busy, start, end);
+  if (!chosen) throw new AppError(409, 'no_resource_available', 'Nothing available at that time');
+  return chosen;
 }
 
-// ---------- Spaces ----------
-
-export function activeSpaces(db: Pick<Db, 'select'>, tenantId: string, locationId?: string): Promise<Space[]> {
-  return db
-    .select()
-    .from(spaces)
-    .where(and(eq(spaces.tenantId, tenantId), eq(spaces.active, true), locationId ? eq(spaces.locationId, locationId) : undefined))
-    .orderBy(asc(spaces.name));
+/** Resource of the tenant by id (any status), or 404. */
+export async function findResource(db: Pick<Db, 'query'>, tenantId: string, id: string): Promise<Resource> {
+  const r = await db.query.resources.findFirst({ where: and(eq(resources.id, id), eq(resources.tenantId, tenantId)) });
+  if (!r) throw new AppError(404, 'resource_not_found', 'Not found');
+  return r;
 }
 
-/** First free space (by name) for [start, end), or the requested one if it's free. Pure. */
-export function pickSpace(list: SpaceLite[], busy: SpaceBusy[], start: Date, end: Date, spaceId?: string | null): SpaceLite | null {
-  const candidates = spaceId ? list.filter((s) => s.id === spaceId) : [...list].sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
-  return candidates.find((s) => !busy.some((b) => b.sid === s.id && overlaps(b, start, end))) ?? null;
-}
+// ---------- Internal service ----------
 
-export async function spaceBusy(db: Pick<Db, 'execute'>, tenantId: string, from: Date, to: Date, excludeId?: string): Promise<SpaceBusy[]> {
-  const exclude = excludeId ? sql`and id <> ${excludeId}` : sql``;
-  const res = await db.execute<{ sid: string; s: Date | string; e: Date | string }>(sql`
-    select space_id as sid, starts_at as s, ends_at as e from appointments
-    where tenant_id = ${tenantId} and space_id is not null and status in ('scheduled', 'confirmed')
-      and starts_at < ${to.toISOString()} and ends_at > ${from.toISOString()} ${exclude}`);
-  return res.rows.map((r) => ({ sid: r.sid, s: new Date(r.s), e: new Date(r.e) }));
-}
-
-/** Validates or picks a space. Call inside the tenant lock. */
-export async function assignSpace(
-  db: Q,
-  tenantId: string,
-  start: Date,
-  end: Date,
-  opts: { spaceId?: string | null; excludeId?: string; locationId?: string } = {},
-): Promise<Space> {
-  const list = await activeSpaces(db, tenantId, opts.locationId);
-  if (opts.spaceId && !list.some((s) => s.id === opts.spaceId)) throw new AppError(404, 'space_not_found', 'Space not found or inactive');
-  const busy = await spaceBusy(db, tenantId, start, end, opts.excludeId);
-  const s = pickSpace(list, busy, start, end, opts.spaceId);
-  if (!s) throw new AppError(409, opts.spaceId ? 'space_taken' : 'no_space_available', 'No space available at that time');
-  return list.find((x) => x.id === s.id)!;
-}
-
-// ---------- Internal services ----------
-
-/** Rentals and restaurants book through a single internal service; create it on demand. */
-export async function internalService(db: Pick<Db, 'select' | 'insert'>, tenant: Pick<Tenant, 'id'>, name: string, durationMin: number): Promise<Service> {
+/**
+ * Kinds that book without choosing a service (party size, duration) use one internal service;
+ * it is created on demand.
+ */
+export async function defaultService(db: Pick<Db, 'select' | 'insert'>, tenant: Tenant, kind: BusinessKind): Promise<Service> {
   const [svc] = await db
     .select()
     .from(services)
@@ -156,15 +116,26 @@ export async function internalService(db: Pick<Db, 'select' | 'insert'>, tenant:
     .orderBy(asc(services.createdAt))
     .limit(1);
   if (svc) return svc;
-  const [created] = await db.insert(services).values({ tenantId: tenant.id, name, durationMin, priceCents: 0 }).returning();
+  const [created] = await db
+    .insert(services)
+    .values(
+      kind === 'reservations'
+        ? { tenantId: tenant.id, name: 'Reservación', durationMin: reservationSettingsOf(tenant.settings).durationMin, priceCents: 0 }
+        : { tenantId: tenant.id, name: 'Renta de espacio', durationMin: 60, priceCents: 0 },
+    )
+    .returning();
   return created!;
 }
 
-export const RENTAL_SERVICE_NAME = 'Renta de espacio';
-
-/** Starter spaces for a new rental business, named after its type. */
-export function defaultSpaces(type: string): { name: string; pricePerHourCents: number }[] {
-  if (type === 'sports') return [{ name: 'Cancha 1', pricePerHourCents: 0 }, { name: 'Cancha 2', pricePerHourCents: 0 }];
-  if (type === 'coworking') return [{ name: 'Sala de juntas', pricePerHourCents: 0 }];
-  return [{ name: 'Estudio A', pricePerHourCents: 0 }];
+/** Starter resources for a new business so online booking works right away. */
+export function starterResources(kind: BusinessKind, type: string): { name: string; color: string; capacity?: number; pricePerHourCents?: number }[] {
+  if (kind === 'reservations') {
+    return [2, 2, 4, 4, 6].map((capacity, i) => ({ name: `Mesa ${i + 1}`, color: RESOURCE_COLORS[i % RESOURCE_COLORS.length]!, capacity }));
+  }
+  if (kind === 'rentals') {
+    if (type === 'sports') return [{ name: 'Cancha 1', color: '#2563eb', pricePerHourCents: 0 }, { name: 'Cancha 2', color: '#16a34a', pricePerHourCents: 0 }];
+    if (type === 'coworking') return [{ name: 'Sala de juntas', color: '#2563eb', pricePerHourCents: 0 }];
+    return [{ name: 'Estudio A', color: '#2563eb', pricePerHourCents: 0 }];
+  }
+  return [];
 }

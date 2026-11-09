@@ -1,42 +1,35 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { isManager } from '@agenda/shared';
+import { isManager, kindConfig, type BusinessKind } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 
 type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
 
 const NAV: NavItem[] = [
   { to: '/', key: 'dashboard', icon: '◧', end: true },
-  { to: '/agenda', key: 'agenda', icon: '▦' },
+  { to: '/agenda', key: 'calendar', icon: '▦' },
   { to: '/customers', key: 'customers', icon: '☺' },
   { to: '/services', key: 'services', icon: '✂' },
-  { to: '/team', key: 'team', icon: '♟', desktopOnly: true },
+  { to: '/resources', key: 'resources', icon: '♟', desktopOnly: true },
   { to: '/payments', key: 'payments', icon: '$' },
   { to: '/reports', key: 'reports', icon: '▤' },
   { to: '/settings', key: 'settings', icon: '⚙' },
 ];
 
-/** Each kind of business names and shows its sections differently. */
-function navFor(kind: string | undefined, manager: boolean): NavItem[] {
-  return NAV.flatMap((n): NavItem[] => {
-    // Team members (colaboradores) work their own book; catalogue and team setup stay with managers.
-    if (!manager && (n.key === 'services' || n.key === 'team')) return [];
-    if (kind === 'reservations') {
-      if (n.key === 'services') return [{ ...n, to: '/tables', key: 'tables', icon: '▣' }];
-      if (n.key === 'agenda') return [{ ...n, key: 'reservations' }];
-      if (n.key === 'team') return [];
-    }
-    if (kind === 'rentals') {
-      if (n.key === 'services') return [{ ...n, to: '/spaces', key: 'spaces', icon: '▣' }];
-      if (n.key === 'agenda') return [{ ...n, key: 'bookings' }];
-      if (n.key === 'team') return [];
-    }
-    if (kind === 'classes') {
-      if (n.key === 'agenda') return [{ ...n, to: '/classes', key: 'classes', icon: '▦' }];
-      if (n.key === 'services') return [{ ...n, key: 'classTypes' }];
-      if (n.key === 'team') return [{ ...n, key: 'instructors' }];
-    }
-    return [n];
+/**
+ * Same sections for every kind of business; only the wording changes (i18n `kinds.<kind>.*`).
+ * Kinds that book without choosing a service (party size, duration) don't need the catalogue.
+ */
+function navFor(kind: BusinessKind, manager: boolean): (NavItem & { label: string; short: string })[] {
+  const cfg = kindConfig(kind);
+  return NAV.filter((n) => {
+    // Team members (colaboradores) work their own book; catalogue and resources stay with managers.
+    if (!manager && (n.key === 'services' || n.key === 'resources')) return false;
+    if (n.key === 'services' && (cfg.partySize || cfg.durations)) return false;
+    return true;
+  }).map((n) => {
+    const perKind = ['calendar', 'services', 'resources'].includes(n.key);
+    return { ...n, label: perKind ? `kinds.${kind}.${n.key}` : `nav.${n.key}`, short: perKind ? `kinds.${kind}.${n.key}Short` : `navShort.${n.key}` };
   });
 }
 
@@ -87,7 +80,7 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
 export function Layout() {
   const { t } = useTranslation();
   const { tenant, user, logout } = useAuth();
-  const nav = navFor(tenant?.kind, isManager(user?.role));
+  const nav = navFor(tenant?.kind ?? 'appointments', isManager(user?.role));
   const mobileNav = nav.filter((n) => !n.desktopOnly);
   const navigate = useNavigate();
 
@@ -108,7 +101,7 @@ export function Layout() {
           {nav.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end} className={linkClass}>
               <span className="w-5 text-center">{n.icon}</span>
-              {t(`nav.${n.key}`)}
+              {t(n.label)}
             </NavLink>
           ))}
         </nav>
@@ -160,7 +153,7 @@ export function Layout() {
             }
           >
             <span className="text-base">{n.icon}</span>
-            <span className="w-full truncate px-0.5 text-center">{t(`navShort.${n.key}`)}</span>
+            <span className="w-full truncate px-0.5 text-center">{t(n.short)}</span>
           </NavLink>
         ))}
       </nav>

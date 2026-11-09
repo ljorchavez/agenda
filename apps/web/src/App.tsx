@@ -16,10 +16,7 @@ import { PaymentsPage } from './pages/Payments';
 import { ReportsPage } from './pages/Reports';
 import { ServicesPage } from './pages/Services';
 import { SettingsPage } from './pages/Settings';
-import { TablesPage } from './pages/Tables';
-import { TeamPage } from './pages/Team';
-import { SpacesPage } from './pages/Spaces';
-import { ClassesPage } from './pages/Classes';
+import { ResourcesPage } from './pages/Resources';
 
 function Protected({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
@@ -55,10 +52,10 @@ export function App() {
         <Route path="services" element={<ServicesPage />} />
         <Route path="payments" element={<PaymentsPage />} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="tables" element={<TablesPage />} />
-        <Route path="team" element={<TeamPage />} />
-        <Route path="spaces" element={<SpacesPage />} />
-        <Route path="classes" element={<ClassesPage />} />
+        <Route path="resources" element={<ResourcesPage />} />
+        {/* Old per-kind pages, now one calendar and one resources page */}
+        {['team', 'tables', 'spaces'].map((p) => <Route key={p} path={p} element={<Navigate to="/resources" replace />} />)}
+        <Route path="classes" element={<Navigate to="/agenda" replace />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="new-business" element={<NewBusinessPage />} />
       </Route>

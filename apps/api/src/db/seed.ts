@@ -10,7 +10,7 @@ import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { closeDb, getDb } from './client.js';
-import { appointments, classSessions, customers, diningTables, locations, memberships, payments, professionals, services, spaces, tenants, users } from './schema.js';
+import { appointments, classSessions, customers, locations, memberships, payments, resources, services, tenants, users } from './schema.js';
 
 const TZ = 'America/Mexico_City';
 
@@ -258,16 +258,16 @@ async function seedRestaurant() {
   await addOwner(db, tenantId);
   const [svc] = await db.insert(services).values({ tenantId, name: 'Reservación', durationMin: 90, priceCents: 0 }).returning();
   const tables = await db
-    .insert(diningTables)
+    .insert(resources)
     .values([
-      { tenantId, name: 'Mesa 1', seats: 2, area: 'Interior' },
-      { tenantId, name: 'Mesa 2', seats: 2, area: 'Interior' },
-      { tenantId, name: 'Mesa 3', seats: 2, area: 'Terraza' },
-      { tenantId, name: 'Mesa 4', seats: 4, area: 'Interior' },
-      { tenantId, name: 'Mesa 5', seats: 4, area: 'Interior' },
-      { tenantId, name: 'Mesa 6', seats: 4, area: 'Terraza' },
-      { tenantId, name: 'Mesa 7', seats: 6, area: 'Terraza' },
-      { tenantId, name: 'Mesa 8', seats: 10, area: 'Privado' },
+      { tenantId, name: 'Mesa 1', capacity: 2, description: 'Interior', color: '#0f766e' },
+      { tenantId, name: 'Mesa 2', capacity: 2, description: 'Interior', color: '#2563eb' },
+      { tenantId, name: 'Mesa 3', capacity: 2, description: 'Terraza', color: '#7c3aed' },
+      { tenantId, name: 'Mesa 4', capacity: 4, description: 'Interior', color: '#db2777' },
+      { tenantId, name: 'Mesa 5', capacity: 4, description: 'Interior', color: '#ea580c' },
+      { tenantId, name: 'Mesa 6', capacity: 4, description: 'Terraza', color: '#ca8a04' },
+      { tenantId, name: 'Mesa 7', capacity: 6, description: 'Terraza', color: '#16a34a' },
+      { tenantId, name: 'Mesa 8', capacity: 10, description: 'Privado', color: '#475569' },
     ])
     .returning();
 
@@ -302,7 +302,7 @@ async function seedRestaurant() {
       const party = pick(sizes);
       const s0 = start.toMillis();
       const e0 = start.plus({ minutes: 90 }).toMillis();
-      const table = [...tables].sort((a, b) => a.seats - b.seats).find((tb) => tb.seats >= party && fits(tb.id, s0, e0));
+      const table = [...tables].sort((a, b) => a.capacity! - b.capacity!).find((tb) => tb.capacity! >= party && fits(tb.id, s0, e0));
       if (!table) continue;
       takenBy.set(table.id, [...(takenBy.get(table.id) ?? []), { s: s0, e: e0 }]);
       const r = rand();
@@ -317,7 +317,7 @@ async function seedRestaurant() {
         priceCents: status === 'completed' ? party * (28000 + Math.floor(rand() * 20) * 1000) : 0,
         source: rand() > 0.45 ? 'online' : 'staff',
         partySize: party,
-        tableId: table.id,
+        resourceId: table.id,
         reminderSentAt: d < 0 ? start.minus({ hours: 24 }).toJSDate() : null,
       });
     }
@@ -438,7 +438,7 @@ async function seedBarbershop() {
     ])
     .returning();
   const pros = await db
-    .insert(professionals)
+    .insert(resources)
     .values([
       { tenantId, name: 'Toño', color: '#2563eb', serviceIds: [] },
       { tenantId, name: 'Memo', color: '#ea580c', serviceIds: [], userId: memoUser!.id },
@@ -467,7 +467,7 @@ async function seedBarbershop() {
             tenantId,
             customerId: pick(custs).id,
             serviceId: service.id,
-            professionalId: p.id,
+            resourceId: p.id,
             locationId: p.locationId,
             startsAt: t.toJSDate(),
             endsAt: end.toJSDate(),
@@ -526,7 +526,7 @@ async function seedClasses() {
     ])
     .returning();
   const [laura, diego] = await db
-    .insert(professionals)
+    .insert(resources)
     .values([
       { tenantId, name: 'Laura', color: '#7c3aed', serviceIds: [] },
       { tenantId, name: 'Diego', color: '#0f766e', serviceIds: [], userId: diegoUser!.id },
@@ -551,7 +551,7 @@ async function seedClasses() {
       sessionRows.push({
         tenantId,
         serviceId: slot.svc!.id,
-        professionalId: slot.pro!.id,
+        resourceId: slot.pro!.id,
         startsAt: start.toJSDate(),
         endsAt: start.plus({ minutes: slot.svc!.durationMin }).toJSDate(),
         capacity: slot.cap,
@@ -577,7 +577,7 @@ async function seedClasses() {
         customerId: cu.id,
         serviceId: s.serviceId,
         classSessionId: s.id,
-        professionalId: s.professionalId,
+        resourceId: s.resourceId,
         startsAt: s.startsAt,
         endsAt: s.endsAt,
         partySize: 1,
@@ -620,12 +620,12 @@ async function seedPadel() {
   await addOwner(db, tenantId);
   const [svc] = await db.insert(services).values({ tenantId, name: 'Renta de espacio', durationMin: 60, priceCents: 0 }).returning();
   const courts = await db
-    .insert(spaces)
+    .insert(resources)
     .values([
-      { tenantId, name: 'Cancha 1', pricePerHourCents: 45000, description: 'Techada, cristal' },
-      { tenantId, name: 'Cancha 2', pricePerHourCents: 45000, description: 'Techada, cristal' },
-      { tenantId, name: 'Cancha 3', pricePerHourCents: 45000, description: 'Techada' },
-      { tenantId, name: 'Cancha Central', pricePerHourCents: 55000, description: 'Gradas y mejor iluminación' },
+      { tenantId, name: 'Cancha 1', color: '#2563eb', capacity: 4, pricePerHourCents: 45000, description: 'Techada, cristal' },
+      { tenantId, name: 'Cancha 2', color: '#16a34a', capacity: 4, pricePerHourCents: 45000, description: 'Techada, cristal' },
+      { tenantId, name: 'Cancha 3', color: '#ea580c', capacity: 4, pricePerHourCents: 45000, description: 'Techada' },
+      { tenantId, name: 'Cancha Central', color: '#7c3aed', capacity: 4, pricePerHourCents: 55000, description: 'Gradas y mejor iluminación' },
     ])
     .returning();
   const custs = await demoCustomers(tenantId, 80, '33455', 160);
@@ -647,11 +647,11 @@ async function seedPadel() {
             tenantId,
             customerId: pick(custs).id,
             serviceId: svc!.id,
-            spaceId: c.id,
+            resourceId: c.id,
             startsAt: t.toJSDate(),
             endsAt: end.toJSDate(),
             status: d < 0 || t < now ? pastStatus() : rand() > 0.5 ? 'confirmed' : 'scheduled',
-            priceCents: Math.round((c.pricePerHourCents * dur) / 60),
+            priceCents: Math.round((c.pricePerHourCents! * dur) / 60),
             source: rand() > 0.35 ? 'online' : 'staff',
             reminderSentAt: d < 0 ? t.minus({ hours: 24 }).toJSDate() : null,
           });
@@ -718,7 +718,7 @@ async function seedDirectory() {
       .returning();
     if (isTables) {
       await db.insert(services).values({ tenantId: t!.id, name: 'Reservación', durationMin: 90, priceCents: 0 });
-      await db.insert(diningTables).values([2, 2, 4, 4, 6].map((seats, k) => ({ tenantId: t!.id, name: `Mesa ${k + 1}`, seats })));
+      await db.insert(resources).values([2, 2, 4, 4, 6].map((capacity, k) => ({ tenantId: t!.id, name: `Mesa ${k + 1}`, capacity })));
     } else {
       await db.insert(services).values(d.services.map(([name, durationMin, priceCents]) => ({ tenantId: t!.id, name, durationMin, priceCents })));
     }

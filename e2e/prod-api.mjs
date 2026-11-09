@@ -320,9 +320,9 @@ if (process.env.CRON_SECRET) {
   const rt = login.body?.token;
   const pub = await call('GET', '/api/public/restaurante-demo');
   check('restaurant public page is table-based', pub.status === 200 && pub.body.kind === 'reservations' && pub.body.maxPartySize >= 8 && pub.body.lat != null, pub.text.slice(0, 200));
-  const tables = await call('GET', '/api/tables', null, rt);
+  const tables = await call('GET', '/api/resources', null, rt);
   check('restaurant has 8 tables', tables.status === 200 && tables.body.length === 8, tables.text.slice(0, 200));
-  check('tables are private', (await call('GET', '/api/tables')).status === 401);
+  check('resources are private', (await call('GET', '/api/resources')).status === 401);
   check('party larger than max -> no slots', ((await call('GET', `/api/public/restaurante-demo/availability?partySize=40&date=${new Date(Date.now() + 3 * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' })}`)).body?.slots ?? []).length === 0);
   let day = null;
   let slots = [];
@@ -336,11 +336,11 @@ if (process.env.CRON_SECRET) {
   check('online table reservation', b.status === 201 && b.body.partySize === 5 && /^\/c\//.test(b.body.managePath ?? ''), b.text);
   const appts = await call('GET', `/api/appointments?from=${encodeURIComponent(slot)}&to=${encodeURIComponent(new Date(new Date(slot).getTime() + 60e3).toISOString())}`, null, rt);
   const mine = appts.body?.find?.((a) => a.managePath === b.body?.managePath);
-  const table = tables.body?.find?.((x) => x.id === mine?.tableId);
-  check('reservation assigned to a table that fits', !!table && table.seats >= 5 && mine.tableName === table.name, JSON.stringify(mine));
+  const table = tables.body?.find?.((x) => x.id === mine?.resourceId);
+  check('reservation assigned to a table that fits', !!table && table.capacity >= 5 && mine.resourceName === table.name && /^#/.test(mine.resourceColor ?? ''), JSON.stringify(mine));
   check('restaurant reservation over capacity -> 422', (await call('POST', '/api/public/restaurante-demo/bookings', { partySize: 60, startsAt: slot, name: 'Grupo QA', phone: '5511223355' })).status === 422);
   // Fill every 6-seat-or-larger table at that slot -> the slot disappears for 6 people
-  const big = tables.body.filter((x) => x.active && x.seats >= 6).length;
+  const big = tables.body.filter((x) => x.active && x.capacity >= 6).length;
   let filled = 0;
   for (let i = 0; i < big + 1; i++) {
     const x = await call('POST', '/api/public/restaurante-demo/bookings', { partySize: 6, startsAt: slot, name: `Grupo QA ${i}`, phone: `55112233${60 + i}` });
@@ -361,36 +361,36 @@ if (process.env.CRON_SECRET) {
 
 const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
 
-// ---- Team: per-professional agendas (barbershop demo)
+// ---- Team: per-person agendas (barbershop demo)
 {
   const pub = await call('GET', '/api/public/barberia-demo');
-  check('barbershop exposes its team', pub.status === 200 && pub.body.kind === 'appointments' && pub.body.professionals?.length === 4, pub.text.slice(0, 200));
+  check('barbershop exposes its team', pub.status === 200 && pub.body.kind === 'appointments' && pub.body.resources?.length === 4, pub.text.slice(0, 200));
   check('barbershop has two locations', pub.body.locations?.map((l) => l.name).sort().join(',') === 'Narvarte,Polanco', JSON.stringify(pub.body.locations));
   const svc = pub.body.services[0];
-  const pro = pub.body.professionals.find((p) => !p.serviceIds.length || p.serviceIds.includes(svc.id));
+  const pro = pub.body.resources.find((p) => !p.serviceIds.length || p.serviceIds.includes(svc.id));
   let day = null;
   let slots = [];
   for (let i = 9; i < 20 && slots.length < 3; i++) {
     day = mxDay(i);
-    slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&professionalId=${pro.id}`)).body?.slots ?? [];
+    slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&resourceId=${pro.id}`)).body?.slots ?? [];
   }
   check('availability for a specific barber', slots.length > 0, day);
   const slot = slots[1] ?? slots[0];
-  const b = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, professionalId: pro.id, startsAt: slot, name: 'Corte QA', phone: '5512120001' });
+  const b = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, resourceId: pro.id, startsAt: slot, name: 'Corte QA', phone: '5512120001' });
   check('book with a chosen barber', b.status === 201 && b.body.resourceName === pro.name, b.text);
-  const again = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, professionalId: pro.id, startsAt: slot, name: 'Corte QA 2', phone: '5512120002' });
+  const again = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, resourceId: pro.id, startsAt: slot, name: 'Corte QA 2', phone: '5512120002' });
   check('same barber same time -> 409', again.status === 409, again.text);
-  const proSlots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&professionalId=${pro.id}`)).body.slots;
+  const proSlots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}&resourceId=${pro.id}`)).body.slots;
   check("barber's taken slot disappears for that barber", !proSlots.includes(slot));
   const anySlots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${svc.id}&date=${day}`)).body.slots;
   if (anySlots.includes(slot)) {
-    const any = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, professionalId: null, startsAt: slot, name: 'Corte QA 3', phone: '5512120003' });
+    const any = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: svc.id, resourceId: null, startsAt: slot, name: 'Corte QA 3', phone: '5512120003' });
     check('"any barber" gets assigned to someone free', any.status === 201 && any.body.resourceName && any.body.resourceName !== pro.name, any.text);
     await call('POST', `/api/public/manage/${any.body.managePath?.slice(3)}/cancel`);
   } else check('slot still offered with another barber', false, 'all barbers busy at slot');
   const login = await demoLogin('barberia-demo');
-  const team = await call('GET', '/api/professionals', null, login.body?.token);
-  check('barbershop team list (private)', team.status === 200 && team.body.length === 4 && (await call('GET', '/api/professionals')).status === 401);
+  const team = await call('GET', '/api/resources', null, login.body?.token);
+  check('barbershop team list (private)', team.status === 200 && team.body.length === 4 && (await call('GET', '/api/resources')).status === 401);
   const m = await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`);
   check('customer cancels barber booking', m.status === 200);
 }
@@ -424,12 +424,13 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   const to = new Date(Date.now() + 7 * 864e5).toISOString();
   const sessions = await call('GET', `/api/class-sessions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, null, login.body?.token);
   check('studio sees its class schedule', sessions.status === 200 && sessions.body.length > 3 && sessions.body.every((s) => s.booked <= s.capacity || s.booked >= 0), sessions.text.slice(0, 160));
+  check('classes carry instructor colour for the calendar', sessions.body.some((s) => s.resourceId && /^#/.test(s.resourceColor ?? '')), sessions.text.slice(0, 160));
 }
 
 // ---- Space rentals (padel demo)
 {
   const pub = await call('GET', '/api/public/padel-demo');
-  check('padel club rents spaces', pub.status === 200 && pub.body.kind === 'rentals' && pub.body.spaces.length === 4 && pub.body.rentalDurations?.includes(90), pub.text.slice(0, 200));
+  check('padel club rents spaces', pub.status === 200 && pub.body.kind === 'rentals' && pub.body.resources.length === 4 && pub.body.rentalDurations?.includes(90), pub.text.slice(0, 200));
   let day = null;
   let slots = [];
   for (let i = 9; i < 20 && slots.length < 3; i++) {
@@ -438,16 +439,21 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   }
   check('court availability for 90 min', slots.length > 0, day);
   const slot = slots[Math.floor(slots.length / 2)];
-  const b = await call('POST', '/api/public/padel-demo/bookings', { spaceId: null, durationMin: 90, startsAt: slot, name: 'Pádel QA', phone: '5514140001' });
-  const sp = pub.body.spaces.find((s) => s.name === b.body?.resourceName);
+  const b = await call('POST', '/api/public/padel-demo/bookings', { resourceId: null, durationMin: 90, startsAt: slot, name: 'Pádel QA', phone: '5514140001' });
+  const sp = pub.body.resources.find((s) => s.name === b.body?.resourceName);
   check('any free court assigned, priced by the hour', b.status === 201 && !!sp && b.body.priceCents === Math.round(sp.pricePerHourCents * 1.5), b.text);
-  const same = await call('POST', '/api/public/padel-demo/bookings', { spaceId: sp?.id, durationMin: 90, startsAt: slot, name: 'Pádel QA 2', phone: '5514140002' });
+  const same = await call('POST', '/api/public/padel-demo/bookings', { resourceId: sp?.id, durationMin: 90, startsAt: slot, name: 'Pádel QA 2', phone: '5514140002' });
   check('same court same time -> 409', same.status === 409, same.text);
-  const bad = await call('POST', '/api/public/padel-demo/bookings', { spaceId: null, durationMin: 45, startsAt: slot, name: 'Pádel QA 3', phone: '5514140003' });
+  const bad = await call('POST', '/api/public/padel-demo/bookings', { resourceId: null, durationMin: 45, startsAt: slot, name: 'Pádel QA 3', phone: '5514140003' });
   check('duration not offered -> 422', bad.status === 422 && bad.body.error === 'invalid_duration', bad.text);
   const login = await demoLogin('padel-demo');
-  const spaces = await call('GET', '/api/spaces', null, login.body?.token);
+  const spaces = await call('GET', '/api/resources', null, login.body?.token);
   check('club sees its courts', spaces.status === 200 && spaces.body.length === 4);
+  check('each court has its own colour', new Set(spaces.body.map((x) => x.color)).size === 4, JSON.stringify(spaces.body.map((x) => x.color)));
+  const court = spaces.body[0];
+  const recolor = await call('PUT', `/api/resources/${court.id}`, { ...court, color: '#db2777' }, login.body?.token);
+  check('owner changes a court colour', recolor.status === 200 && recolor.body.color === '#db2777', recolor.text.slice(0, 160));
+  await call('PUT', `/api/resources/${court.id}`, court, login.body?.token);
   check('customer cancels court', (await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`)).status === 200);
 }
 
@@ -457,17 +463,17 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   const owner = await asDemo('barberia-demo');
   const admin = await login('recepcion@agenda.mx');
   const memo = await login('memo@agenda.mx');
-  check('demo logins have roles', owner?.user.role === 'owner' && admin?.user.role === 'admin' && memo?.user.role === 'staff' && !!memo.user.professionalId,
+  check('demo logins have roles', owner?.user.role === 'owner' && admin?.user.role === 'admin' && memo?.user.role === 'staff' && !!memo.user.resourceId,
     JSON.stringify([owner?.user, admin?.user, memo?.user]));
   const from = new Date(Date.now() - 30 * 864e5).toISOString();
   const to = new Date(Date.now() + 30 * 864e5).toISOString();
   const q = `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const all = (await call('GET', q, null, admin.token)).body ?? [];
   const mine = (await call('GET', q, null, memo.token)).body ?? [];
-  const pros = new Set(all.map((a) => a.professionalId));
+  const pros = new Set(all.map((a) => a.resourceId));
   check('admin sees every barber', pros.size >= 2 && all.length > mine.length, `${all.length} vs ${mine.length}`);
-  check('colaborador sees only own bookings', mine.length > 0 && mine.every((a) => a.professionalId === memo.user.professionalId), String(mine.length));
-  const other = all.find((a) => a.professionalId && a.professionalId !== memo.user.professionalId);
+  check('colaborador sees only own bookings', mine.length > 0 && mine.every((a) => a.resourceId === memo.user.resourceId), String(mine.length));
+  const other = all.find((a) => a.resourceId && a.resourceId !== memo.user.resourceId);
   check("colaborador can't open another barber's booking", (await call('GET', `/api/appointments/${other.id}`, null, memo.token)).status === 404);
   check("colaborador can't edit another barber's booking", (await call('PATCH', `/api/appointments/${other.id}`, { notes: 'x' }, memo.token)).status === 404);
   check("colaborador can't delete bookings", (await call('DELETE', `/api/appointments/${mine[0].id}`, null, memo.token)).status === 403);
@@ -476,7 +482,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('colaborador sees only own customers', cust.total > 0 && cust.total < custAll.total, `${cust.total} vs ${custAll.total}`);
   check("colaborador can't list users", (await call('GET', '/api/users', null, memo.token)).status === 403);
   const users = await call('GET', '/api/users', null, admin.token);
-  check('admin lists users with roles', users.status === 200 && users.body.some((u) => u.role === 'staff' && u.professionalName), users.text.slice(0, 200));
+  check('admin lists users with roles', users.status === 200 && users.body.some((u) => u.role === 'staff' && u.resourceName), users.text.slice(0, 200));
   check("admin can't create an owner", (await call('POST', '/api/users', { name: 'X QA', email: `qa-${Date.now()}@agenda.mx`, password: 'qa-password-1', role: 'owner' }, admin.token)).status === 403);
   check("admin can't connect Mercado Pago", (await call('PUT', '/api/tenant/mercadopago', { accessToken: 'x'.repeat(30) }, admin.token)).status === 403);
   const dash = await call('GET', '/api/metrics/dashboard', null, memo.token);
@@ -485,7 +491,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('colaborador reports scoped', rep.status === 200, rep.text.slice(0, 120));
   const diego = await login('diego@agenda.mx');
   const ses = (await call('GET', `/api/class-sessions?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(to)}`, null, diego.token)).body ?? [];
-  check('instructor sees only own classes', ses.length > 0 && ses.every((s) => s.professionalId === diego.user.professionalId), String(ses.length));
+  check('instructor sees only own classes', ses.length > 0 && ses.every((s) => s.resourceId === diego.user.resourceId), String(ses.length));
 }
 
 // ---- Locations (sucursales) and the Polanco manager
@@ -496,7 +502,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('locations + plan (1 included, 1 extra)', locs.status === 200 && !!pol && locs.body.plan.extraLocations === 1, locs.text.slice(0, 200));
   const day = mxDay(10);
   const pub = (await call('GET', '/api/public/barberia-demo')).body;
-  const rafa = pub.professionals.find((p) => p.locationId === pol?.id);
+  const rafa = pub.resources.find((p) => p.locationId === pol?.id);
   const slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${pub.services[0].id}&date=${day}&locationId=${pol?.id}`)).body?.slots ?? [];
   const hour = (x) => Number(new Date(x).toLocaleTimeString('en-GB', { timeZone: 'America/Mexico_City', hour: '2-digit' }));
   check('Polanco availability follows its own hours (11-21)', slots.length > 0 && slots.every((x) => hour(x) >= 11 && hour(x) < 21), slots.slice(0, 3).join(','));

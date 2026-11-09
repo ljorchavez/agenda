@@ -17,7 +17,7 @@ export function ServicesPage() {
 
   return (
     <>
-      <PageHeader title={tenant?.kind === 'classes' ? t('nav.classTypes') : t('services.title')} actions={manager && <button className="btn-primary" onClick={() => setEditing('new')}>{t('services.new')}</button>} />
+      <PageHeader title={t(`kinds.${tenant?.kind ?? 'appointments'}.services`)} actions={manager && <button className="btn-primary" onClick={() => setEditing('new')}>{t('services.new')}</button>} />
       {isLoading ? (
         <Loading />
       ) : !data?.length ? (

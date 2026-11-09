@@ -24,7 +24,7 @@ type Form = {
 };
 
 /**
- * Sucursales. Each one has its own team/tables/spaces, hours and booking page choice.
+ * Sucursales. Each one has its own resources, hours and booking page choice.
  * Pricing: the plan includes PLAN_INCLUDED_LOCATIONS; every extra active location is an add-on.
  */
 export function LocationsSection({ editable }: { editable: boolean }) {
@@ -220,7 +220,7 @@ function LocationModal({ target, onClose }: { target: LocationDto | null; onClos
   );
 }
 
-/** Small "Sucursal" picker used by the agenda, team, tables, spaces, classes and reports. */
+/** Small "Sucursal" picker used by the calendar, resources and reports. */
 export function LocationSelect({
   value,
   onChange,

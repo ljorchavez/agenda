@@ -71,7 +71,7 @@ function toStats(r: StatsRow): CustomerWithStats {
  * the stats only count their own bookings, and (unless `anyCustomer`) only their customers are listed.
  */
 function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; scope?: Scope; anyCustomer?: boolean }) {
-  const scope: Scope = opts.scope ?? { all: true, locationId: null, personal: false, userId: '', professionalId: null };
+  const scope: Scope = opts.scope ?? { all: true, locationId: null, personal: false, userId: '', resourceId: null };
   const sc = scopeSql(scope, 'a');
   const filters = [sql`c.tenant_id = ${tenantId}`];
   if (!scope.all && !opts.anyCustomer) {

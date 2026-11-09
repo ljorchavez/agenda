@@ -24,7 +24,8 @@ directoryRoutes.get('/public-directory', async (c) => {
     lng: number;
     phone: string | null;
     online: boolean;
-    price_from: number | string | null;
+    hourly_from: number | string | null;
+    service_from: number | string | null;
     location_id: string;
     location_name: string;
     location_count: number | string;
@@ -45,11 +46,11 @@ directoryRoutes.get('/public-directory', async (c) => {
     select t.slug, t.name, t.business_type, t.description, p.address, p.neighborhood, p.city, p.state,
            p.lat, p.lng, p.phone, p.location_id, p.location_name, p.location_count,
            coalesce((t.settings->>'onlineBookingEnabled')::boolean, false) as online,
-           case when t.business_type in ('sports', 'coworking', 'studio')
-             then (select min(sp.price_per_hour_cents) from spaces sp
-                   where sp.tenant_id = t.id and sp.active and sp.price_per_hour_cents > 0)
-             else (select min(s.price_cents) from services s
-                   where s.tenant_id = t.id and s.active and s.price_cents > 0) end as price_from
+           -- Hourly-priced resources (courts, rooms) show "desde $X/hora"; otherwise the cheapest service.
+           (select min(r.price_per_hour_cents) from resources r
+             where r.tenant_id = t.id and r.active and r.price_per_hour_cents > 0) as hourly_from,
+           (select min(s.price_cents) from services s
+             where s.tenant_id = t.id and s.active and s.price_cents > 0) as service_from
     from pins p join tenants t on t.id = p.tenant_id
     where p.lat is not null and p.lng is not null and p.city is not null
     order by t.name, p.location_name
@@ -71,8 +72,8 @@ directoryRoutes.get('/public-directory', async (c) => {
       lng: Number(r.lng),
       phone: r.phone,
       onlineBooking: Boolean(r.online),
-      priceFromCents: r.price_from == null ? null : Number(r.price_from),
-      priceUnit: businessKind(r.business_type) === 'rentals' && r.price_from != null ? ('hour' as const) : null,
+      priceFromCents: r.hourly_from != null ? Number(r.hourly_from) : r.service_from == null ? null : Number(r.service_from),
+      priceUnit: r.hourly_from != null ? ('hour' as const) : null,
       locationId: r.location_id,
       locationName: Number(r.location_count) > 1 ? r.location_name : null,
     }));

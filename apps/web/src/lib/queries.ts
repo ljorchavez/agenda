@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { CustomerWithStats, LocationDto, PlanDto, ProfessionalDto, ServiceDto, SpaceDto } from '@agenda/shared';
+import type { CustomerWithStats, LocationDto, PlanDto, ResourceDto, ServiceDto } from '@agenda/shared';
 import { api } from './api';
 
 export const useServices = () =>
@@ -15,11 +15,9 @@ export const useCustomers = (q = '', sort = 'name', forBooking = false) =>
       ),
   });
 
-export const useProfessionals = (enabled = true) =>
-  useQuery({ queryKey: ['professionals'], queryFn: () => api<ProfessionalDto[]>('/professionals'), enabled });
-
-export const useSpaces = (enabled = true) =>
-  useQuery({ queryKey: ['spaces'], queryFn: () => api<SpaceDto[]>('/spaces'), enabled });
+/** Whatever gets booked: team members, instructors, courts, rooms or tables. */
+export const useResources = (enabled = true) =>
+  useQuery({ queryKey: ['resources'], queryFn: () => api<ResourceDto[]>('/resources'), enabled });
 
 export const useLocations = () =>
   useQuery({ queryKey: ['locations'], queryFn: () => api<{ locations: LocationDto[]; plan: PlanDto }>('/locations') });

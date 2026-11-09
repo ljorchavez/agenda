@@ -8,28 +8,35 @@ import type {
   ServiceDto,
   TenantDto,
 } from '@agenda/shared';
-import type { ClassSession, Customer, Payment, Professional, Service, Space, Tenant } from '../db/schema.js';
-import type { ClassSessionDto, ProfessionalDto, SpaceDto } from '@agenda/shared';
+import type { ClassSession, Customer, Payment, Resource, Service, Tenant } from '../db/schema.js';
+import type { ClassSessionDto, ResourceDto } from '@agenda/shared';
 
-export function toProfessionalDto(p: Professional): ProfessionalDto {
-  return { id: p.id, name: p.name, color: p.color, active: p.active, serviceIds: p.serviceIds ?? [], userId: p.userId, locationId: p.locationId };
-}
-
-export function toSpaceDto(s: Space): SpaceDto {
-  return { id: s.id, name: s.name, description: s.description, pricePerHourCents: s.pricePerHourCents, active: s.active, locationId: s.locationId };
+export function toResourceDto(r: Resource): ResourceDto {
+  return {
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    active: r.active,
+    serviceIds: r.serviceIds ?? [],
+    userId: r.userId,
+    capacity: r.capacity,
+    pricePerHourCents: r.pricePerHourCents,
+    description: r.description,
+    locationId: r.locationId,
+  };
 }
 
 export function toClassSessionDto(
   s: ClassSession,
-  extra: { serviceName: string; priceCents: number; professionalName: string | null; professionalColor: string | null; booked: number },
+  extra: { serviceName: string; priceCents: number; resourceName: string | null; resourceColor: string | null; booked: number },
 ): ClassSessionDto {
   return {
     id: s.id,
     serviceId: s.serviceId,
     serviceName: extra.serviceName,
-    professionalId: s.professionalId,
-    professionalName: extra.professionalName,
-    professionalColor: extra.professionalColor,
+    resourceId: s.resourceId,
+    resourceName: extra.resourceName,
+    resourceColor: extra.resourceColor,
     startsAt: s.startsAt.toISOString(),
     endsAt: s.endsAt.toISOString(),
     capacity: s.capacity,
@@ -133,13 +140,9 @@ export type AppointmentRow = {
   notes: string | null;
   paid_cents: number | string | null;
   party_size: number | null;
-  table_id: string | null;
-  table_name: string | null;
-  professional_id: string | null;
-  professional_name: string | null;
-  professional_color: string | null;
-  space_id: string | null;
-  space_name: string | null;
+  resource_id: string | null;
+  resource_name: string | null;
+  resource_color: string | null;
   class_session_id: string | null;
   location_id: string;
 };
@@ -162,13 +165,9 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     paidCents: Number(r.paid_cents ?? 0),
     managePath: `/c/${manageToken(r.id)}`,
     partySize: r.party_size == null ? null : Number(r.party_size),
-    tableId: r.table_id,
-    tableName: r.table_name,
-    professionalId: r.professional_id,
-    professionalName: r.professional_name,
-    professionalColor: r.professional_color,
-    spaceId: r.space_id,
-    spaceName: r.space_name,
+    resourceId: r.resource_id,
+    resourceName: r.resource_name,
+    resourceColor: r.resource_color,
     classSessionId: r.class_session_id,
     locationId: r.location_id,
   };

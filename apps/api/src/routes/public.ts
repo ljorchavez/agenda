@@ -2,40 +2,27 @@ import { Hono } from 'hono';
 import { and, asc, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
+  bookingPriceCents,
   businessKind,
   computeDepositCents,
+  eligibleResources,
+  kindConfig,
   normalizeMxPhone,
   paymentSettingsOf,
   publicBookingSchema,
   publicClassBookingSchema,
-  publicRentalSchema,
-  publicReservationSchema,
   rentalSettingsOf,
   reservationSettingsOf,
-  spacePriceCents,
   type BusinessHours,
   type Locale,
   type PublicBookingResult,
   type PublicBusinessDto,
 } from '@agenda/shared';
 import { getDb, type Db } from '../db/client.js';
-import { appointments, customers, services, tenants, type Appointment, type Customer, type Tenant } from '../db/schema.js';
+import { appointments, customers, services, tenants, type Appointment, type Customer, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
-import { assignTable, loadTableState, pickTable, reservationService } from '../lib/tables.js';
-import {
-  activeProfessionals,
-  activeSpaces,
-  assignProfessional,
-  assignSpace,
-  eligibleFor,
-  internalService,
-  pickProfessional,
-  pickSpace,
-  professionalBusy,
-  RENTAL_SERVICE_NAME,
-  spaceBusy,
-} from '../lib/resources.js';
+import { activeResources, assignResource, defaultService, pickResource, resourceBusy, type Need } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { hoursFor, listLocations, resolveLocation, toPublicLocation } from '../lib/locations.js';
 import { manageToken } from '../lib/crypto.js';
@@ -43,8 +30,8 @@ import { apiBaseUrl, createOnlinePayment, tenantMpToken } from '../lib/online-pa
 
 /**
  * Unauthenticated endpoints for the public booking page (/b/:slug).
- * Only exposes the business's public info, services, team first names and spaces — never customer data.
- * In AWS, API Gateway throttling protects these routes from abuse.
+ * Only exposes the business's public info, services and resources (first names, courts, tables) — never customer data.
+ * Every kind of business books through the same code; KIND_CONFIG says which fields apply.
  */
 export const publicRoutes = new Hono();
 
@@ -71,19 +58,18 @@ publicRoutes.get('/public/:slug', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
   const db = getDb();
   const kind = businessKind(tenant.businessType);
-  const [list, pros, spaceList, locs] = await Promise.all([
+  const cfg = kindConfig(kind);
+  const [list, res, locs] = await Promise.all([
     db
       .select()
       .from(services)
       .where(and(eq(services.tenantId, tenant.id), eq(services.active, true)))
       .orderBy(asc(services.name)),
-    kind === 'appointments' ? activeProfessionals(db, tenant.id) : Promise.resolve([]),
-    kind === 'rentals' ? activeSpaces(db, tenant.id) : Promise.resolve([]),
+    activeResources(db, tenant.id),
     listLocations(db, tenant.id),
   ]);
   const activeLocs = locs.filter((l) => l.active);
   const activeIds = new Set(activeLocs.map((l) => l.id));
-  spaceList.sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
   const body: PublicBusinessDto = {
     name: tenant.name,
     slug: tenant.slug,
@@ -92,7 +78,7 @@ publicRoutes.get('/public/:slug', async (c) => {
     locale: tenant.locale as Locale,
     phone: tenant.phone,
     hours: tenant.settings.hours,
-    services: kind === 'rentals' ? [] : list.map((s) => ({ id: s.id, name: s.name, durationMin: s.durationMin, priceCents: s.priceCents })),
+    services: cfg.durations ? [] : list.map((s) => ({ id: s.id, name: s.name, durationMin: s.durationMin, priceCents: s.priceCents })),
     deposit: (() => {
       const d = paymentSettingsOf(tenant.settings).deposit;
       return d.enabled ? { type: d.type, value: d.value } : null;
@@ -105,47 +91,53 @@ publicRoutes.get('/public/:slug', async (c) => {
     state: tenant.state,
     lat: tenant.lat,
     lng: tenant.lng,
-    maxPartySize: kind === 'reservations' ? reservationSettingsOf(tenant.settings).maxPartySize : null,
-    professionals: pros
-      .filter((p) => activeIds.has(p.locationId))
-      .map((p) => ({ id: p.id, name: p.name, color: p.color, serviceIds: p.serviceIds ?? [], locationId: p.locationId })),
-    spaces: spaceList
-      .filter((x) => activeIds.has(x.locationId))
-      .map((x) => ({ id: x.id, name: x.name, description: x.description, pricePerHourCents: x.pricePerHourCents, locationId: x.locationId })),
-    rentalDurations: kind === 'rentals' ? rentalSettingsOf(tenant.settings).durations : null,
+    maxPartySize: cfg.partySize ? reservationSettingsOf(tenant.settings).maxPartySize : null,
+    resources: res
+      .filter((r) => activeIds.has(r.locationId))
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        color: r.color,
+        serviceIds: r.serviceIds ?? [],
+        capacity: r.capacity,
+        pricePerHourCents: r.pricePerHourCents,
+        description: r.description,
+        locationId: r.locationId,
+      })),
+    rentalDurations: cfg.durations ? rentalSettingsOf(tenant.settings).durations : null,
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
   };
   return c.json(body);
 });
 
 /**
- * Free slots for a service on a local date (YYYY-MM-DD).
- * With a team, a slot is free when some professional who does the service (or the requested one) is free.
+ * Free start times on a local date (YYYY-MM-DD) for a booking of `durationMin`.
+ * With resources, a time is free when some resource that takes the service and fits the party
+ * (or the requested one) is free; without resources the location works as a single agenda.
  */
 export async function computeSlots(
   tenant: Tenant,
   durationMin: number,
   date: string,
   now: DateTime = DateTime.now(),
-  opts: { excludeId?: string; serviceId?: string; professionalId?: string | null; locationId?: string } = {},
+  opts: Need & { excludeId?: string; resourceId?: string | null; locationId?: string } = {},
 ): Promise<string[]> {
   const db = getDb();
   const loc = await resolveLocation(db, tenant.id, opts.locationId);
   const w = dayWindow(tenant, date, hoursFor(tenant, loc));
   if (!w) return [];
-  const pros = await activeProfessionals(db, tenant.id, loc.id);
+  const starts: DateTime[] = [];
+  for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) if (t > now) starts.push(t);
+  const list = await activeResources(db, tenant.id, loc.id);
 
-  if (pros.length) {
-    let eligible = eligibleFor(pros, opts.serviceId);
-    if (opts.professionalId) eligible = eligible.filter((p) => p.id === opts.professionalId);
+  if (list.length) {
+    let eligible = eligibleResources(list, opts);
+    if (opts.resourceId) eligible = eligible.filter((r) => r.id === opts.resourceId);
     if (!eligible.length) return [];
-    const busy = await professionalBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId, loc.id);
-    const slots: string[] = [];
-    for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) {
-      if (t <= now) continue;
-      if (pickProfessional(eligible, busy, t.toJSDate(), t.plus({ minutes: durationMin }).toJSDate())) slots.push(t.toISO()!);
-    }
-    return slots;
+    const busy = await resourceBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), { excludeId: opts.excludeId, locationId: loc.id });
+    return starts
+      .filter((t) => pickResource(eligible, busy, t.toJSDate(), t.plus({ minutes: durationMin }).toJSDate()))
+      .map((t) => t.toISO()!);
   }
 
   // Single agenda: load the day's busy intervals once instead of one query per slot.
@@ -159,64 +151,48 @@ export async function computeSlots(
         inArray(appointments.status, ['scheduled', 'confirmed']),
         lt(appointments.startsAt, w.close.toJSDate()),
         gt(appointments.endsAt, w.open.toJSDate()),
-        sql`${appointments.classSessionId} is null and ${appointments.spaceId} is null and ${appointments.tableId} is null`,
+        sql`${appointments.classSessionId} is null and ${appointments.resourceId} is null`,
         opts.excludeId ? ne(appointments.id, opts.excludeId) : undefined,
       ),
     );
-  const slots: string[] = [];
-  for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) {
-    if (t <= now) continue;
-    const s = t.toJSDate();
-    const e = t.plus({ minutes: durationMin }).toJSDate();
-    if (!active.some((b) => b.s < e && b.e > s)) slots.push(t.toISO()!);
-  }
-  return slots;
+  return starts
+    .filter((t) => {
+      const s = t.toJSDate();
+      const e = t.plus({ minutes: durationMin }).toJSDate();
+      return !active.some((b) => b.s < e && b.e > s);
+    })
+    .map((t) => t.toISO()!);
 }
 
-/** Restaurant slots: times where some free table fits the party. */
-export async function computeTableSlots(
+/**
+ * What a booking request means for this kind of business: the service, its length and the party.
+ * Throws 400/422 when a field the kind needs is missing or not allowed.
+ */
+export async function bookingSpec(
+  db: Db,
   tenant: Tenant,
-  partySize: number,
-  date: string,
-  now: DateTime = DateTime.now(),
-  opts: { excludeId?: string; durationMin?: number; locationId?: string } = {},
-): Promise<string[]> {
-  const db = getDb();
-  const loc = await resolveLocation(db, tenant.id, opts.locationId);
-  const w = dayWindow(tenant, date, hoursFor(tenant, loc));
-  if (!w) return [];
-  const durationMin = opts.durationMin ?? reservationSettingsOf(tenant.settings).durationMin;
-  const { tables, busy } = await loadTableState(db, tenant.id, partySize, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId, loc.id);
-  if (!tables.length) return [];
-  const slots: string[] = [];
-  for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) {
-    if (t <= now) continue;
-    if (pickTable(tables, busy, partySize, t.toJSDate(), t.plus({ minutes: durationMin }).toJSDate())) slots.push(t.toISO()!);
+  input: { serviceId?: string | null; partySize?: number | null; durationMin?: number | null },
+): Promise<{ service: Service; durationMin: number; partySize: number | null }> {
+  const kind = businessKind(tenant.businessType);
+  const cfg = kindConfig(kind);
+  if (cfg.partySize) {
+    const rs = reservationSettingsOf(tenant.settings);
+    if (!input.partySize) throw new AppError(400, 'missing_params', 'partySize required');
+    if (input.partySize > rs.maxPartySize) throw new AppError(422, 'party_too_large', `Max ${rs.maxPartySize} people online`);
+    return { service: await defaultService(db, tenant, kind), durationMin: rs.durationMin, partySize: input.partySize };
   }
-  return slots;
-}
-
-/** Rental slots: start times where the requested space (or any space) is free for the duration. */
-export async function computeSpaceSlots(
-  tenant: Tenant,
-  durationMin: number,
-  date: string,
-  now: DateTime = DateTime.now(),
-  opts: { excludeId?: string; spaceId?: string | null; locationId?: string } = {},
-): Promise<string[]> {
-  const db = getDb();
-  const loc = await resolveLocation(db, tenant.id, opts.locationId);
-  const w = dayWindow(tenant, date, hoursFor(tenant, loc));
-  if (!w) return [];
-  const list = await activeSpaces(db, tenant.id, loc.id);
-  if (!list.length || (opts.spaceId && !list.some((s) => s.id === opts.spaceId))) return [];
-  const busy = await spaceBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), opts.excludeId);
-  const slots: string[] = [];
-  for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) {
-    if (t <= now) continue;
-    if (pickSpace(list, busy, t.toJSDate(), t.plus({ minutes: durationMin }).toJSDate(), opts.spaceId)) slots.push(t.toISO()!);
+  if (cfg.durations) {
+    if (!input.durationMin || !rentalSettingsOf(tenant.settings).durations.includes(input.durationMin)) {
+      throw new AppError(422, 'invalid_duration', 'durationMin must be one of the allowed durations');
+    }
+    return { service: await defaultService(db, tenant, kind), durationMin: input.durationMin, partySize: input.partySize ?? null };
   }
-  return slots;
+  if (!input.serviceId) throw new AppError(400, 'missing_params', 'serviceId required');
+  const service = await db.query.services.findFirst({
+    where: and(eq(services.id, input.serviceId), eq(services.tenantId, tenant.id), eq(services.active, true)),
+  });
+  if (!service) throw notFound('service');
+  return { service, durationMin: service.durationMin, partySize: input.partySize ?? null };
 }
 
 /** Class starts on a local date that still have `spots` free (optionally one class type). */
@@ -243,53 +219,39 @@ export async function computeClassSlots(
 }
 
 const sameInstant = (slots: string[], start: DateTime) => slots.some((s) => DateTime.fromISO(s).toMillis() === start.toMillis());
+const num = (v: string | undefined) => (v ? Number(v) : null);
 
 publicRoutes.get('/public/:slug/availability', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
   const date = c.req.query('date');
-  const kind = businessKind(tenant.businessType);
   if (!date) throw new AppError(400, 'missing_params', 'date required');
-  // A chosen professional or space decides the location when none is given.
+  const db = getDb();
+  const resourceId = c.req.query('resourceId') || null;
+  // A chosen resource decides the location when none is given.
   let locationId = c.req.query('locationId') || undefined;
-  const proQ = c.req.query('professionalId');
-  const spaceQ = c.req.query('spaceId');
-  if (!locationId && (proQ || spaceQ)) {
-    const db = getDb();
-    const row = proQ
-      ? (await activeProfessionals(db, tenant.id)).find((p) => p.id === proQ)
-      : (await activeSpaces(db, tenant.id)).find((x) => x.id === spaceQ);
-    locationId = row?.locationId;
-  }
+  if (!locationId && resourceId) locationId = (await activeResources(db, tenant.id)).find((r) => r.id === resourceId)?.locationId;
 
-  if (kind === 'reservations') {
-    const partySize = Number(c.req.query('partySize'));
-    const max = reservationSettingsOf(tenant.settings).maxPartySize;
-    if (!Number.isInteger(partySize) || partySize < 1) throw new AppError(400, 'missing_params', 'partySize and date required');
-    if (partySize > max) return c.json({ slots: [] });
-    return c.json({ slots: await computeTableSlots(tenant, partySize, date, DateTime.now(), { locationId }) });
-  }
-  if (kind === 'rentals') {
-    const durationMin = Number(c.req.query('durationMin'));
-    if (!rentalSettingsOf(tenant.settings).durations.includes(durationMin)) {
-      throw new AppError(400, 'invalid_duration', 'durationMin must be one of the allowed durations');
-    }
-    return c.json({ slots: await computeSpaceSlots(tenant, durationMin, date, DateTime.now(), { spaceId: c.req.query('spaceId') || null, locationId }) });
-  }
-  if (kind === 'classes') {
+  if (kindConfig(businessKind(tenant.businessType)).sessions) {
     const list = await computeClassSlots(tenant, date, DateTime.now(), { serviceId: c.req.query('serviceId') || undefined, locationId });
     return c.json({ slots: list.map((s) => s.startsAt) });
   }
-
-  const serviceId = c.req.query('serviceId');
-  if (!serviceId) throw new AppError(400, 'missing_params', 'serviceId and date required');
-  const service = await getDb().query.services.findFirst({
-    where: and(eq(services.id, serviceId), eq(services.tenantId, tenant.id), eq(services.active, true)),
-  });
-  if (!service) throw notFound('service');
+  let spec;
+  try {
+    spec = await bookingSpec(db, tenant, {
+      serviceId: c.req.query('serviceId'),
+      partySize: num(c.req.query('partySize')),
+      durationMin: num(c.req.query('durationMin')),
+    });
+  } catch (err) {
+    // Too many people for online booking: just no times.
+    if (err instanceof AppError && err.code === 'party_too_large') return c.json({ slots: [] });
+    throw err;
+  }
   return c.json({
-    slots: await computeSlots(tenant, service.durationMin, date, DateTime.now(), {
-      serviceId,
-      professionalId: c.req.query('professionalId') || null,
+    slots: await computeSlots(tenant, spec.durationMin, date, DateTime.now(), {
+      serviceId: spec.service.id,
+      partySize: spec.partySize,
+      resourceId,
       locationId,
     }),
   });
@@ -389,58 +351,11 @@ async function attachDeposit(
   return body;
 }
 
-/** Restaurant reservation: party size + time, table assigned automatically. */
-async function bookTable(tenant: Tenant, raw: unknown): Promise<PublicBookingResult> {
-  const input = publicReservationSchema.parse(raw);
-  const db = getDb();
-  const rs = reservationSettingsOf(tenant.settings);
-  if (input.partySize > rs.maxPartySize) {
-    throw new AppError(422, 'party_too_large', `Max ${rs.maxPartySize} people online`);
-  }
-  const loc = await resolveLocation(db, tenant.id, input.locationId);
-  const start = DateTime.fromISO(input.startsAt).setZone(tenant.timezone);
-  if (!sameInstant(await computeTableSlots(tenant, input.partySize, start.toISODate()!, DateTime.now(), { locationId: loc.id }), start)) {
-    throw conflict('slot_unavailable', 'This time is no longer available');
-  }
-  const startsAt = start.toJSDate();
-  const endsAt = start.plus({ minutes: rs.durationMin }).toJSDate();
-  const service = await reservationService(db, tenant);
-
-  const appt = await db.transaction(async (tx) => {
-    await lockTenant(tx, tenant.id);
-    let table;
-    try {
-      table = await assignTable(tx, tenant.id, input.partySize, startsAt, endsAt, { locationId: loc.id });
-    } catch {
-      throw conflict('slot_unavailable', 'This time is no longer available');
-    }
-    const customer = await findOrCreateCustomer(tx, tenant.id, input);
-    const [row] = await tx
-      .insert(appointments)
-      .values({
-        tenantId: tenant.id,
-        customerId: customer.id,
-        serviceId: service.id,
-        startsAt,
-        endsAt,
-        priceCents: 0,
-        source: 'online',
-        notes: input.notes ?? null,
-        partySize: input.partySize,
-        tableId: table.id,
-        locationId: loc.id,
-      })
-      .returning();
-    return row!;
-  });
-  return result(tenant, appt, service.name, null);
-}
-
 /** Group class: takes `spots` places in a session if they still fit. */
 async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Promise<PublicBookingResult> {
   const input = publicClassBookingSchema.parse(raw);
   const db = getDb();
-  const { appt, customer, serviceName, pro } = await db.transaction(async (tx) => {
+  const { appt, customer, serviceName, res } = await db.transaction(async (tx) => {
     const { session, booked } = await lockSession(tx, tenant.id, input.classSessionId);
     if (session.status !== 'scheduled' || session.startsAt <= new Date()) {
       throw conflict('slot_unavailable', 'This class is no longer available');
@@ -460,7 +375,7 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         customerId: customer.id,
         serviceId: service.id,
         classSessionId: session.id,
-        professionalId: session.professionalId,
+        resourceId: session.resourceId,
         startsAt: session.startsAt,
         endsAt: session.endsAt,
         partySize: input.spots,
@@ -470,91 +385,40 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         notes: input.notes ?? null,
       })
       .returning();
-    const pro = session.professionalId
-      ? await tx.query.professionals.findFirst({ where: (p, { eq: e }) => e(p.id, session.professionalId!) })
-      : null;
-    return { appt: row!, customer, serviceName: service.name, pro };
+    const res = session.resourceId ? await tx.query.resources.findFirst({ where: (r, { eq: e }) => e(r.id, session.resourceId!) }) : null;
+    return { appt: row!, customer, serviceName: service.name, res };
   });
-  return attachDeposit(requestUrl, tenant, result(tenant, appt, serviceName, pro?.name ?? null), appt, customer, serviceName);
+  return attachDeposit(requestUrl, tenant, result(tenant, appt, serviceName, res?.name ?? null), appt, customer, serviceName);
 }
 
-/** Space rental: a space (or any free one) for one of the allowed durations; price by the hour. */
-async function bookSpace(requestUrl: string, tenant: Tenant, raw: unknown): Promise<PublicBookingResult> {
-  const input = publicRentalSchema.parse(raw);
-  if (!rentalSettingsOf(tenant.settings).durations.includes(input.durationMin)) {
-    throw new AppError(422, 'invalid_duration', 'That duration is not offered');
-  }
-  const db = getDb();
-  const start = DateTime.fromISO(input.startsAt).setZone(tenant.timezone);
-  // A chosen space decides the location.
-  const chosen = input.spaceId ? (await activeSpaces(db, tenant.id)).find((x) => x.id === input.spaceId) : null;
-  if (input.spaceId && !chosen) throw notFound('space');
-  const loc = await resolveLocation(db, tenant.id, chosen?.locationId ?? input.locationId);
-  const slots = await computeSpaceSlots(tenant, input.durationMin, start.toISODate()!, DateTime.now(), { spaceId: input.spaceId, locationId: loc.id });
-  if (!sameInstant(slots, start)) throw conflict('slot_unavailable', 'This time is no longer available');
-  const startsAt = start.toJSDate();
-  const endsAt = start.plus({ minutes: input.durationMin }).toJSDate();
-  const service = await internalService(db, tenant, RENTAL_SERVICE_NAME, 60);
-
-  const { appt, customer, space } = await db.transaction(async (tx) => {
-    await lockTenant(tx, tenant.id);
-    let space;
-    try {
-      space = await assignSpace(tx, tenant.id, startsAt, endsAt, { spaceId: input.spaceId, locationId: loc.id });
-    } catch {
-      throw conflict('slot_unavailable', 'This time is no longer available');
-    }
-    const customer = await findOrCreateCustomer(tx, tenant.id, input);
-    const [row] = await tx
-      .insert(appointments)
-      .values({
-        tenantId: tenant.id,
-        customerId: customer.id,
-        serviceId: service.id,
-        spaceId: space.id,
-        locationId: loc.id,
-        startsAt,
-        endsAt,
-        priceCents: spacePriceCents(space.pricePerHourCents, input.durationMin),
-        source: 'online',
-        notes: input.notes ?? null,
-      })
-      .returning();
-    return { appt: row!, customer, space };
-  });
-  return attachDeposit(requestUrl, tenant, result(tenant, appt, space.name, space.name), appt, customer, `${space.name} (${input.durationMin} min)`);
-}
-
-/** Service appointment, with a specific professional or whoever is free. */
-async function bookService(requestUrl: string, tenant: Tenant, raw: unknown): Promise<PublicBookingResult> {
+/** Any booking that isn't a class: a service, a table for a party or a space for a while. */
+async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): Promise<PublicBookingResult> {
   const input = publicBookingSchema.parse(raw);
   const db = getDb();
-  const service = await db.query.services.findFirst({
-    where: and(eq(services.id, input.serviceId), eq(services.tenantId, tenant.id), eq(services.active, true)),
-  });
-  if (!service) throw notFound('service');
-  // A chosen professional decides the location.
-  const chosen = input.professionalId ? (await activeProfessionals(db, tenant.id)).find((p) => p.id === input.professionalId) : null;
-  if (input.professionalId && !chosen) throw notFound('professional');
+  const { service, durationMin, partySize } = await bookingSpec(db, tenant, input);
+  // A chosen resource decides the location.
+  const chosen = input.resourceId ? (await activeResources(db, tenant.id)).find((r) => r.id === input.resourceId) : null;
+  if (input.resourceId && !chosen) throw notFound('resource');
   const loc = await resolveLocation(db, tenant.id, chosen?.locationId ?? input.locationId);
 
   const start = DateTime.fromISO(input.startsAt).setZone(tenant.timezone);
-  const slots = await computeSlots(tenant, service.durationMin, start.toISODate()!, DateTime.now(), {
+  const slots = await computeSlots(tenant, durationMin, start.toISODate()!, DateTime.now(), {
     serviceId: service.id,
-    professionalId: input.professionalId,
+    partySize,
+    resourceId: input.resourceId,
     locationId: loc.id,
   });
   if (!sameInstant(slots, start)) throw conflict('slot_unavailable', 'This time is no longer available');
   const startsAt = start.toJSDate();
-  const endsAt = start.plus({ minutes: service.durationMin }).toJSDate();
+  const endsAt = start.plus({ minutes: durationMin }).toJSDate();
 
-  const { appt, customer, pro } = await db.transaction(async (tx) => {
+  const { appt, customer, resource } = await db.transaction(async (tx) => {
     // Lock the tenant row so two simultaneous bookings can't take the same slot.
     await lockTenant(tx, tenant.id);
-    let pro = null;
-    if ((await activeProfessionals(tx, tenant.id, loc.id)).length) {
+    let resource = null;
+    if ((await activeResources(tx, tenant.id, loc.id)).length) {
       try {
-        pro = await assignProfessional(tx, tenant.id, service.id, startsAt, endsAt, { professionalId: input.professionalId, locationId: loc.id });
+        resource = await assignResource(tx, tenant.id, startsAt, endsAt, { resourceId: input.resourceId, serviceId: service.id, partySize, locationId: loc.id });
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
@@ -568,31 +432,25 @@ async function bookService(requestUrl: string, tenant: Tenant, raw: unknown): Pr
         tenantId: tenant.id,
         customerId: customer.id,
         serviceId: service.id,
-        professionalId: pro?.id ?? null,
+        resourceId: resource?.id ?? null,
         locationId: loc.id,
         startsAt,
         endsAt,
-        priceCents: service.priceCents,
+        partySize,
+        priceCents: bookingPriceCents(resource, service.priceCents, durationMin),
         source: 'online',
         notes: input.notes ?? null,
       })
       .returning();
-    return { appt: row!, customer, pro };
+    return { appt: row!, customer, resource };
   });
-  return attachDeposit(requestUrl, tenant, result(tenant, appt, service.name, pro?.name ?? null), appt, customer, service.name);
+  const title = kindConfig(businessKind(tenant.businessType)).durations && resource ? `${resource.name} (${durationMin} min)` : service.name;
+  return attachDeposit(requestUrl, tenant, result(tenant, appt, service.name, resource?.name ?? null), appt, customer, title);
 }
 
 publicRoutes.post('/public/:slug/bookings', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
   const body = await c.req.json();
-  switch (businessKind(tenant.businessType)) {
-    case 'reservations':
-      return c.json(await bookTable(tenant, body), 201);
-    case 'classes':
-      return c.json(await bookClass(c.req.url, tenant, body), 201);
-    case 'rentals':
-      return c.json(await bookSpace(c.req.url, tenant, body), 201);
-    default:
-      return c.json(await bookService(c.req.url, tenant, body), 201);
-  }
+  if (kindConfig(businessKind(tenant.businessType)).sessions) return c.json(await bookClass(c.req.url, tenant, body), 201);
+  return c.json(await bookResource(c.req.url, tenant, body), 201);
 });

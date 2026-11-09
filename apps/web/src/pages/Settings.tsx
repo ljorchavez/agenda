@@ -7,10 +7,12 @@ import {
   BUSINESS_TYPES,
   isManager,
   isValidClabe,
+  kindConfig,
   paymentSettingsOf,
   rentalSettingsOf,
   reservationSettingsOf,
   selfServiceOf,
+  type BusinessKind,
   type Role,
   type SessionUser,
   type TenantDto,
@@ -24,7 +26,7 @@ import { LocationSelect, LocationsSection } from '../components/Locations';
 import { ErrorText, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
-import { useMyLocations, useProfessionals } from '../lib/queries';
+import { useMyLocations, useResources } from '../lib/queries';
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -147,8 +149,8 @@ function BusinessSettings() {
     reservations: reservationSettingsOf(tenant!.settings),
     rentals: rentalSettingsOf(tenant!.settings),
   });
-  const isRentals = tenant?.kind === 'rentals';
-  const hasTeam = tenant?.kind === 'appointments' || tenant?.kind === 'classes';
+  const kind = tenant?.kind ?? 'appointments';
+  const isRentals = kindConfig(kind).durations;
   const durations = settings.rentals!.durations;
   const toggleDuration = (m: number) =>
     setSettings((x) => {
@@ -156,7 +158,7 @@ function BusinessSettings() {
       const next = cur.includes(m) ? cur.filter((d) => d !== m) : [...cur, m].sort((a, b) => a - b);
       return next.length ? { ...x, rentals: { durations: next } } : x;
     });
-  const isRestaurant = tenant?.kind === 'reservations';
+  const isRestaurant = kindConfig(kind).partySize;
   const rs = settings.reservations!;
   const setRs = (patch: Partial<typeof rs>) => setSettings((x) => ({ ...x, reservations: { ...x.reservations!, ...patch } }));
   const selfService = settings.selfService!;
@@ -210,15 +212,13 @@ function BusinessSettings() {
           </div>
           <LanguageSelect />
           <div className="text-sm text-slate-500">{t('settings.timezone')}: {tenant?.timezone}</div>
-          {hasTeam && (
-            <Link to="/team" className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm hover:border-brand-500">
-              <span>
-                <span className="font-medium text-slate-800">{tenant?.kind === 'classes' ? t('team.instructorsTitle') : t('team.title')}</span>
-                <span className="block text-slate-500">{t('settings.teamLinkHelp')}</span>
-              </span>
-              <span className="text-brand-700">→</span>
-            </Link>
-          )}
+          <Link to="/resources" className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm hover:border-brand-500">
+            <span>
+              <span className="font-medium text-slate-800">{t(`kinds.${kind}.resources`)}</span>
+              <span className="block text-slate-500">{t(`kinds.${kind}.resourcesHelp`)}</span>
+            </span>
+            <span className="text-brand-700">→</span>
+          </Link>
         </section>
 
         <section className="card space-y-4">
@@ -371,32 +371,32 @@ function BusinessSettings() {
         <AccountSection />
       </div>
       <LocationsSection editable={businessManager} />
-      <UsersSection hasTeam={hasTeam} kind={tenant!.kind} />
+      <UsersSection kind={kind} />
     </>
   );
 }
 
-type UserForm = { name: string; email: string; password: string; role: Role; professionalId: string; locationId: string };
+type UserForm = { name: string; email: string; password: string; role: Role; resourceId: string; locationId: string };
 
 /** Logins with access to the business, their role and which team member's agenda they work. */
-function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
+function UsersSection({ kind }: { kind: BusinessKind }) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const qc = useQueryClient();
   const roles = assignableRoles(user!.role);
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<UserDto[]>('/users') });
-  const pros = useProfessionals(hasTeam);
+  const pros = useResources();
   const [editing, setEditing] = useState<UserDto | 'new' | null>(null);
   const { locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
-  const memberWord = kind === 'classes' ? t('settings.linkInstructor') : t('settings.linkMember');
+  const memberWord = t(`kinds.${kind}.resource`);
   return (
     <section className="card mt-6">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">{t('settings.logins')}</h2>
         {roles.length > 0 && <button className="btn-secondary" onClick={() => setEditing('new')}>{t('settings.addUser')}</button>}
       </div>
-      <p className="mb-3 text-sm text-slate-500">{hasTeam ? t('settings.rolesHelpTeam') : t('settings.rolesHelp')}</p>
+      <p className="mb-3 text-sm text-slate-500">{t('settings.rolesHelpTeam')}</p>
       <ul className="divide-y divide-slate-100 text-sm">
         {(users.data ?? []).map((u) => {
           const manageable = u.id === user!.id || roles.includes(u.role);
@@ -411,8 +411,8 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
                 {locs.anyMulti && u.role !== 'owner' && (
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{u.locationName ?? t('locations.all')}</span>
                 )}
-                {hasTeam && u.professionalName && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{memberWord}: {u.professionalName}</span>
+                {u.resourceName && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{memberWord}: {u.resourceName}</span>
                 )}
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${u.role === 'staff' ? 'bg-sky-50 text-sky-700' : u.role === 'admin' ? 'bg-violet-50 text-violet-700' : 'bg-amber-50 text-amber-800'}`}>
                   {t(`settings.role.${u.role}`)}
@@ -439,7 +439,6 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
         <UserModal
           target={editing === 'new' ? null : editing}
           roles={roles}
-          hasTeam={hasTeam}
           memberWord={memberWord}
           pros={pros.data ?? []}
           users={users.data ?? []}
@@ -449,7 +448,7 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
           onDone={() => {
             setEditing(null);
             void qc.invalidateQueries({ queryKey: ['users'] });
-            void qc.invalidateQueries({ queryKey: ['professionals'] });
+            void qc.invalidateQueries({ queryKey: ['resources'] });
           }}
         />
       )}
@@ -460,7 +459,6 @@ function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
 function UserModal({
   target,
   roles,
-  hasTeam,
   memberWord,
   pros,
   users,
@@ -471,7 +469,6 @@ function UserModal({
 }: {
   target: UserDto | null;
   roles: Role[];
-  hasTeam: boolean;
   memberWord: string;
   pros: { id: string; name: string; active: boolean; locationId: string }[];
   users: UserDto[];
@@ -490,16 +487,16 @@ function UserModal({
     email: target?.email ?? '',
     password: '',
     role: target?.role ?? 'staff',
-    professionalId: target?.professionalId ?? '',
+    resourceId: target?.resourceId ?? '',
     locationId: target?.locationId ?? ownLocation ?? '',
   });
-  const takenBy = new Map(users.filter((u) => u.professionalId && u.id !== target?.id).map((u) => [u.professionalId!, u.name]));
+  const takenBy = new Map(users.filter((u) => u.resourceId && u.id !== target?.id).map((u) => [u.resourceId!, u.name]));
   const save = useMutation({
     mutationFn: () => {
-      const professionalId = hasTeam ? form.professionalId || null : undefined;
+      const resourceId = form.resourceId || null;
       const locationId = locations.length && form.role !== 'owner' ? form.locationId || null : undefined;
       if (!target) {
-        return api('/users', { method: 'POST', body: { name: form.name, email: form.email, password: form.password, role: form.role, professionalId, locationId } });
+        return api('/users', { method: 'POST', body: { name: form.name, email: form.email, password: form.password, role: form.role, resourceId, locationId } });
       }
       return api(`/users/${target.id}`, {
         method: 'PATCH',
@@ -507,7 +504,7 @@ function UserModal({
           ...(lockedAccount ? {} : { name: form.name }),
           ...(self ? {} : { role: form.role }),
           ...(form.password ? { password: form.password } : {}),
-          professionalId,
+          resourceId,
           ...(self ? {} : { locationId }),
         },
       });
@@ -568,18 +565,18 @@ function UserModal({
           </div>
         )}
         {target?.sharedAccount && !self && <p className="text-xs text-slate-500">{t('settings.sharedAccount')}</p>}
-        {hasTeam && (
+        {pros.length > 0 && (
           <div>
             <label className="label" htmlFor="u-pro">{memberWord}</label>
-            <select id="u-pro" className="input" value={form.professionalId} onChange={(e) => setForm({ ...form, professionalId: e.target.value })}>
+            <select id="u-pro" className="input" value={form.resourceId} onChange={(e) => setForm({ ...form, resourceId: e.target.value })}>
               <option value="">{t('settings.noLink')}</option>
-              {pros.filter((p) => p.active || p.id === form.professionalId).map((p) => (
+              {pros.filter((p) => p.active || p.id === form.resourceId).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}{takenBy.has(p.id) ? ` (${t('settings.linkedTo', { name: takenBy.get(p.id) })})` : ''}
                 </option>
               ))}
             </select>
-            {form.role === 'staff' && !form.professionalId && <p className="mt-1 text-xs text-amber-700">{t('settings.staffNeedsLink')}</p>}
+            {form.role === 'staff' && !form.resourceId && <p className="mt-1 text-xs text-amber-700">{t('settings.staffNeedsLink')}</p>}
           </div>
         )}
         <ErrorText error={save.error ?? remove.error} ns="settings" />

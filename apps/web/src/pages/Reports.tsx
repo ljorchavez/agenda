@@ -28,7 +28,7 @@ import type { ReportDto, ReportGranularity, ReportKpis, ServiceDto } from '@agen
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
-import { useMyLocations, useProfessionals, useSpaces } from '../lib/queries';
+import { useMyLocations, useResources } from '../lib/queries';
 import { dateLocale, money, percent } from '../lib/format';
 
 const PRESETS = [
@@ -158,7 +158,7 @@ export function ReportsPage() {
   const { tenant } = useAuth();
   const { scoped, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
-  const isRentals = tenant?.kind === 'rentals';
+  const kind = tenant?.kind ?? 'appointments';
   const preset = (PRESETS as readonly string[]).includes(params.get('p') ?? '') ? (params.get('p') as Preset) : 'last3Months';
   const range = preset === 'custom'
     ? { from: params.get('from') ?? presetRange('thisMonth').from, to: params.get('to') ?? presetRange('thisMonth').to }
@@ -182,7 +182,7 @@ export function ReportsPage() {
   const qs = new URLSearchParams({ from: range.from, to: range.to });
   if (granularity) qs.set('granularity', granularity);
   if (serviceId) qs.set('serviceId', serviceId);
-  if (who && !scoped) qs.set(isRentals ? 'spaceId' : 'professionalId', who);
+  if (who && !scoped) qs.set('resourceId', who);
   if (source) qs.set('source', source);
   if (loc && !ownLocation) qs.set('locationId', loc);
 
@@ -193,9 +193,8 @@ export function ReportsPage() {
     enabled: range.from <= range.to,
   });
   const services = useQuery({ queryKey: ['services'], queryFn: () => api<ServiceDto[]>('/services') });
-  const pros = useProfessionals(!isRentals);
-  const spaces = useSpaces(isRentals);
-  const resources: { id: string; name: string; active: boolean }[] = ((isRentals ? spaces.data : pros.data) ?? []).filter((x) => !loc || x.locationId === loc);
+  const resourcesQ = useResources();
+  const resources = (resourcesQ.data ?? []).filter((x) => !loc || x.locationId === loc);
 
   const intl = i18n.language.startsWith('en') ? 'en-US' : 'es-MX';
   const data = report.data;
@@ -358,7 +357,7 @@ export function ReportsPage() {
         )}
         {!scoped && resources.length > 1 && (
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{isRentals ? t('spaces.space') : t('team.professional')}</span>
+            <span className="mb-1 block text-slate-600">{t(`kinds.${kind}.resource`)}</span>
             <select className="input" value={who} onChange={(e) => set({ who: e.target.value })}>
               <option value="">{t('reports.all')}</option>
               {resources.map((u) => (
@@ -515,11 +514,11 @@ export function ReportsPage() {
               </Card>
             )}
 
-            {(data.byProfessional.length > 0 || data.bySpace.length > 0) && (
-              <Card title={data.bySpace.length ? t('reports.charts.spaces') : t('reports.charts.professionals')}>
+            {data.byResource.length > 0 && (
+              <Card title={t(`kinds.${kind}.resources`)}>
                 <ul className="space-y-3">
-                  {(data.bySpace.length ? data.bySpace.map((x) => ({ ...x, color: BRAND })) : data.byProfessional).map((r) => {
-                    const top = Math.max(...(data.bySpace.length ? data.bySpace : data.byProfessional).map((x) => x.revenueCents), 1);
+                  {data.byResource.map((r) => {
+                    const top = Math.max(...data.byResource.map((x) => x.revenueCents), 1);
                     return (
                       <li key={r.id}>
                         <div className="mb-1 flex justify-between text-sm">

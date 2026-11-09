@@ -2,17 +2,29 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
-import { computeDepositCents, eligibleProfessionals, paymentSettingsOf, rentalSettingsOf, selfServiceOf, spacePriceCents, type AppointmentDto, type BusinessHours, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
+import {
+  bookingPriceCents,
+  computeDepositCents,
+  eligibleResources,
+  kindConfig,
+  paymentSettingsOf,
+  rentalSettingsOf,
+  selfServiceOf,
+  type AppointmentDto,
+  type BusinessHours,
+  type ClassSessionDto,
+  type CustomerDto,
+  type PaymentDto,
+  type ResourceDto,
+} from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
-import { useCustomers, useMyLocations, useProfessionals, useServices, useSpaces } from '../lib/queries';
+import { useCustomers, useMyLocations, useResources, useServices } from '../lib/queries';
 import { LocationSelect } from '../components/Locations';
 import { CalendarGrid, type CalColumn, type CalEvent } from '../components/CalendarGrid';
-
-const useTables = (enabled: boolean) =>
-  useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables'), enabled });
+import { NewSessionModal, SessionModal } from '../components/ClassModals';
 
 type View = 'day' | 'week';
 const VIEW_KEY = 'agenda.view';
@@ -77,36 +89,26 @@ const shortName = (name: string) => {
   return rest.length ? `${first} ${rest[0]![0]}.` : first ?? name;
 };
 
+/**
+ * One calendar for every kind of business. Columns are days, or resources (people, courts, tables,
+ * instructors) in the day view. Bookings and group classes are blocks on the same grid; the kind
+ * only changes labels and which form opens (KIND_CONFIG).
+ */
 export function AgendaPage() {
   const { t, i18n } = useTranslation();
   const { tenant } = useAuth();
-  const { scoped, unlinked, locationId: ownLocation } = useAccess();
+  const kind = tenant?.kind ?? 'appointments';
+  const cfg = kindConfig(kind);
+  const { manager, scoped, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
   const small = useSmallScreen();
   const [loc, setLoc] = useState('');
-  const isRestaurant = tenant?.kind === 'reservations';
-  const isRentals = tenant?.kind === 'rentals';
-  const isClasses = tenant?.kind === 'classes';
-  const pros = useProfessionals(tenant?.kind === 'appointments');
-  const spaces = useSpaces(isRentals);
-  const tables = useTables(isRestaurant && !scoped);
+  const resourcesQ = useResources();
   const inLoc = (x: { locationId: string }) => !loc || x.locationId === loc;
-  // Person / space filter of the selected location
-  const resources = isRentals
-    ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#475569' }))
-    : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color }));
+  const resources = (resourcesQ.data ?? []).filter((x) => x.active && inLoc(x));
   const [filter, setFilter] = useState('');
-  // Day view columns when there are several people, tables or spaces (like Teams' schedule view)
-  const teamResources = (
-    isRestaurant
-      ? (tables.data ?? [])
-          .filter((x) => x.active && inLoc(x))
-          .map((x) => ({ id: x.id, name: x.name, color: BRAND, locationId: x.locationId, sub: t('tables.people', { count: x.seats }) as string }))
-      : isRentals
-        ? (spaces.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: '#475569', locationId: x.locationId, sub: '' }))
-        : (pros.data ?? []).filter((x) => x.active && inLoc(x)).map((x) => ({ id: x.id, name: x.name, color: x.color, locationId: x.locationId, sub: '' }))
-  ).filter((r) => !filter || r.id === filter);
-  const byResource = !scoped && !isClasses && (isRestaurant ? (tables.data ?? []).length > 1 : resources.length > 1);
+  const columnResources = resources.filter((r) => !filter || r.id === filter);
+  const byResource = !scoped && resources.length > 1;
 
   const [viewPref, setViewPref] = useState<View | null>(() => savedView());
   const view: View = viewPref ?? (small ? 'day' : byResource ? 'day' : 'week');
@@ -122,9 +124,9 @@ export function AgendaPage() {
   };
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [showCancelled, setShowCancelled] = useState(false);
-  const [creating, setCreating] = useState<{ at: Date; locationId?: string; preset?: Preset } | null>(null);
+  const [creating, setCreating] = useState<{ at: Date; locationId?: string; resourceId?: string } | null>(null);
   const [selected, setSelected] = useState<AppointmentDto | null>(null);
-  const [classGroup, setClassGroup] = useState<AppointmentDto[] | null>(null);
+  const [session, setSession] = useState<string | null>(null);
   const datePicker = useRef<HTMLInputElement>(null);
   const weekStart = startOfWeek(anchor, { weekStartsOn: 1 });
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -154,72 +156,81 @@ export function AgendaPage() {
   const multiDay = view === 'week' ? (small ? threeDays : weekDays) : [anchor];
   const from = new Date(Math.min(weekStart.getTime(), multiDay[0]!.getTime()));
   const to = new Date(Math.max(addDays(weekStart, 7).getTime(), addDays(multiDay[multiDay.length - 1]!, 1).getTime()));
+  const range$ = `from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
 
-  const { data, isLoading } = useQuery({
+  const apptsQ = useQuery({
     queryKey: ['appointments', from.toISOString(), to.toISOString()],
-    queryFn: () => api<AppointmentDto[]>(`/appointments?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`),
+    queryFn: () => api<AppointmentDto[]>(`/appointments?${range$}`),
   });
+  const sessionsQ = useQuery({
+    queryKey: ['class-sessions', from.toISOString(), to.toISOString()],
+    queryFn: () => api<ClassSessionDto[]>(`/class-sessions?${range$}`),
+    enabled: cfg.sessions,
+  });
+  const isLoading = apptsQ.isLoading || (cfg.sessions && sessionsQ.isLoading);
 
-  const appts = (data ?? []).filter(
-    (a) => inLoc(a) && (!filter || a.professionalId === filter || a.spaceId === filter) && (showCancelled || a.status !== 'cancelled'),
-  );
   const fmtTime = (d: Date) => format(d, i18n.language.startsWith('en') ? 'h:mm a' : 'HH:mm');
   const fmtRange = (s: Date, e: Date) => `${fmtTime(s)} – ${fmtTime(e)}`;
 
-  const subtitleOf = (a: AppointmentDto) =>
-    a.tableId || (isRestaurant && a.partySize)
-      ? `${t('tables.people', { count: a.partySize ?? 0 })}${a.tableName ? ` · ${a.tableName}` : ''}`
-      : a.spaceName ?? a.serviceName;
-  const toEvent = (a: AppointmentDto, showPerson: boolean): CalEvent => {
-    const start = new Date(a.startsAt);
-    const end = new Date(a.endsAt);
-    const sub = isRentals ? a.serviceName : subtitleOf(a);
-    return {
-      id: a.id,
-      start,
-      end,
-      color: a.professionalColor ?? (isRentals ? '#475569' : BRAND),
-      title: a.customerName,
-      shortTitle: shortName(a.customerName),
-      subtitle: sub,
-      detail: showPerson ? a.professionalName ?? a.spaceName : null,
-      icon: STATUS_ICON[a.status],
-      tone: a.status === 'cancelled' ? 'cancelled' : a.status === 'no_show' ? 'alert' : a.status === 'completed' ? 'muted' : 'normal',
-      label: [fmtRange(start, end), a.customerName, sub, a.professionalName ?? a.spaceName, t(`status.${a.status}`)].filter(Boolean).join(' · '),
-      onClick: () => setSelected(a),
-    };
-  };
-  /** Group class bookings into one block per class session. */
-  const toEvents = (list: AppointmentDto[], showPerson: boolean): CalEvent[] => {
-    const groups = new Map<string, AppointmentDto[]>();
-    const out: CalEvent[] = [];
-    for (const a of list) {
-      if (a.classSessionId) groups.set(a.classSessionId, [...(groups.get(a.classSessionId) ?? []), a]);
-      else out.push(toEvent(a, showPerson));
-    }
-    for (const [sid, g] of groups) {
-      const a = g[0]!;
-      const start = new Date(a.startsAt);
-      const end = new Date(a.endsAt);
-      const people = g.filter((x) => x.status !== 'cancelled').reduce((n, x) => n + (x.partySize ?? 1), 0);
-      const attendees = t('agenda.attendees', { count: people });
-      out.push({
-        id: `class-${sid}`,
-        start,
-        end,
-        color: a.professionalColor ?? BRAND,
-        title: a.serviceName,
-        subtitle: attendees,
-        detail: a.professionalName,
-        label: [fmtRange(start, end), a.serviceName, attendees, a.professionalName].filter(Boolean).join(' · '),
-        onClick: () => setClassGroup(g),
-      });
-    }
-    return out;
-  };
+  /** Everything on the calendar, as one list: bookings, and classes (their sign-ups are inside). */
+  type Item = { start: Date; resourceId: string | null; locationId: string; toEvent: (showResource: boolean) => CalEvent };
+  const items: Item[] = [
+    ...(apptsQ.data ?? [])
+      .filter((a) => !a.classSessionId && (showCancelled || a.status !== 'cancelled'))
+      .map((a): Item => ({
+        start: new Date(a.startsAt),
+        resourceId: a.resourceId,
+        locationId: a.locationId,
+        toEvent: (showResource) => {
+          const start = new Date(a.startsAt);
+          const end = new Date(a.endsAt);
+          const sub = cfg.partySize && a.partySize ? t('agenda.attendees', { count: a.partySize }) : a.serviceName;
+          return {
+            id: a.id,
+            start,
+            end,
+            color: a.resourceColor ?? BRAND,
+            title: a.customerName,
+            shortTitle: shortName(a.customerName),
+            subtitle: sub,
+            detail: showResource ? a.resourceName : null,
+            icon: STATUS_ICON[a.status],
+            tone: a.status === 'cancelled' ? 'cancelled' : a.status === 'no_show' ? 'alert' : a.status === 'completed' ? 'muted' : 'normal',
+            label: [fmtRange(start, end), a.customerName, sub, a.resourceName, t(`status.${a.status}`)].filter(Boolean).join(' · '),
+            onClick: () => setSelected(a),
+          };
+        },
+      })),
+    ...(sessionsQ.data ?? [])
+      .filter((s) => showCancelled || s.status !== 'cancelled')
+      .map((s): Item => ({
+        start: new Date(s.startsAt),
+        resourceId: s.resourceId,
+        locationId: s.locationId,
+        toEvent: (showResource) => {
+          const start = new Date(s.startsAt);
+          const end = new Date(s.endsAt);
+          const cancelled = s.status === 'cancelled';
+          const spots = cancelled ? t('classes.cancelled') : `${s.booked}/${s.capacity} · ${t('agenda.attendees', { count: s.booked })}`;
+          return {
+            id: `class-${s.id}`,
+            start,
+            end,
+            color: s.resourceColor ?? BRAND,
+            title: s.serviceName,
+            subtitle: spots,
+            detail: showResource ? s.resourceName : null,
+            icon: !cancelled && s.booked >= s.capacity ? '●' : '',
+            tone: cancelled ? 'cancelled' : 'normal',
+            label: [fmtRange(start, end), s.serviceName, spots, s.resourceName].filter(Boolean).join(' · '),
+            onClick: () => setSession(s.id),
+          };
+        },
+      })),
+  ].filter((x) => inLoc(x) && (!filter || x.resourceId === filter));
 
-  const onDay = (d: Date) => appts.filter((a) => isSameDay(new Date(a.startsAt), d));
-  const countOn = (d: Date) => toEvents(onDay(d), false).length;
+  const onDay = (d: Date) => items.filter((x) => isSameDay(x.start, d));
+  const countOn = (d: Date) => onDay(d).length;
   const openDay = (d: Date) => {
     setAnchor(startOfDay(d));
     setView('day');
@@ -246,22 +257,22 @@ export function AgendaPage() {
       <div className="flex flex-col items-center">{inner}</div>
     );
   };
-  const newAt = (at: Date, locationId?: string, preset?: Preset) => setCreating({ at, locationId: locationId ?? loc, preset });
+  // Classes are scheduled by managers; bookings by anyone.
+  const canCreate = !cfg.sessions || manager;
+  const newAt = (at: Date, locationId?: string, resourceId?: string) => setCreating({ at, locationId: locationId ?? loc, resourceId });
 
   let columns: CalColumn[];
   if (view === 'day' && byResource) {
     const day = onDay(anchor);
-    const key = (a: AppointmentDto) => (isRestaurant ? a.tableId : isRentals ? a.spaceId : a.professionalId);
-    columns = teamResources.map((r) => {
-      const events = toEvents(day.filter((a) => key(a) === r.id), false);
+    columns = columnResources.map((r) => {
+      const events = day.filter((x) => x.resourceId === r.id).map((x) => x.toEvent(false));
       return {
         key: r.id,
         date: anchor,
         isToday: false,
         open: openFor(anchor, [r.locationId]),
         events,
-        onCreate: (at: Date) =>
-          newAt(at, r.locationId, isRestaurant ? { tableId: r.id } : isRentals ? { spaceId: r.id } : { professionalId: r.id }),
+        onCreate: canCreate ? (at: Date) => newAt(at, r.locationId, r.id) : undefined,
         header: (
           <div className="flex min-w-0 flex-col items-center px-1 text-center">
             <span className="flex max-w-full items-center gap-2 text-sm font-semibold text-slate-800">
@@ -269,24 +280,28 @@ export function AgendaPage() {
               <span className="truncate">{r.name}</span>
             </span>
             <span className="truncate text-xs text-slate-500">
-              {[r.sub, locs.multi && !loc ? loc0(r.locationId)?.name : '', t('agenda.count', { count: events.length })].filter(Boolean).join(' · ')}
+              {[
+                r.capacity != null ? t('resources.capacityN', { count: r.capacity }) : '',
+                locs.multi && !loc ? loc0(r.locationId)?.name : '',
+                t('agenda.count', { count: events.length }),
+              ].filter(Boolean).join(' · ')}
             </span>
           </div>
         ),
       };
     });
-    const unassigned = day.filter((a) => !key(a) || !teamResources.some((r) => r.id === key(a)));
+    const unassigned = day.filter((x) => !x.resourceId || !columnResources.some((r) => r.id === x.resourceId));
     if (unassigned.length && !filter) {
       columns.push({
         key: 'unassigned',
         date: anchor,
         isToday: false,
         open: openFor(anchor, visibleLocIds),
-        events: toEvents(unassigned, true),
-        onCreate: (at) => newAt(at),
+        events: unassigned.map((x) => x.toEvent(true)),
+        onCreate: canCreate ? (at) => newAt(at) : undefined,
         header: (
           <div className="flex flex-col items-center text-center">
-            <span className="text-sm font-semibold text-slate-600">{isRestaurant ? t('agenda.noTable') : t('agenda.unassigned')}</span>
+            <span className="text-sm font-semibold text-slate-600">{t('agenda.unassigned')}</span>
             <span className="text-xs text-slate-500">{t('agenda.count', { count: unassigned.length })}</span>
           </div>
         ),
@@ -302,14 +317,14 @@ export function AgendaPage() {
         : weekDays.filter((d) => openFor(d, visibleLocIds) || onDay(d).length > 0).length
           ? weekDays.filter((d) => openFor(d, visibleLocIds) || onDay(d).length > 0)
           : weekDays;
-    const showPerson = !filter && resources.length > 1;
+    const showResource = !filter && resources.length > 1;
     columns = days.map((d) => ({
       key: d.toISOString(),
       date: d,
       isToday: isSameDay(d, today),
       open: openFor(d, visibleLocIds),
-      events: toEvents(onDay(d), showPerson),
-      onCreate: (at: Date) => newAt(at),
+      events: onDay(d).map((x) => x.toEvent(showResource)),
+      onCreate: canCreate ? (at: Date) => newAt(at) : undefined,
       onMore: () => openDay(d),
       header: dayHeader(d, view === 'week'),
     }));
@@ -345,19 +360,20 @@ export function AgendaPage() {
   return (
     <>
       <PageHeader
-        title={isRestaurant ? t('nav.reservations') : isRentals ? t('nav.bookings') : t('agenda.title')}
+        title={t(`kinds.${kind}.calendar`)}
         actions={
-          <button className="btn-primary" onClick={() => {
-            const at = isSameDay(anchor, today) ? new Date() : new Date(new Date(anchor).setHours(10, 0, 0, 0));
-            at.setMinutes(Math.ceil(at.getMinutes() / 30) * 30, 0, 0);
-            newAt(at);
-          }}>
-            {isRestaurant ? t('tables.newReservation') : t('agenda.new')}
-          </button>
+          canCreate && (
+            <button className="btn-primary" onClick={() => {
+              const at = isSameDay(anchor, today) ? new Date() : new Date(new Date(anchor).setHours(10, 0, 0, 0));
+              at.setMinutes(Math.ceil(at.getMinutes() / 30) * 30, 0, 0);
+              newAt(at);
+            }}>
+              {t(`kinds.${kind}.newBooking`)}
+            </button>
+          )
         }
       />
-      {unlinked && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
-      {scoped && !unlinked && <p className="mb-2 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
+      {scoped && <p className="mb-2 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
 
       {/* Toolbar (Teams style): today, prev/next, date picker | filters, view, zoom */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -400,7 +416,7 @@ export function AgendaPage() {
           )}
           {!scoped && resources.length > 1 && (
             <select className="input !w-auto !py-1.5 text-sm" aria-label={t('agenda.filter')} value={filter} onChange={(e) => setFilter(e.target.value)}>
-              <option value="">{isRentals ? t('agenda.allSpaces') : t('agenda.everyone')}</option>
+              <option value="">{t(`kinds.${kind}.allResources`)}</option>
               {resources.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           )}
@@ -468,53 +484,52 @@ export function AgendaPage() {
           moreLabel={(n) => t('agenda.more', { count: n })}
         />
       )}
-      <p className="mt-2 hidden text-xs text-slate-500 sm:block">{t('agenda.tapToCreate')}</p>
+      {canCreate && <p className="mt-2 hidden text-xs text-slate-500 sm:block">{t('agenda.tapToCreate')}</p>}
 
-      {creating && (
-        <NewAppointmentModal initial={creating.at} defaultLocation={creating.locationId ?? loc} preset={creating.preset} onClose={() => setCreating(null)} />
-      )}
+      {creating &&
+        (cfg.sessions ? (
+          <NewSessionModal initial={creating.at} defaultLocation={creating.locationId ?? loc} resourceId={creating.resourceId} onClose={() => setCreating(null)} />
+        ) : (
+          <NewAppointmentModal initial={creating.at} defaultLocation={creating.locationId ?? loc} presetResource={creating.resourceId} onClose={() => setCreating(null)} />
+        ))}
       {selected && <AppointmentModal appt={selected} onClose={() => setSelected(null)} />}
-      {classGroup && (
-        <Modal open title={`${classGroup[0]!.serviceName} · ${fmtRange(new Date(classGroup[0]!.startsAt), new Date(classGroup[0]!.endsAt))}`} onClose={() => setClassGroup(null)}>
-          <ul className="divide-y divide-slate-100">
-            {classGroup.map((a) => (
-              <li key={a.id}>
-                <button type="button" className="flex w-full items-center justify-between gap-2 py-2 text-left hover:bg-slate-50" onClick={() => { setClassGroup(null); setSelected(a); }}>
-                  <span className="text-sm font-medium text-slate-800">{a.customerName}{(a.partySize ?? 1) > 1 ? ` ×${a.partySize}` : ''}</span>
-                  <StatusBadge status={a.status} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Modal>
-      )}
+      {session && <SessionModal id={session} onClose={() => setSession(null)} onOpen={setSession} />}
     </>
   );
 }
 
-type Preset = { professionalId?: string; spaceId?: string; tableId?: string };
+/** Label for a resource in pickers: name plus what makes it different (seats, hourly rate). */
+function useResourceLabel() {
+  const { t } = useTranslation();
+  return (r: ResourceDto) =>
+    [
+      r.name,
+      r.capacity != null && t('resources.capacityN', { count: r.capacity }),
+      r.pricePerHourCents != null && t('resources.perHour', { price: money(r.pricePerHourCents) }),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+}
 
-function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { initial: Date; defaultLocation: string; preset?: Preset; onClose: () => void }) {
+function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose }: { initial: Date; defaultLocation: string; presetResource?: string; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { tenant, user } = useAuth();
+  const kind = tenant?.kind ?? 'appointments';
+  const cfg = kindConfig(kind);
   // Colaboradores book into their own agenda; the API enforces it too.
-  const { scoped, professionalId: ownPro, locationId: ownLocation } = useAccess();
+  const { scoped, resourceId: ownResource, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
   const [locationId, setLocationId] = useState(defaultLocation || ownLocation || '');
   // With one location there's nothing to choose; the API uses the main one.
   const effectiveLoc = locationId || locs.list[0]?.id || '';
-  const atLoc = (x: { locationId: string }) => !effectiveLoc || x.locationId === effectiveLoc;
-  const isRestaurant = tenant?.kind === 'reservations';
-  const isRentals = tenant?.kind === 'rentals';
-  const tables = useTables(isRestaurant);
-  const pros = useProfessionals(tenant?.kind === 'appointments');
-  const spaces = useSpaces(isRentals);
+  const resourcesQ = useResources();
+  const label = useResourceLabel();
   const durations = rentalSettingsOf(tenant!.settings).durations;
-  const [professionalId, setProfessionalId] = useState(preset?.professionalId ?? '');
-  const [spaceId, setSpaceId] = useState(preset?.spaceId ?? '');
+  // Kinds that book by party size or by length use one internal service.
+  const needsService = !cfg.partySize && !cfg.durations;
+  const [resourceId, setResourceId] = useState(presetResource ?? '');
   const [partySize, setPartySize] = useState('2');
-  const [tableId, setTableId] = useState(preset?.tableId ?? '');
   const services = useServices();
   const [search, setSearch] = useState('');
   const customers = useCustomers(search, 'name', scoped);
@@ -522,12 +537,18 @@ function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { in
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
   const [serviceId, setServiceId] = useState('');
   const [startsAt, setStartsAt] = useState(toLocalInput(initial));
-  const [duration, setDuration] = useState(isRentals ? String(durations[0]) : '');
+  const [duration, setDuration] = useState(cfg.durations ? String(durations[0]) : '');
   const [price, setPrice] = useState('');
   const [notes, setNotes] = useState('');
   const [allowOverlap, setAllowOverlap] = useState(false);
 
   const active = (services.data ?? []).filter((s) => s.active);
+  const svc = active.find((s) => s.id === serviceId);
+  const atLoc = (resourcesQ.data ?? []).filter((r) => r.active && (!effectiveLoc || r.locationId === effectiveLoc));
+  const eligible = eligibleResources(atLoc, { serviceId: needsService ? serviceId || null : null, partySize: cfg.partySize ? Number(partySize || 1) : null });
+  const resource = atLoc.find((r) => r.id === resourceId);
+  const durationMin = Number(duration || svc?.durationMin || 0);
+  const suggested = bookingPriceCents(resource, svc?.priceCents ?? 0, durationMin);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -543,15 +564,14 @@ function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { in
         method: 'POST',
         body: {
           customerId: cid,
-          serviceId: isRentals ? undefined : serviceId || active[0]?.id,
+          serviceId: needsService ? serviceId || active[0]?.id : undefined,
           startsAt: new Date(startsAt).toISOString(),
           durationMin: duration ? Number(duration) : undefined,
-          priceCents: isRestaurant ? 0 : price !== '' ? toCents(price) : undefined,
+          priceCents: price !== '' ? toCents(price) : undefined,
           notes: notes || null,
           allowOverlap,
-          ...(isRestaurant ? { partySize: Number(partySize), tableId: tableId || null } : {}),
-          ...(isRentals ? { spaceId: spaceId || null } : {}),
-          ...(scoped ? (ownPro ? { professionalId: ownPro } : {}) : teamPros.length ? { professionalId: professionalId || null } : {}),
+          ...(cfg.partySize ? { partySize: Number(partySize) } : {}),
+          ...(scoped ? { resourceId: ownResource } : atLoc.length ? { resourceId: resourceId || null } : {}),
           ...(!scoped && effectiveLoc ? { locationId: effectiveLoc } : {}),
         },
       });
@@ -564,20 +584,17 @@ function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { in
     },
   });
 
-  const teamPros = (pros.data ?? []).filter((p) => p.active && (scoped || atLoc(p)));
-  const eligible = eligibleProfessionals(teamPros, serviceId || active[0]?.id);
-  const space = (spaces.data ?? []).find((x) => x.id === spaceId);
   const pickService = (id: string) => {
     setServiceId(id);
     const s = active.find((x) => x.id === id);
     if (s) {
       setDuration(String(s.durationMin));
-      setPrice(String(s.priceCents / 100));
+      setPrice('');
     }
   };
 
   return (
-    <Modal open title={isRestaurant ? t('tables.newReservation') : t('agenda.new')} onClose={onClose}>
+    <Modal open title={t(`kinds.${kind}.newBooking`)} onClose={onClose}>
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -591,7 +608,7 @@ function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { in
             <LocationSelect
               id="na-loc"
               value={effectiveLoc}
-              onChange={(v) => { setLocationId(v); setProfessionalId(''); setTableId(''); setSpaceId(''); }}
+              onChange={(v) => { setLocationId(v); setResourceId(''); }}
               list={locs.list}
             />
           </div>
@@ -623,100 +640,76 @@ function NewAppointmentModal({ initial, defaultLocation, preset, onClose }: { in
             </>
           )}
         </div>
-        {isRestaurant ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="label">{t('tables.partySize')}</label>
-              <input type="number" min={1} max={50} required className="input" value={partySize} onChange={(e) => setPartySize(e.target.value)} />
-            </div>
-            <div>
-              <label className="label">{t('tables.table')}</label>
-              <select className="input" value={tableId} onChange={(e) => setTableId(e.target.value)}>
-                <option value="">{t('tables.auto')}</option>
-                {(tables.data ?? []).filter((x) => x.active && atLoc(x) && x.seats >= Number(partySize || 1)).map((x) => (
-                  <option key={x.id} value={x.id}>{x.name} · {t('tables.seatsN', { count: x.seats })}{x.area ? ` · ${x.area}` : ''}</option>
-                ))}
-              </select>
-            </div>
+        {needsService && (
+          <div>
+            <label className="label" htmlFor="na-svc">{t('agenda.service')}</label>
+            <select id="na-svc" required className="input" value={serviceId} onChange={(e) => pickService(e.target.value)}>
+              <option value="">{t('agenda.selectService')}</option>
+              {active.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} · {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</option>
+              ))}
+            </select>
           </div>
-        ) : isRentals ? (
-          <div className="grid gap-4 sm:grid-cols-2">
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {cfg.partySize && (
             <div>
-              <label className="label">{t('spaces.space')}</label>
-              <select className="input" value={spaceId} onChange={(e) => setSpaceId(e.target.value)}>
-                <option value="">{t('spaces.auto')}</option>
-                {(spaces.data ?? []).filter((x) => x.active && atLoc(x)).map((x) => (
-                  <option key={x.id} value={x.id}>{x.name} · {t('spaces.perHour', { price: money(x.pricePerHourCents) })}</option>
-                ))}
-              </select>
+              <label className="label" htmlFor="na-party">{t('agenda.partySize')}</label>
+              <input id="na-party" type="number" min={1} max={50} required className="input" value={partySize} onChange={(e) => setPartySize(e.target.value)} />
             </div>
-            <div>
-              <label className="label">{t('agenda.duration')}</label>
-              <select className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
-                {durations.map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
-              </select>
-            </div>
-          </div>
-        ) : (
-        <div>
-          <label className="label">{t('agenda.service')}</label>
-          <select required className="input" value={serviceId} onChange={(e) => pickService(e.target.value)}>
-            <option value="">{t('agenda.selectService')}</option>
-            {active.map((s) => (
-              <option key={s.id} value={s.id}>{s.name} · {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</option>
-            ))}
-          </select>
-          {scoped && ownPro && (
-            <p className="mt-2 text-sm text-slate-500">{t('roles.bookingFor', { name: teamPros.find((p) => p.id === ownPro)?.name ?? user?.name })}</p>
           )}
-          {!scoped && teamPros.length > 0 && (
-            <div className="mt-4">
-              <label className="label">{t('team.professional')}</label>
-              <select className="input" value={professionalId} onChange={(e) => setProfessionalId(e.target.value)}>
-                <option value="">{t('team.auto')}</option>
-                {eligible.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {scoped ? (
+            <p className="text-sm text-slate-500 sm:col-span-2">{t('roles.bookingFor', { name: atLoc.find((r) => r.id === ownResource)?.name ?? user?.name })}</p>
+          ) : atLoc.length > 0 && (
+            <div>
+              <label className="label" htmlFor="na-res">{t(`kinds.${kind}.resource`)}</label>
+              <select id="na-res" className="input" value={resourceId} onChange={(e) => setResourceId(e.target.value)}>
+                <option value="">{t('resources.auto')}</option>
+                {eligible.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
               </select>
             </div>
           )}
         </div>
-        )}
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="sm:col-span-3">
-            <label className="label">{t('agenda.startsAt')}</label>
-            <input type="datetime-local" required className="input" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+            <label className="label" htmlFor="na-start">{t('agenda.startsAt')}</label>
+            <input id="na-start" type="datetime-local" required className="input" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
           </div>
-          {!isRentals && (
           <div>
-            <label className="label">{t('agenda.duration')}</label>
-            <input type="number" min={5} className="input" value={duration} onChange={(e) => setDuration(e.target.value)} />
+            <label className="label" htmlFor="na-dur">{t('agenda.duration')}</label>
+            {cfg.durations ? (
+              <select id="na-dur" className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
+                {durations.map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
+              </select>
+            ) : (
+              <input id="na-dur" type="number" min={5} className="input" placeholder={svc ? String(svc.durationMin) : ''} value={duration} onChange={(e) => setDuration(e.target.value)} />
+            )}
           </div>
-          )}
-          {!isRestaurant && (
           <div>
-            <label className="label">{t('agenda.price')}</label>
+            <label className="label" htmlFor="na-price">{t('agenda.price')}</label>
             <input
+              id="na-price"
               type="number"
               min={0}
               step="0.01"
               className="input"
-              placeholder={isRentals && space ? String(spacePriceCents(space.pricePerHourCents, Number(duration)) / 100) : ''}
+              placeholder={suggested ? String(suggested / 100) : t('common.optional')}
               value={price}
               onChange={(e) => setPrice(e.target.value)}
             />
           </div>
-          )}
         </div>
         <div>
-          <label className="label">{t('agenda.notes')}</label>
-          <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <label className="label" htmlFor="na-notes">{t('agenda.notes')}</label>
+          <textarea id="na-notes" className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
         {!scoped && (
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
-          {isRestaurant ? t('tables.noTable') : isRentals ? t('spaces.noSpace') : t('agenda.allowOverlap')}
-        </label>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
+            {t('agenda.allowOverlap')}
+          </label>
         )}
-        <ErrorText error={create.error} ns={isRestaurant ? 'tables' : 'agenda'} />
+        <ErrorText error={create.error} ns="agenda" />
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
           <button className="btn-primary" disabled={create.isPending}>{t('common.save')}</button>
@@ -745,15 +738,16 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const outstanding = Math.max(appt.priceCents - appt.paidCents, 0);
   const selfService = selfServiceOf(tenant!.settings);
   const [copied, setCopied] = useState(false);
-  const tablesQ = useTables(appt.tableId != null || tenant?.kind === 'reservations');
-  const prosQ = useProfessionals(tenant?.kind === 'appointments');
-  const spacesQ = useSpaces(tenant?.kind === 'rentals');
-  const teamPros = eligibleProfessionals((prosQ.data ?? []).filter((p) => p.active && p.locationId === appt.locationId), appt.serviceId);
-  const [pro, setPro] = useState(appt.professionalId ?? '');
-  const [spc, setSpc] = useState(appt.spaceId ?? '');
-  const isTableBooking = tenant?.kind === 'reservations' && !appt.classSessionId;
+  const kind = tenant?.kind ?? 'appointments';
+  const cfg = kindConfig(kind);
+  const label = useResourceLabel();
+  const resourcesQ = useResources();
+  const atLoc = (resourcesQ.data ?? []).filter((r) => r.active && r.locationId === appt.locationId);
+  // Party size kinds (restaurants) charge the bill when the visit ends.
+  const withParty = cfg.partySize && appt.partySize != null && !appt.classSessionId;
   const [party, setParty] = useState(String(appt.partySize ?? 2));
-  const [table, setTable] = useState(appt.tableId ?? '');
+  const [res, setRes] = useState(appt.resourceId ?? '');
+  const eligible = eligibleResources(atLoc, { serviceId: appt.serviceId, partySize: withParty ? Number(party || 1) : null });
   const [bill, setBill] = useState('');
   const manageUrl = `${window.location.origin}${appt.managePath}`;
   const manageMsg = t('agenda.manageMessage', {
@@ -803,7 +797,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
       : undefined;
 
   return (
-    <Modal open title={t('agenda.edit')} onClose={onClose}>
+    <Modal open title={t(`kinds.${kind}.booking`)} onClose={onClose}>
       <div className="space-y-1">
         <div className="flex items-center justify-between">
           <div className="text-lg font-semibold">{appt.customerName}</div>
@@ -811,15 +805,10 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
         <div className="text-slate-600">{appt.serviceName}</div>
         <div className="text-sm text-slate-500">{dateTime(appt.startsAt)} – {timeOnly(appt.endsAt)} · {t(`source.${appt.source}`)}</div>
-        {isTableBooking && appt.partySize != null && (
-          <div className="text-sm font-medium text-slate-700">
-            {t('tables.people', { count: appt.partySize })} · {appt.tableName ?? t('tables.unassigned')}
-          </div>
-        )}
-        {(appt.professionalName || appt.spaceName) && (
+        {(appt.resourceName || withParty) && (
           <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-            {appt.professionalColor && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: appt.professionalColor }} />}
-            {appt.professionalName ?? appt.spaceName}
+            {appt.resourceColor && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: appt.resourceColor }} />}
+            {[withParty && t('agenda.attendees', { count: appt.partySize ?? 0 }), appt.resourceName ?? (atLoc.length ? t('agenda.unassigned') : '')].filter(Boolean).join(' · ')}
           </div>
         )}
         {apptLocs.anyMulti && <div className="text-sm text-slate-500">⌂ {apptLocs.byId.get(appt.locationId)?.name}</div>}
@@ -842,44 +831,25 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <button className="btn-secondary text-rose-700" onClick={() => update.mutate({ status: 'cancelled' })}>{t('agenda.cancelAppt')}</button>
           </div>
 
-          {!scoped && teamPros.length > 0 && !appt.classSessionId && (
+          {!scoped && !appt.classSessionId && (atLoc.length > 0 || withParty) && (
             <div className="rounded-lg border border-slate-200 p-3">
-              <label className="label">{t('team.professional')}</label>
+              <label className="label" htmlFor="am-res">{t(`kinds.${kind}.resource`)}</label>
               <div className="flex flex-wrap gap-2">
-                <select className="input w-auto" value={pro} onChange={(e) => setPro(e.target.value)}>
-                  <option value="">{t('team.auto')}</option>
-                  {teamPros.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <button className="btn-secondary" onClick={() => update.mutate({ professionalId: pro || null })}>{t('common.save')}</button>
-              </div>
-            </div>
-          )}
-
-          {tenant?.kind === 'rentals' && (
-            <div className="rounded-lg border border-slate-200 p-3">
-              <label className="label">{t('spaces.space')}</label>
-              <div className="flex flex-wrap gap-2">
-                <select className="input w-auto" value={spc} onChange={(e) => setSpc(e.target.value)}>
-                  <option value="">{t('spaces.auto')}</option>
-                  {(spacesQ.data ?? []).filter((x) => x.active && x.locationId === appt.locationId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-                <button className="btn-secondary" onClick={() => update.mutate({ spaceId: spc || null })}>{t('common.save')}</button>
-              </div>
-            </div>
-          )}
-
-          {isTableBooking && appt.partySize != null && (
-            <div className="rounded-lg border border-slate-200 p-3">
-              <label className="label">{t('tables.table')}</label>
-              <div className="flex flex-wrap gap-2">
-                <input type="number" min={1} max={50} className="input w-24" value={party} onChange={(e) => setParty(e.target.value)} aria-label={t('tables.partySize')} />
-                <select className="input w-auto" value={table} onChange={(e) => setTable(e.target.value)}>
-                  <option value="">{t('tables.auto')}</option>
-                  {(tablesQ.data ?? []).filter((x) => x.active && x.locationId === appt.locationId && x.seats >= Number(party || 1)).map((x) => (
-                    <option key={x.id} value={x.id}>{x.name} · {t('tables.seatsN', { count: x.seats })}</option>
-                  ))}
-                </select>
-                <button className="btn-secondary" onClick={() => update.mutate({ partySize: Number(party), tableId: table || null })}>{t('common.save')}</button>
+                {withParty && (
+                  <input type="number" min={1} max={50} className="input w-24" value={party} onChange={(e) => setParty(e.target.value)} aria-label={t('agenda.partySize')} />
+                )}
+                {atLoc.length > 0 && (
+                  <select id="am-res" className="input w-auto" value={res} onChange={(e) => setRes(e.target.value)}>
+                    <option value="">{t('resources.auto')}</option>
+                    {eligible.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
+                  </select>
+                )}
+                <button
+                  className="btn-secondary"
+                  onClick={() => update.mutate({ ...(atLoc.length ? { resourceId: res || null } : {}), ...(withParty ? { partySize: Number(party) } : {}) })}
+                >
+                  {t('common.save')}
+                </button>
               </div>
             </div>
           )}
@@ -892,10 +862,10 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                   <option key={m} value={m}>{t(`methods.${m}`)}</option>
                 ))}
               </select>
-              {isTableBooking && appt.partySize != null && (
-                <input type="number" min={0} step="0.01" className="input w-32" placeholder={t('tables.bill')} value={bill} onChange={(e) => setBill(e.target.value)} aria-label={t('tables.bill')} />
+              {withParty && (
+                <input type="number" min={0} step="0.01" className="input w-32" placeholder={t('agenda.bill')} value={bill} onChange={(e) => setBill(e.target.value)} aria-label={t('agenda.bill')} />
               )}
-              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method, ...(isTableBooking && bill !== '' ? { priceCents: toCents(bill) } : {}) })}>
+              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method, ...(withParty && bill !== '' ? { priceCents: toCents(bill) } : {}) })}>
                 {t('agenda.complete')}
               </button>
             </div>
@@ -966,7 +936,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
       )}
 
-      <ErrorText error={update.error} ns={isTableBooking ? 'tables' : 'agenda'} />
+      <ErrorText error={update.error} ns="agenda" />
       <div className="mt-6 flex justify-between">
         {manager ? (
           <button
