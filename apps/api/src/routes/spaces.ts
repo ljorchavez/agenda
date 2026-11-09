@@ -5,7 +5,7 @@ import { getDb } from '../db/client.js';
 import { spaces } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
 import { toSpaceDto } from '../lib/mappers.js';
-import { requireOwner, type AppEnv } from '../middleware/auth.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 /** Spaces rented by the hour (courts, rooms, studios), scoped by tenant. Only owners can change them. */
 export const spaceRoutes = new Hono<AppEnv>();
@@ -20,7 +20,7 @@ spaceRoutes.get('/spaces', async (c) => {
   return c.json(rows.map(toSpaceDto));
 });
 
-spaceRoutes.post('/spaces', requireOwner, async (c) => {
+spaceRoutes.post('/spaces', requireManager, async (c) => {
   const input = spaceInputSchema.parse(await c.req.json());
   const [row] = await getDb()
     .insert(spaces)
@@ -29,7 +29,7 @@ spaceRoutes.post('/spaces', requireOwner, async (c) => {
   return c.json(toSpaceDto(row!), 201);
 });
 
-spaceRoutes.put('/spaces/:id', requireOwner, async (c) => {
+spaceRoutes.put('/spaces/:id', requireManager, async (c) => {
   const input = spaceInputSchema.parse(await c.req.json());
   const [row] = await getDb()
     .update(spaces)
@@ -41,7 +41,7 @@ spaceRoutes.put('/spaces/:id', requireOwner, async (c) => {
 });
 
 /** Spaces with booking history are deactivated instead of deleted. */
-spaceRoutes.delete('/spaces/:id', requireOwner, async (c) => {
+spaceRoutes.delete('/spaces/:id', requireManager, async (c) => {
   const db = getDb();
   const id = c.req.param('id');
   const tenantId = c.get('tenantId');

@@ -2,8 +2,17 @@ import { z } from 'zod';
 
 // ---------- Enums ----------
 
-export const ROLES = ['owner', 'staff'] as const;
+/**
+ * - owner: everything, including payment settings and logins
+ * - admin: runs the business day to day (all bookings, team, catalog) but not payments or other admins
+ * - staff: a team member ("colaborador") who only sees their own bookings, customers and numbers
+ */
+export const ROLES = ['owner', 'admin', 'staff'] as const;
 export type Role = (typeof ROLES)[number];
+/** Owners and admins see every booking and can change the catalog/team. */
+export const isManager = (role: Role | null | undefined) => role === 'owner' || role === 'admin';
+/** Roles a user may assign to others. */
+export const assignableRoles = (role: Role): Role[] => (role === 'owner' ? ['owner', 'admin', 'staff'] : role === 'admin' ? ['staff'] : []);
 
 export const BUSINESS_TYPES = [
   'nutrition',
@@ -493,8 +502,39 @@ export const staffCreateSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8).max(200),
   role: z.enum(ROLES).default('staff'),
+  /** Team member this login belongs to (their agenda) */
+  professionalId: z.string().uuid().nullable().optional(),
 });
 export type StaffCreateInput = z.infer<typeof staffCreateSchema>;
+
+export const userUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  role: z.enum(ROLES).optional(),
+  /** Sets a new password (owners/admins resetting a team member's access) */
+  password: z.string().min(8).max(200).optional(),
+  professionalId: z.string().uuid().nullable().optional(),
+});
+export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
+
+/** Anyone can rename themselves or change their own password (current one required). */
+export const accountUpdateSchema = z
+  .object({
+    name: z.string().trim().min(2).max(120).optional(),
+    currentPassword: z.string().max(200).optional(),
+    newPassword: z.string().min(8).max(200).optional(),
+  })
+  .refine((x) => !x.newPassword || Boolean(x.currentPassword), { path: ['currentPassword'], message: 'currentPassword required' });
+export type AccountUpdateInput = z.infer<typeof accountUpdateSchema>;
+
+export interface UserDto {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  /** Linked team member, if any */
+  professionalId: string | null;
+  professionalName: string | null;
+}
 
 // ---------- Customers ----------
 
@@ -615,6 +655,8 @@ export interface SessionUser {
   name: string;
   email: string;
   role: Role;
+  /** Team member linked to this login (staff only see this person's bookings) */
+  professionalId: string | null;
 }
 
 export interface TenantDto {

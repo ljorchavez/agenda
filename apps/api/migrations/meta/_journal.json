@@ -29,6 +29,13 @@
       "when": 1794180000000,
       "tag": "0003_team_classes_spaces",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794190000000,
+      "tag": "0004_roles",
+      "breakpoints": true
     }
   ]
 }

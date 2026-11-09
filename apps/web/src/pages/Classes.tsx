@@ -5,13 +5,15 @@ import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
 import { paymentSettingsOf, type AppointmentDto, type ClassSessionDto, type CustomerDto } from '@agenda/shared';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
 import { dateLocale, dateTime, money, timeOnly, toLocalInput } from '../lib/format';
 import { useCustomers, useProfessionals, useServices } from '../lib/queries';
 
 /** Week view of group classes; each class shows spots taken and opens its attendee list. */
 export function ClassesPage() {
   const { t } = useTranslation();
+  // Colaboradores (instructors) see only their own classes and can't schedule new ones.
+  const { manager, unlinked } = useAccess();
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [creating, setCreating] = useState<Date | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -39,13 +41,15 @@ export function ClassesPage() {
             <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="prev">‹</button>
             <button className="btn-secondary" onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}>{t('agenda.today')}</button>
             <button className="btn-secondary" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="next">›</button>
-            <button className="btn-primary" onClick={() => setCreating(newAt(new Date()))}>{t('classes.new')}</button>
+            {manager && <button className="btn-primary" onClick={() => setCreating(newAt(new Date()))}>{t('classes.new')}</button>}
           </>
         }
       />
       <p className="-mt-4 mb-4 text-sm text-slate-500">
         {format(weekStart, 'd MMM', { locale: dateLocale() })} – {format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}
       </p>
+      {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
+      {!manager && !unlinked && <p className="mb-4 text-sm text-slate-500">{t('roles.onlyYourClasses')}</p>}
       {sessions.isLoading ? (
         <Loading />
       ) : (
@@ -178,6 +182,7 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { tenant } = useAuth();
+  const { manager } = useAccess();
   const pros = useProfessionals();
   const pay = paymentSettingsOf(tenant!.settings);
   const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
@@ -253,9 +258,13 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
       {!cancelled && (
         <div className="mt-4 flex flex-wrap gap-2">
           <button className="btn-secondary" onClick={() => setAdding(!adding)}>{t('classes.addAttendee')}</button>
-          <button className="btn-secondary" onClick={() => setEdit(edit ? null : { startsAt: toLocalInput(new Date(s.startsAt)), capacity: String(s.capacity), professionalId: s.professionalId ?? '' })}>{t('common.edit')}</button>
-          <button className="btn-secondary" disabled={copy.isPending} onClick={() => copy.mutate()}>{t('classes.copyNextWeek')}</button>
-          <button className="btn-secondary text-rose-700" onClick={() => window.confirm(t('classes.cancelConfirm')) && cancel.mutate()}>{t('classes.cancelClass')}</button>
+          {manager && (
+            <>
+              <button className="btn-secondary" onClick={() => setEdit(edit ? null : { startsAt: toLocalInput(new Date(s.startsAt)), capacity: String(s.capacity), professionalId: s.professionalId ?? '' })}>{t('common.edit')}</button>
+              <button className="btn-secondary" disabled={copy.isPending} onClick={() => copy.mutate()}>{t('classes.copyNextWeek')}</button>
+              <button className="btn-secondary text-rose-700" onClick={() => window.confirm(t('classes.cancelConfirm')) && cancel.mutate()}>{t('classes.cancelClass')}</button>
+            </>
+          )}
         </div>
       )}
 
@@ -320,7 +329,7 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
 
       <ErrorText error={copy.error ?? cancel.error ?? remove.error ?? attendee.error} ns="classes" />
       <div className="mt-6 flex justify-between">
-        {attendees.length === 0 ? (
+        {manager && attendees.length === 0 ? (
           <button className="text-sm text-rose-700 hover:underline" onClick={() => window.confirm(t('classes.deleteConfirm')) && remove.mutate()}>{t('common.delete')}</button>
         ) : <span />}
         <button className="btn-secondary" onClick={onClose}>{t('common.close')}</button>
@@ -331,8 +340,9 @@ function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () => void
 
 function AddAttendee({ sessionId, onDone }: { sessionId: string; onDone: () => void }) {
   const { t } = useTranslation();
+  const { manager, scoped } = useAccess();
   const [search, setSearch] = useState('');
-  const customers = useCustomers(search);
+  const customers = useCustomers(search, 'name', scoped);
   const [customerId, setCustomerId] = useState('');
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
   const [spots, setSpots] = useState('1');
@@ -373,10 +383,12 @@ function AddAttendee({ sessionId, onDone }: { sessionId: string; onDone: () => v
           {t('classes.spots')}
           <input type="number" min={1} max={10} className="input w-20" value={spots} onChange={(e) => setSpots(e.target.value)} />
         </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={overbook} onChange={(e) => setOverbook(e.target.checked)} />
-          {t('classes.overbook')}
-        </label>
+        {manager && (
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={overbook} onChange={(e) => setOverbook(e.target.checked)} />
+            {t('classes.overbook')}
+          </label>
+        )}
         <button className="btn-primary ml-auto" disabled={add.isPending}>{t('common.save')}</button>
       </div>
       <ErrorText error={add.error} ns="classes" />

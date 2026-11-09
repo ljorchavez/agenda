@@ -3,25 +3,135 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  assignableRoles,
   BUSINESS_TYPES,
+  isManager,
   isValidClabe,
   paymentSettingsOf,
   rentalSettingsOf,
   reservationSettingsOf,
   selfServiceOf,
+  type Role,
   type SessionUser,
   type TenantDto,
   type TenantSettings,
+  type UserDto,
 } from '@agenda/shared';
 import { PaymentSettingsSection } from '../components/PaymentSettings';
 import { PublicProfileSection } from '../components/PublicProfile';
-import { ErrorText, PageHeader } from '../components/ui';
+import { ErrorText, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useProfessionals } from '../lib/queries';
 
 export function SettingsPage() {
+  const { user } = useAuth();
+  if (!isManager(user?.role)) return <MemberSettings />;
+  return <BusinessSettings />;
+}
+
+/** Colaboradores: their own account and language, plus the public link to share. */
+function MemberSettings() {
+  const { t } = useTranslation();
+  const { tenant } = useAuth();
+  const publicUrl = `${window.location.origin}/b/${tenant?.slug}`;
+  return (
+    <>
+      <PageHeader title={t('settings.title')} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <AccountSection />
+        <section className="card space-y-4">
+          <h2 className="font-semibold">{t('settings.business')}</h2>
+          <div className="text-sm text-slate-700">{tenant?.name}</div>
+          <LanguageSelect />
+          <div>
+            <div className="label">{t('settings.publicLink')}</div>
+            <input readOnly className="input" value={publicUrl} onFocus={(e) => e.target.select()} />
+          </div>
+          <p className="text-sm text-slate-500">{t('settings.memberHelp')}</p>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function LanguageSelect() {
+  const { t, i18n } = useTranslation();
+  return (
+    <div>
+      <label className="label">{t('settings.language')}</label>
+      <select
+        className="input"
+        value={i18n.language.startsWith('en') ? 'en' : 'es'}
+        onChange={(e) => {
+          void i18n.changeLanguage(e.target.value);
+          try { localStorage.setItem('agenda.lang', e.target.value); } catch { /* ignore */ }
+        }}
+      >
+        <option value="es">Español</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+  );
+}
+
+function AccountSection() {
+  const { t } = useTranslation();
+  const { user, setUser } = useAuth();
+  const [name, setName] = useState(user?.name ?? '');
+  const [currentPassword, setCurrent] = useState('');
+  const [newPassword, setNew] = useState('');
+  const [saved, setSaved] = useState(false);
+  const save = useMutation({
+    mutationFn: () =>
+      api<SessionUser>('/auth/me', {
+        method: 'PATCH',
+        body: { name, ...(newPassword ? { currentPassword, newPassword } : {}) },
+      }),
+    onSuccess: (u) => {
+      setUser(u);
+      setCurrent('');
+      setNew('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    },
+  });
+  return (
+    <section className="card space-y-4">
+      <h2 className="font-semibold">{t('settings.account')}</h2>
+      <div className="text-sm text-slate-500">
+        {user?.email} · <span className="font-medium text-slate-700">{t(`settings.role.${user?.role ?? 'staff'}`)}</span>
+      </div>
+      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <div>
+          <label className="label">{t('auth.name')}</label>
+          <input required minLength={2} className="input" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label">{t('settings.currentPassword')}</label>
+            <input type="password" autoComplete="current-password" className="input" value={currentPassword} onChange={(e) => setCurrent(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">{t('settings.newPassword')}</label>
+            <input type="password" autoComplete="new-password" minLength={8} className="input" value={newPassword} onChange={(e) => setNew(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="btn-secondary" disabled={save.isPending || (Boolean(newPassword) && !currentPassword)}>{t('common.save')}</button>
+          {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
+        </div>
+        <ErrorText error={save.error} ns="settings" />
+      </form>
+    </section>
+  );
+}
+
+function BusinessSettings() {
   const { t, i18n } = useTranslation();
   const { tenant, user, setTenant } = useAuth();
+  // Admins edit the business like the owner; payouts (bank / Mercado Pago) stay with the owner.
+  const canEdit = isManager(user?.role);
   const isOwner = user?.role === 'owner';
   const [name, setName] = useState(tenant?.name ?? '');
   const [businessType, setBusinessType] = useState(tenant?.businessType ?? 'other');
@@ -80,34 +190,21 @@ export function SettingsPage() {
           <h2 className="font-semibold">{t('settings.business')}</h2>
           <div>
             <label className="label">{t('auth.businessName')}</label>
-            <input className="input" value={name} disabled={!isOwner} onChange={(e) => setName(e.target.value)} />
+            <input className="input" value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label">{t('auth.businessType')}</label>
-              <select className="input" value={businessType} disabled={!isOwner} onChange={(e) => setBusinessType(e.target.value as typeof businessType)}>
+              <select className="input" value={businessType} disabled={!canEdit} onChange={(e) => setBusinessType(e.target.value as typeof businessType)}>
                 {BUSINESS_TYPES.map((b) => <option key={b} value={b}>{t(`businessTypes.${b}`)}</option>)}
               </select>
             </div>
             <div>
               <label className="label">{t('auth.phone')}</label>
-              <input className="input" value={phone} disabled={!isOwner} onChange={(e) => setPhone(e.target.value)} />
+              <input className="input" value={phone} disabled={!canEdit} onChange={(e) => setPhone(e.target.value)} />
             </div>
           </div>
-          <div>
-            <label className="label">{t('settings.language')}</label>
-            <select
-              className="input"
-              value={i18n.language.startsWith('en') ? 'en' : 'es'}
-              onChange={(e) => {
-                void i18n.changeLanguage(e.target.value);
-                try { localStorage.setItem('agenda.lang', e.target.value); } catch { /* ignore */ }
-              }}
-            >
-              <option value="es">Español</option>
-              <option value="en">English</option>
-            </select>
-          </div>
+          <LanguageSelect />
           <div className="text-sm text-slate-500">{t('settings.timezone')}: {tenant?.timezone}</div>
           {hasTeam && (
             <Link to="/team" className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm hover:border-brand-500">
@@ -136,7 +233,7 @@ export function SettingsPage() {
             </button>
           </div>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" disabled={!isOwner} checked={settings.onlineBookingEnabled} onChange={(e) => setSettings({ ...settings, onlineBookingEnabled: e.target.checked })} />
+            <input type="checkbox" disabled={!canEdit} checked={settings.onlineBookingEnabled} onChange={(e) => setSettings({ ...settings, onlineBookingEnabled: e.target.checked })} />
             {t('settings.onlineBookingEnabled')}
           </label>
 
@@ -146,13 +243,13 @@ export function SettingsPage() {
               <div className="grid max-w-md gap-3 sm:grid-cols-2">
                 <div>
                   <label className="label">{t('tables.duration')}</label>
-                  <select disabled={!isOwner} className="input" value={rs.durationMin} onChange={(e) => setRs({ durationMin: Number(e.target.value) })}>
+                  <select disabled={!canEdit} className="input" value={rs.durationMin} onChange={(e) => setRs({ durationMin: Number(e.target.value) })}>
                     {[60, 75, 90, 105, 120, 150, 180].map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label">{t('tables.maxParty')}</label>
-                  <input type="number" min={1} max={50} disabled={!isOwner} className="input" value={rs.maxPartySize} onChange={(e) => setRs({ maxPartySize: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} />
+                  <input type="number" min={1} max={50} disabled={!canEdit} className="input" value={rs.maxPartySize} onChange={(e) => setRs({ maxPartySize: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} />
                 </div>
               </div>
             </>
@@ -169,7 +266,7 @@ export function SettingsPage() {
                     <button
                       key={m}
                       type="button"
-                      disabled={!isOwner}
+                      disabled={!canEdit}
                       aria-pressed={on}
                       onClick={() => toggleDuration(m)}
                       className={`rounded-lg border px-3 py-1.5 text-sm ${on ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 text-slate-500'}`}
@@ -185,28 +282,28 @@ export function SettingsPage() {
           <h2 className="pt-2 font-semibold">{t('settings.selfService')}</h2>
           <p className="text-sm text-slate-500">{t('settings.selfServiceHelp')}</p>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" disabled={!isOwner} checked={selfService.rescheduleEnabled} onChange={(e) => setSelfService({ rescheduleEnabled: e.target.checked })} />
+            <input type="checkbox" disabled={!canEdit} checked={selfService.rescheduleEnabled} onChange={(e) => setSelfService({ rescheduleEnabled: e.target.checked })} />
             {t('settings.rescheduleEnabled')}
           </label>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" disabled={!isOwner} checked={selfService.cancelEnabled} onChange={(e) => setSelfService({ cancelEnabled: e.target.checked })} />
+            <input type="checkbox" disabled={!canEdit} checked={selfService.cancelEnabled} onChange={(e) => setSelfService({ cancelEnabled: e.target.checked })} />
             {t('settings.cancelEnabled')}
           </label>
           {(selfService.rescheduleEnabled || selfService.cancelEnabled) && (
             <div className="max-w-56">
               <label className="label">{t('settings.minHoursNotice')}</label>
-              <input type="number" min={0} max={168} disabled={!isOwner} className="input" value={selfService.minHoursNotice} onChange={(e) => setSelfService({ minHoursNotice: Math.max(0, Math.min(168, Number(e.target.value) || 0)) })} />
+              <input type="number" min={0} max={168} disabled={!canEdit} className="input" value={selfService.minHoursNotice} onChange={(e) => setSelfService({ minHoursNotice: Math.max(0, Math.min(168, Number(e.target.value) || 0)) })} />
             </div>
           )}
 
           <h2 className="pt-2 font-semibold">{t('settings.reminders')}</h2>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" disabled={!isOwner} checked={settings.remindersEnabled} onChange={(e) => setSettings({ ...settings, remindersEnabled: e.target.checked })} />
+            <input type="checkbox" disabled={!canEdit} checked={settings.remindersEnabled} onChange={(e) => setSettings({ ...settings, remindersEnabled: e.target.checked })} />
             {t('settings.remindersEnabled')}
           </label>
           <div className="max-w-48">
             <label className="label">{t('settings.reminderHoursBefore')}</label>
-            <input type="number" min={1} max={72} disabled={!isOwner} className="input" value={settings.reminderHoursBefore} onChange={(e) => setSettings({ ...settings, reminderHoursBefore: Number(e.target.value) })} />
+            <input type="number" min={1} max={72} disabled={!canEdit} className="input" value={settings.reminderHoursBefore} onChange={(e) => setSettings({ ...settings, reminderHoursBefore: Number(e.target.value) })} />
           </div>
         </section>
 
@@ -221,7 +318,7 @@ export function SettingsPage() {
                   <button
                     key={d}
                     type="button"
-                    disabled={!isOwner}
+                    disabled={!canEdit}
                     onClick={() => setHours({ days: on ? settings.hours.days.filter((x) => x !== d) : [...settings.hours.days, d].sort() })}
                     className={`rounded-lg border px-3 py-1.5 text-sm capitalize ${on ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 text-slate-500'}`}
                   >
@@ -234,22 +331,22 @@ export function SettingsPage() {
           <div className="grid max-w-xl gap-4 sm:grid-cols-3">
             <div>
               <label className="label">{t('settings.open')}</label>
-              <input type="time" disabled={!isOwner} className="input" value={settings.hours.open} onChange={(e) => setHours({ open: e.target.value })} />
+              <input type="time" disabled={!canEdit} className="input" value={settings.hours.open} onChange={(e) => setHours({ open: e.target.value })} />
             </div>
             <div>
               <label className="label">{t('settings.close')}</label>
-              <input type="time" disabled={!isOwner} className="input" value={settings.hours.close} onChange={(e) => setHours({ close: e.target.value })} />
+              <input type="time" disabled={!canEdit} className="input" value={settings.hours.close} onChange={(e) => setHours({ close: e.target.value })} />
             </div>
             <div>
               <label className="label">{t('settings.slotMinutes')}</label>
-              <select disabled={!isOwner} className="input" value={settings.hours.slotMinutes} onChange={(e) => setHours({ slotMinutes: Number(e.target.value) })}>
+              <select disabled={!canEdit} className="input" value={settings.hours.slotMinutes} onChange={(e) => setHours({ slotMinutes: Number(e.target.value) })}>
                 {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
           </div>
         </section>
 
-        <PublicProfileSection disabled={!isOwner} />
+        <PublicProfileSection disabled={!canEdit} />
 
         <PaymentSettingsSection
           value={payments}
@@ -258,7 +355,7 @@ export function SettingsPage() {
         />
       </div>
 
-      {isOwner && (
+      {canEdit && (
         <div className="mt-6 flex items-center gap-3">
           <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
           {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
@@ -266,44 +363,207 @@ export function SettingsPage() {
         </div>
       )}
 
-      <TeamSection isOwner={isOwner} hasTeam={hasTeam} />
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <AccountSection />
+      </div>
+      <UsersSection hasTeam={hasTeam} kind={tenant!.kind} />
     </>
   );
 }
 
-function TeamSection({ isOwner, hasTeam }: { isOwner: boolean; hasTeam: boolean }) {
+type UserForm = { name: string; email: string; password: string; role: Role; professionalId: string };
+
+/** Logins with access to the business, their role and which team member's agenda they work. */
+function UsersSection({ hasTeam, kind }: { hasTeam: boolean; kind: string }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const qc = useQueryClient();
-  const team = useQuery({ queryKey: ['users'], queryFn: () => api<SessionUser[]>('/users') });
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
-  const add = useMutation({
-    mutationFn: () => api('/users', { method: 'POST', body: { ...form, role: 'staff' } }),
-    onSuccess: () => {
-      setForm({ name: '', email: '', password: '' });
-      void qc.invalidateQueries({ queryKey: ['users'] });
-    },
-  });
+  const roles = assignableRoles(user!.role);
+  const users = useQuery({ queryKey: ['users'], queryFn: () => api<UserDto[]>('/users') });
+  const pros = useProfessionals(hasTeam);
+  const [editing, setEditing] = useState<UserDto | 'new' | null>(null);
+  const memberWord = kind === 'classes' ? t('settings.linkInstructor') : t('settings.linkMember');
   return (
     <section className="card mt-6">
-      <h2 className="mb-1 font-semibold">{t('settings.logins')}</h2>
-      <p className="mb-3 text-sm text-slate-500">{hasTeam ? t('settings.loginsHelpTeam') : t('settings.loginsHelp')}</p>
-      <ul className="mb-4 divide-y divide-slate-100 text-sm">
-        {(team.data ?? []).map((u) => (
-          <li key={u.id} className="flex justify-between py-2">
-            <span>{u.name} <span className="text-slate-500">· {u.email}</span></span>
-            <span className="text-slate-500">{t(`settings.role.${u.role}`)}</span>
-          </li>
-        ))}
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">{t('settings.logins')}</h2>
+        {roles.length > 0 && <button className="btn-secondary" onClick={() => setEditing('new')}>{t('settings.addUser')}</button>}
+      </div>
+      <p className="mb-3 text-sm text-slate-500">{hasTeam ? t('settings.rolesHelpTeam') : t('settings.rolesHelp')}</p>
+      <ul className="divide-y divide-slate-100 text-sm">
+        {(users.data ?? []).map((u) => {
+          const manageable = u.id === user!.id || roles.includes(u.role);
+          return (
+            <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <span className="min-w-0">
+                <span className="font-medium text-slate-800">{u.name}</span>
+                {u.id === user!.id && <span className="text-slate-400"> ({t('settings.you')})</span>}
+                <span className="block truncate text-slate-500">{u.email}</span>
+              </span>
+              <span className="flex items-center gap-2">
+                {hasTeam && u.professionalName && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{memberWord}: {u.professionalName}</span>
+                )}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${u.role === 'staff' ? 'bg-sky-50 text-sky-700' : u.role === 'admin' ? 'bg-violet-50 text-violet-700' : 'bg-amber-50 text-amber-800'}`}>
+                  {t(`settings.role.${u.role}`)}
+                </span>
+                {manageable && (
+                  <button className="text-sm font-medium text-brand-700 hover:underline" onClick={() => setEditing(u)} aria-label={`${t('common.edit')} ${u.name}`}>
+                    {t('common.edit')}
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
       </ul>
-      {isOwner && (
-        <form className="grid gap-2 sm:grid-cols-4" onSubmit={(e) => { e.preventDefault(); add.mutate(); }}>
-          <input required placeholder={t('auth.name')} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input required type="email" placeholder={t('auth.email')} className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input required type="password" minLength={8} placeholder={t('auth.password')} className="input" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <button className="btn-secondary" disabled={add.isPending}>{t('settings.addMember')}</button>
-          <div className="sm:col-span-4"><ErrorText error={add.error} ns="auth" /></div>
-        </form>
+      <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-3">
+        {(['owner', 'admin', 'staff'] as const).map((r) => (
+          <div key={r} className="rounded-lg bg-slate-50 p-2.5">
+            <div className="font-semibold text-slate-700">{t(`settings.role.${r}`)}</div>
+            {t(`settings.roleHelp.${r}`)}
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <UserModal
+          target={editing === 'new' ? null : editing}
+          roles={roles}
+          hasTeam={hasTeam}
+          memberWord={memberWord}
+          pros={pros.data ?? []}
+          users={users.data ?? []}
+          onClose={() => setEditing(null)}
+          onDone={() => {
+            setEditing(null);
+            void qc.invalidateQueries({ queryKey: ['users'] });
+            void qc.invalidateQueries({ queryKey: ['professionals'] });
+          }}
+        />
       )}
     </section>
+  );
+}
+
+function UserModal({
+  target,
+  roles,
+  hasTeam,
+  memberWord,
+  pros,
+  users,
+  onClose,
+  onDone,
+}: {
+  target: UserDto | null;
+  roles: Role[];
+  hasTeam: boolean;
+  memberWord: string;
+  pros: { id: string; name: string; active: boolean }[];
+  users: UserDto[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const { t } = useTranslation();
+  const { user } = useAuth();
+  const self = target?.id === user!.id;
+  const [form, setForm] = useState<UserForm>({
+    name: target?.name ?? '',
+    email: target?.email ?? '',
+    password: '',
+    role: target?.role ?? 'staff',
+    professionalId: target?.professionalId ?? '',
+  });
+  const takenBy = new Map(users.filter((u) => u.professionalId && u.id !== target?.id).map((u) => [u.professionalId!, u.name]));
+  const save = useMutation({
+    mutationFn: () => {
+      const professionalId = hasTeam ? form.professionalId || null : undefined;
+      if (!target) {
+        return api('/users', { method: 'POST', body: { name: form.name, email: form.email, password: form.password, role: form.role, professionalId } });
+      }
+      return api(`/users/${target.id}`, {
+        method: 'PATCH',
+        body: {
+          name: form.name,
+          ...(self ? {} : { role: form.role }),
+          ...(form.password ? { password: form.password } : {}),
+          professionalId,
+        },
+      });
+    },
+    onSuccess: onDone,
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/users/${target!.id}`, { method: 'DELETE' }),
+    onSuccess: onDone,
+  });
+  const roleOptions = target && !roles.includes(target.role) ? [target.role, ...roles] : roles;
+  return (
+    <Modal open title={target ? t('settings.editUser') : t('settings.addUser')} onClose={onClose}>
+      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <div>
+          <label className="label" htmlFor="u-name">{t('auth.name')}</label>
+          <input id="u-name" required minLength={2} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </div>
+        {!target && (
+          <div>
+            <label className="label" htmlFor="u-email">{t('auth.email')}</label>
+            <input id="u-email" required type="email" className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </div>
+        )}
+        <div>
+          <label className="label" htmlFor="u-pass">{target ? t('settings.resetPassword') : t('auth.password')}</label>
+          <input
+            id="u-pass"
+            type="password"
+            autoComplete="new-password"
+            required={!target}
+            minLength={8}
+            className="input"
+            placeholder={target ? t('settings.resetPasswordHelp') : ''}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="u-role">{t('settings.roleLabel')}</label>
+          <select id="u-role" className="input" disabled={self} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
+            {roleOptions.map((r) => <option key={r} value={r}>{t(`settings.role.${r}`)}</option>)}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">{t(`settings.roleHelp.${form.role}`)}</p>
+        </div>
+        {hasTeam && (
+          <div>
+            <label className="label" htmlFor="u-pro">{memberWord}</label>
+            <select id="u-pro" className="input" value={form.professionalId} onChange={(e) => setForm({ ...form, professionalId: e.target.value })}>
+              <option value="">{t('settings.noLink')}</option>
+              {pros.filter((p) => p.active || p.id === form.professionalId).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{takenBy.has(p.id) ? ` (${t('settings.linkedTo', { name: takenBy.get(p.id) })})` : ''}
+                </option>
+              ))}
+            </select>
+            {form.role === 'staff' && !form.professionalId && <p className="mt-1 text-xs text-amber-700">{t('settings.staffNeedsLink')}</p>}
+          </div>
+        )}
+        <ErrorText error={save.error ?? remove.error} ns="settings" />
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+          {target && !self ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-rose-700 hover:underline"
+              disabled={remove.isPending}
+              onClick={() => window.confirm(t('settings.removeUserConfirm', { name: target.name })) && remove.mutate()}
+            >
+              {t('settings.removeUser')}
+            </button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
+            <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+          </div>
+        </div>
+      </form>
+    </Modal>
   );
 }

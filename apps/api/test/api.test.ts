@@ -585,6 +585,109 @@ d('API (integration)', () => {
     expect(Array.isArray(rep.body.bySpace)).toBe(true);
   });
 
+  it('roles: owner, admin and team members only see their own bookings', async () => {
+    const owner = (await call('POST', '/auth/register', {
+      businessName: 'Barberia Roles', businessType: 'barbershop', name: 'Dueña', email: 'roles-owner@test.mx', password: 'password123',
+    })).body as AuthResponse;
+    const tok = owner.token;
+    expect(owner.user).toMatchObject({ role: 'owner', professionalId: null });
+    const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const pA = (await call('POST', '/professionals', { name: 'Ana' }, tok)).body;
+    const pB = (await call('POST', '/professionals', { name: 'Beto' }, tok)).body;
+
+    // Owner creates an admin and a team member linked to Ana
+    const admin = await call('POST', '/users', { name: 'Recepción', email: 'roles-admin@test.mx', password: 'password123', role: 'admin' }, tok);
+    expect(admin.status).toBe(201);
+    const staff = await call('POST', '/users', { name: 'Ana', email: 'roles-ana@test.mx', password: 'password123', role: 'staff', professionalId: pA.id }, tok);
+    expect(staff.body).toMatchObject({ role: 'staff', professionalId: pA.id, professionalName: 'Ana' });
+    const adminTok = (await call('POST', '/auth/login', { email: 'roles-admin@test.mx', password: 'password123' })).body.token;
+    const anaLogin = (await call('POST', '/auth/login', { email: 'roles-ana@test.mx', password: 'password123' })).body;
+    expect(anaLogin.user).toMatchObject({ role: 'staff', professionalId: pA.id });
+    const anaTok = anaLogin.token;
+
+    // Admin can only create team members, not other admins/owners
+    expect((await call('POST', '/users', { name: 'Equis', email: 'roles-x@test.mx', password: 'password123', role: 'admin' }, adminTok)).status).toBe(403);
+    expect((await call('POST', '/users', { name: 'Beto', email: 'roles-beto@test.mx', password: 'password123', role: 'staff', professionalId: pB.id }, adminTok)).status).toBe(201);
+    // Team members can't see or manage logins, catalog or team
+    expect((await call('GET', '/users', undefined, anaTok)).status).toBe(403);
+    expect((await call('POST', '/services', { name: 'Tinte', durationMin: 60, priceCents: 1 }, anaTok)).status).toBe(403);
+    expect((await call('POST', '/professionals', { name: 'Nadie' }, anaTok)).status).toBe(403);
+    expect((await call('PATCH', '/tenant', { name: 'Hackeado' }, anaTok)).status).toBe(403);
+    // Admin runs the business but can't touch payment settings or Mercado Pago
+    expect((await call('POST', '/services', { name: 'Tinte', durationMin: 60, priceCents: 50000 }, adminTok)).status).toBe(201);
+    expect((await call('PUT', '/tenant/mercadopago', { accessToken: 'APP_USR-12345678901234567890' }, adminTok)).status).toBe(403);
+
+    // Bookings for both barbers
+    const cust1 = (await call('POST', '/customers', { name: 'Cliente Ana', phone: '5560000001' }, tok)).body;
+    const cust2 = (await call('POST', '/customers', { name: 'Cliente Beto', phone: '5560000002' }, tok)).body;
+    const at = DateTime.now().plus({ days: 3 }).set({ hour: 11, minute: 0, second: 0, millisecond: 0 });
+    const apA = (await call('POST', '/appointments', { customerId: cust1.id, serviceId: svc.id, professionalId: pA.id, startsAt: at.toISO() }, tok)).body;
+    const apB = (await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, professionalId: pB.id, startsAt: at.toISO() }, tok)).body;
+    expect(apA.professionalId).toBe(pA.id);
+    expect(apB.professionalId).toBe(pB.id);
+    const range = `from=${encodeURIComponent(at.minus({ days: 1 }).toISO()!)}&to=${encodeURIComponent(at.plus({ days: 1 }).toISO()!)}`;
+
+    expect((await call('GET', `/appointments?${range}`, undefined, tok)).body).toHaveLength(2);
+    expect((await call('GET', `/appointments?${range}`, undefined, adminTok)).body).toHaveLength(2);
+    const mine = (await call('GET', `/appointments?${range}`, undefined, anaTok)).body;
+    expect(mine.map((x: { id: string }) => x.id)).toEqual([apA.id]);
+    expect((await call('GET', `/appointments/${apB.id}`, undefined, anaTok)).status).toBe(404);
+    expect((await call('PATCH', `/appointments/${apB.id}`, { status: 'cancelled' }, anaTok)).status).toBe(404);
+    expect((await call('PATCH', `/appointments/${apA.id}`, { professionalId: pB.id }, anaTok)).status).toBe(403);
+    expect((await call('DELETE', `/appointments/${apA.id}`, undefined, anaTok)).status).toBe(403);
+    // Ana books into her own agenda only
+    expect((await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, professionalId: pB.id, startsAt: at.plus({ hours: 2 }).toISO() }, anaTok)).status).toBe(403);
+    const own = await call('POST', '/appointments', { customerId: cust2.id, serviceId: svc.id, startsAt: at.plus({ hours: 2 }).toISO() }, anaTok);
+    expect(own.status).toBe(201);
+    expect(own.body.professionalId).toBe(pA.id);
+    // Completing her own booking with a payment
+    const done = await call('PATCH', `/appointments/${apA.id}`, { status: 'completed', paymentMethod: 'cash' }, anaTok);
+    expect(done.status).toBe(200);
+    await call('PATCH', `/appointments/${apB.id}`, { status: 'completed', paymentMethod: 'card' }, tok);
+
+    // Customers: only hers (Cliente Beto appears because Ana now has a booking with them)
+    const custs = (await call('GET', '/customers', undefined, anaTok)).body;
+    expect(custs.items.map((x: { name: string }) => x.name).sort()).toEqual(['Cliente Ana', 'Cliente Beto']);
+    const beto = custs.items.find((x: { name: string }) => x.name === 'Cliente Beto');
+    expect(beto.totalSpentCents).toBe(0); // Beto's payment isn't Ana's
+    const other = (await call('POST', '/customers', { name: 'Ajeno', phone: '5560000003' }, tok)).body;
+    expect((await call('GET', `/customers/${other.id}`, undefined, anaTok)).status).toBe(404);
+    expect((await call('GET', '/customers?q=Ajeno', undefined, anaTok)).body.items).toHaveLength(0);
+    expect((await call('GET', '/customers?q=Ajeno&for=booking', undefined, anaTok)).body.items).toHaveLength(1);
+    expect((await call('DELETE', `/customers/${cust1.id}`, undefined, anaTok)).status).toBe(403);
+
+    // Payments, dashboard and reports only count her work
+    const pays = (await call('GET', '/payments', undefined, anaTok)).body;
+    expect(pays).toHaveLength(1);
+    expect(pays[0].amountCents).toBe(20000);
+    expect((await call('GET', '/payments', undefined, tok)).body).toHaveLength(2);
+    expect((await call('POST', '/payments', { customerId: cust2.id, appointmentId: apB.id, amountCents: 100, method: 'cash', status: 'paid' }, anaTok)).status).toBe(403);
+    const day = at.toISODate()!;
+    const today = DateTime.now().toISODate()!;
+    const rep = (await call('GET', `/reports?from=${today}&to=${day}&professionalId=${pB.id}`, undefined, anaTok)).body;
+    expect(rep.kpis.completed).toBe(1);
+    expect(rep.byProfessional.map((x: { name: string }) => x.name)).toEqual(['Ana']);
+    const repAll = (await call('GET', `/reports?from=${today}&to=${day}`, undefined, adminTok)).body;
+    expect(repAll.kpis.completed).toBe(2);
+
+    // Role changes apply immediately; admins can't promote; the last owner stays an owner
+    expect((await call('PATCH', `/users/${owner.user.id}`, { role: 'staff' }, tok)).body.error).toBe('own_role');
+    const anaId = staff.body.id;
+    expect((await call('PATCH', `/users/${anaId}`, { role: 'admin' }, adminTok)).status).toBe(403);
+    expect((await call('PATCH', `/users/${anaId}`, { role: 'admin' }, tok)).status).toBe(200);
+    expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(3);
+    await call('PATCH', `/users/${anaId}`, { role: 'staff' }, tok);
+    expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(2);
+    // Unlinked team member sees nothing in a team business
+    await call('PATCH', `/users/${anaId}`, { professionalId: null }, tok);
+    expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).body).toHaveLength(0);
+    // Removing the login revokes access right away
+    expect((await call('DELETE', `/users/${anaId}`, undefined, tok)).status).toBe(204);
+    expect((await call('GET', `/appointments?${range}`, undefined, anaTok)).status).toBe(401);
+    // Other businesses can't touch these users
+    expect((await call('PATCH', `/users/${anaId}`, { role: 'owner' }, b.token)).status).toBe(404);
+  });
+
   it('public directory: opt-in, location required, only public fields', async () => {
     // Not listed by default
     let dir = await call('GET', '/public-directory');

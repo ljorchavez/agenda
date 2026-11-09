@@ -376,7 +376,15 @@ async function seedBarbershop() {
     })
     .returning();
   const tenantId = tenant!.id;
-  await db.insert(users).values({ tenantId, email: 'barberia@agenda.mx', name: 'Toño Ramírez', role: 'owner', passwordHash: await hashPassword('demo1234') });
+  const pw = await hashPassword('demo1234');
+  const [owner, , memoUser] = await db
+    .insert(users)
+    .values([
+      { tenantId, email: 'barberia@agenda.mx', name: 'Toño Ramírez', role: 'owner', passwordHash: pw },
+      { tenantId, email: 'recepcion@agenda.mx', name: 'Karla (Recepción)', role: 'admin', passwordHash: pw },
+      { tenantId, email: 'memo@agenda.mx', name: 'Memo Hernández', role: 'staff', passwordHash: pw },
+    ])
+    .returning();
   const svc = await db
     .insert(services)
     .values([
@@ -389,8 +397,8 @@ async function seedBarbershop() {
   const pros = await db
     .insert(professionals)
     .values([
-      { tenantId, name: 'Toño', color: '#2563eb', serviceIds: [] },
-      { tenantId, name: 'Memo', color: '#ea580c', serviceIds: [] },
+      { tenantId, name: 'Toño', color: '#2563eb', serviceIds: [], userId: owner!.id },
+      { tenantId, name: 'Memo', color: '#ea580c', serviceIds: [], userId: memoUser!.id },
       // Luis doesn't do kids' cuts
       { tenantId, name: 'Luis', color: '#16a34a', serviceIds: [svc[0]!.id, svc[1]!.id, svc[2]!.id] },
     ])
@@ -458,7 +466,14 @@ async function seedClasses() {
     })
     .returning();
   const tenantId = tenant!.id;
-  await db.insert(users).values({ tenantId, email: 'clases@agenda.mx', name: 'Laura Méndez', role: 'owner', passwordHash: await hashPassword('demo1234') });
+  const pw = await hashPassword('demo1234');
+  const [lauraUser, diegoUser] = await db
+    .insert(users)
+    .values([
+      { tenantId, email: 'clases@agenda.mx', name: 'Laura Méndez', role: 'owner', passwordHash: pw },
+      { tenantId, email: 'diego@agenda.mx', name: 'Diego Ruiz', role: 'staff', passwordHash: pw },
+    ])
+    .returning();
   const [vinyasa, yin, pilates] = await db
     .insert(services)
     .values([
@@ -470,8 +485,8 @@ async function seedClasses() {
   const [laura, diego] = await db
     .insert(professionals)
     .values([
-      { tenantId, name: 'Laura', color: '#7c3aed', serviceIds: [] },
-      { tenantId, name: 'Diego', color: '#0f766e', serviceIds: [] },
+      { tenantId, name: 'Laura', color: '#7c3aed', serviceIds: [], userId: lauraUser!.id },
+      { tenantId, name: 'Diego', color: '#0f766e', serviceIds: [], userId: diegoUser!.id },
     ])
     .returning();
   // Weekly timetable (created session by session, like a studio would with "copy to next week")

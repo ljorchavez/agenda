@@ -237,7 +237,8 @@
     "addMember": "Add member",
     "role": {
       "owner": "Owner",
-      "staff": "Staff"
+      "admin": "Admin",
+      "staff": "Team member"
     },
     "selfService": "Customer changes",
     "selfServiceHelp": "Your customers get a private link to manage their appointment.",
@@ -247,7 +248,37 @@
     "logins": "Users with access",
     "loginsHelp": "People who can sign in to your business account.",
     "loginsHelpTeam": "People who can sign in. You can link each user to someone on your team in the Team section.",
-    "teamLinkHelp": "Add your team, their services and their calendar colour."
+    "teamLinkHelp": "Add your team, their services and their calendar colour.",
+    "roleHelp": {
+      "owner": "Full control, including payouts.",
+      "admin": "Sees and manages all bookings, customers, team and settings. Can't touch the payout account.",
+      "staff": "Sees and handles only their own bookings, customers and payments."
+    },
+    "roleLabel": "Role",
+    "account": "Your account",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "memberHelp": "You have a team member account: you see only your bookings, customers and payments. The owner or an admin manages the business.",
+    "addUser": "Add user",
+    "editUser": "Edit user",
+    "you": "you",
+    "resetPassword": "New password (optional)",
+    "resetPasswordHelp": "Leave empty to keep it",
+    "linkMember": "Agenda of",
+    "linkInstructor": "Instructor",
+    "noLink": "Not linked",
+    "linkedTo": "already linked to {{name}}",
+    "staffNeedsLink": "Link them to someone on your team so they see their agenda.",
+    "removeUser": "Remove access",
+    "removeUserConfirm": "Remove {{name}}'s access? Their bookings are kept.",
+    "rolesHelp": "People who can sign in to your business and what each one can do.",
+    "rolesHelpTeam": "People who can sign in. Link each team member to their team profile so they only see their own agenda.",
+    "wrong_password": "Current password is incorrect.",
+    "email_taken": "That email already has an account.",
+    "own_role": "You can't change your own role.",
+    "last_owner": "The business needs at least one owner.",
+    "own_user": "You can't remove yourself.",
+    "forbidden": "Your role can't manage that user."
   },
   "booking": {
     "title": "Book your appointment",
@@ -640,12 +671,25 @@
     "table_taken": "That table is already booked at that time.",
     "table_too_small": "That table is inactive or too small for the party.",
     "party_too_large": "For larger groups, contact the business.",
-    "forbidden": "Only the owner can do this.",
+    "forbidden": "Your role isn't allowed to do this.",
     "not_found": "Not found.",
     "invalid_credentials": "Wrong email or password.",
     "range_too_long": "Choose a shorter period.",
     "reschedule_not_allowed": "This booking can no longer be changed.",
     "method_disabled": "That payment method is disabled.",
-    "overlap": "There is already a booking at that time."
+    "overlap": "There is already a booking at that time.",
+    "not_yours": "That booking belongs to someone else on the team.",
+    "not_linked": "Your login isn't linked to a team profile.",
+    "last_owner": "The business needs at least one owner.",
+    "own_role": "You can't change your own role.",
+    "own_user": "You can't remove yourself.",
+    "email_taken": "That email already has an account.",
+    "wrong_password": "Current password is incorrect."
+  },
+  "roles": {
+    "notLinked": "Your login isn't linked to a team profile yet. Ask the owner or an admin to link it to see your agenda.",
+    "onlyYours": "You're seeing only your bookings.",
+    "onlyYourClasses": "You're seeing only your classes.",
+    "bookingFor": "Booked with {{name}}."
   }
 }

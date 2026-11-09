@@ -12,7 +12,8 @@ import { appointments, customers, payments, services, tenants } from '../db/sche
 import { AppError, notFound } from '../lib/errors.js';
 import { apiBaseUrl, createOnlinePayment } from '../lib/online-payments.js';
 import { toPaymentDto } from '../lib/mappers.js';
-import type { AppEnv } from '../middleware/auth.js';
+import { forbiddenScope, getScope, inScope, paymentScopeSql } from '../lib/access.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const paymentRoutes = new Hono<AppEnv>();
 
@@ -26,8 +27,11 @@ paymentRoutes.get('/payments', async (c) => {
   if (from) filters.push(gte(when, new Date(from)));
   if (to) filters.push(lt(when, new Date(to)));
   if (customerId) filters.push(eq(payments.customerId, customerId));
+  const db = getDb();
+  const scope = await getScope(db, c);
+  if (!scope.all) filters.push(sql`true ${paymentScopeSql(scope, 'payments')}`);
 
-  const rows = await getDb()
+  const rows = await db
     .select({ p: payments, customerName: customers.name })
     .from(payments)
     .innerJoin(customers, eq(customers.id, payments.customerId))
@@ -47,11 +51,15 @@ paymentRoutes.post('/payments', async (c) => {
     where: and(eq(customers.id, input.customerId), eq(customers.tenantId, tenantId)),
   });
   if (!customer) throw notFound('customer');
+  const scope = await getScope(db, c);
+  // Team members record payments only for their own bookings.
+  if (!scope.all && !input.appointmentId) throw forbiddenScope();
   if (input.appointmentId) {
     const appt = await db.query.appointments.findFirst({
       where: and(eq(appointments.id, input.appointmentId), eq(appointments.tenantId, tenantId)),
     });
     if (!appt) throw notFound('appointment');
+    if (!inScope(scope, appt)) throw forbiddenScope();
   }
 
   const [row] = await db
@@ -70,7 +78,7 @@ paymentRoutes.post('/payments', async (c) => {
   return c.json(toPaymentDto({ ...row!, customerName: customer.name }), 201);
 });
 
-paymentRoutes.patch('/payments/:id', async (c) => {
+paymentRoutes.patch('/payments/:id', requireManager, async (c) => {
   const input = z.object({ status: z.enum(PAYMENT_STATUSES) }).parse(await c.req.json());
   const [row] = await getDb()
     .update(payments)
@@ -97,6 +105,7 @@ paymentRoutes.post('/payments/link', async (c) => {
     .innerJoin(services, eq(services.id, appointments.serviceId))
     .where(and(eq(appointments.id, input.appointmentId), eq(appointments.tenantId, tenantId)));
   if (!appt) throw notFound('appointment');
+  if (!inScope(await getScope(db, c), appt.a)) throw forbiddenScope();
 
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   if (!tenant) throw notFound('tenant');

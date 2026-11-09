@@ -237,7 +237,8 @@
     "addMember": "Agregar miembro",
     "role": {
       "owner": "Dueño",
-      "staff": "Staff"
+      "admin": "Administrador",
+      "staff": "Colaborador"
     },
     "selfService": "Cambios por el cliente",
     "selfServiceHelp": "Tus clientes reciben un enlace privado para administrar su cita.",
@@ -247,7 +248,37 @@
     "logins": "Usuarios con acceso",
     "loginsHelp": "Personas que pueden entrar al sistema de tu negocio.",
     "loginsHelpTeam": "Personas que pueden entrar al sistema. Puedes vincular cada usuario con alguien de tu equipo en la sección Equipo.",
-    "teamLinkHelp": "Agrega a tu equipo, sus servicios y su color en la agenda."
+    "teamLinkHelp": "Agrega a tu equipo, sus servicios y su color en la agenda.",
+    "roleHelp": {
+      "owner": "Control total, incluidos pagos y cobros a su cuenta.",
+      "admin": "Ve y administra todas las reservas, clientes, equipo y configuración. No toca la cuenta de cobro.",
+      "staff": "Ve y atiende solo sus propias citas, clientes y pagos."
+    },
+    "roleLabel": "Rol",
+    "account": "Tu cuenta",
+    "currentPassword": "Contraseña actual",
+    "newPassword": "Nueva contraseña",
+    "memberHelp": "Tu cuenta es de colaborador: ves solo tus citas, tus clientes y tus pagos. El dueño o un administrador administra el negocio.",
+    "addUser": "Agregar usuario",
+    "editUser": "Editar usuario",
+    "you": "tú",
+    "resetPassword": "Nueva contraseña (opcional)",
+    "resetPasswordHelp": "Déjala vacía para no cambiarla",
+    "linkMember": "Agenda de",
+    "linkInstructor": "Instructor",
+    "noLink": "Sin vincular",
+    "linkedTo": "ya vinculado a {{name}}",
+    "staffNeedsLink": "Vincúlalo a alguien de tu equipo para que vea su agenda.",
+    "removeUser": "Quitar acceso",
+    "removeUserConfirm": "¿Quitar el acceso de {{name}}? Sus citas se conservan.",
+    "rolesHelp": "Personas que pueden entrar al sistema de tu negocio y lo que puede hacer cada una.",
+    "rolesHelpTeam": "Personas que pueden entrar al sistema. Vincula a cada colaborador con su perfil del equipo para que vea solo su agenda.",
+    "wrong_password": "La contraseña actual no es correcta.",
+    "email_taken": "Ese correo ya tiene una cuenta.",
+    "own_role": "No puedes cambiar tu propio rol.",
+    "last_owner": "El negocio necesita al menos un dueño.",
+    "own_user": "No puedes quitarte el acceso a ti mismo.",
+    "forbidden": "Tu rol no puede administrar a ese usuario."
   },
   "booking": {
     "title": "Agenda tu cita",
@@ -640,12 +671,25 @@
     "table_taken": "Esa mesa ya está reservada a esa hora.",
     "table_too_small": "Esa mesa está inactiva o es muy pequeña para el grupo.",
     "party_too_large": "Para grupos más grandes, contacta al negocio.",
-    "forbidden": "Solo el dueño puede hacer esto.",
+    "forbidden": "Tu rol no tiene permiso para hacer esto.",
     "not_found": "No encontrado.",
     "invalid_credentials": "Correo o contraseña incorrectos.",
     "range_too_long": "Elige un periodo más corto.",
     "reschedule_not_allowed": "Ya no se puede cambiar esta reserva.",
     "method_disabled": "Ese método de pago está desactivado.",
-    "overlap": "Ya hay una cita a esa hora."
+    "overlap": "Ya hay una cita a esa hora.",
+    "not_yours": "Esa reserva pertenece a otra persona del equipo.",
+    "not_linked": "Tu usuario no está vinculado a un perfil del equipo.",
+    "last_owner": "El negocio necesita al menos un dueño.",
+    "own_role": "No puedes cambiar tu propio rol.",
+    "own_user": "No puedes quitarte el acceso a ti mismo.",
+    "email_taken": "Ese correo ya tiene una cuenta.",
+    "wrong_password": "La contraseña actual no es correcta."
+  },
+  "roles": {
+    "notLinked": "Tu usuario aún no está vinculado a un perfil del equipo. Pide al dueño o a un administrador que lo vincule para ver tu agenda.",
+    "onlyYours": "Estás viendo solo tus citas.",
+    "onlyYourClasses": "Estás viendo solo tus clases.",
+    "bookingFor": "Se agenda con {{name}}."
   }
 }

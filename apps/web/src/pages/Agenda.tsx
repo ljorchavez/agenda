@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfWeek } from 'date-fns';
 import { computeDepositCents, eligibleProfessionals, paymentSettingsOf, rentalSettingsOf, selfServiceOf, spacePriceCents, type AppointmentDto, type CustomerDto, type PaymentDto, type TableDto } from '@agenda/shared';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
@@ -15,6 +15,7 @@ const useTables = (enabled: boolean) =>
 export function AgendaPage() {
   const { t } = useTranslation();
   const { tenant } = useAuth();
+  const { scoped, unlinked } = useAccess();
   const isRestaurant = tenant?.kind === 'reservations';
   const isRentals = tenant?.kind === 'rentals';
   const pros = useProfessionals(tenant?.kind === 'appointments');
@@ -63,7 +64,9 @@ export function AgendaPage() {
       <p className="-mt-4 mb-4 text-sm text-slate-500">
         {format(weekStart, 'd MMM', { locale: dateLocale() })} – {format(addDays(weekStart, 6), 'd MMM yyyy', { locale: dateLocale() })}
       </p>
-      {resources.length > 1 && (
+      {unlinked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('roles.notLinked')}</p>}
+      {scoped && !unlinked && <p className="mb-4 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
+      {!scoped && resources.length > 1 && (
         <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={t('agenda.filter')}>
           <button
             onClick={() => setFilter('')}
@@ -147,7 +150,9 @@ export function AgendaPage() {
 function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { tenant } = useAuth();
+  const { tenant, user } = useAuth();
+  // Colaboradores book into their own agenda; the API enforces it too.
+  const { scoped, professionalId: ownPro } = useAccess();
   const isRestaurant = tenant?.kind === 'reservations';
   const isRentals = tenant?.kind === 'rentals';
   const tables = useTables(isRestaurant);
@@ -160,7 +165,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
   const [tableId, setTableId] = useState('');
   const services = useServices();
   const [search, setSearch] = useState('');
-  const customers = useCustomers(search);
+  const customers = useCustomers(search, 'name', scoped);
   const [customerId, setCustomerId] = useState('');
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
   const [serviceId, setServiceId] = useState('');
@@ -194,7 +199,7 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
           allowOverlap,
           ...(isRestaurant ? { partySize: Number(partySize), tableId: tableId || null } : {}),
           ...(isRentals ? { spaceId: spaceId || null } : {}),
-          ...(teamPros.length ? { professionalId: professionalId || null } : {}),
+          ...(scoped ? (ownPro ? { professionalId: ownPro } : {}) : teamPros.length ? { professionalId: professionalId || null } : {}),
         },
       });
     },
@@ -297,7 +302,10 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
               <option key={s.id} value={s.id}>{s.name} · {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</option>
             ))}
           </select>
-          {teamPros.length > 0 && (
+          {scoped && ownPro && (
+            <p className="mt-2 text-sm text-slate-500">{t('roles.bookingFor', { name: teamPros.find((p) => p.id === ownPro)?.name ?? user?.name })}</p>
+          )}
+          {!scoped && teamPros.length > 0 && (
             <div className="mt-4">
               <label className="label">{t('team.professional')}</label>
               <select className="input" value={professionalId} onChange={(e) => setProfessionalId(e.target.value)}>
@@ -338,10 +346,12 @@ function NewAppointmentModal({ initial, onClose }: { initial: Date; onClose: () 
           <label className="label">{t('agenda.notes')}</label>
           <textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
+        {!scoped && (
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
           {isRestaurant ? t('tables.noTable') : isRentals ? t('spaces.noSpace') : t('agenda.allowOverlap')}
         </label>
+        )}
         <ErrorText error={create.error} ns={isRestaurant ? 'tables' : 'agenda'} />
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
@@ -356,6 +366,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { tenant } = useAuth();
+  const { manager, scoped } = useAccess();
   const pay = paymentSettingsOf(tenant!.settings);
   const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
   const offline = inPerson.length ? inPerson : (['cash', 'card', 'transfer'] as const);
@@ -465,7 +476,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <button className="btn-secondary text-rose-700" onClick={() => update.mutate({ status: 'cancelled' })}>{t('agenda.cancelAppt')}</button>
           </div>
 
-          {teamPros.length > 0 && !appt.classSessionId && (
+          {!scoped && teamPros.length > 0 && !appt.classSessionId && (
             <div className="rounded-lg border border-slate-200 p-3">
               <label className="label">{t('team.professional')}</label>
               <div className="flex flex-wrap gap-2">
@@ -591,12 +602,14 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
 
       <ErrorText error={update.error} ns={isTableBooking ? 'tables' : 'agenda'} />
       <div className="mt-6 flex justify-between">
-        <button
-          className="text-sm text-rose-700 hover:underline"
-          onClick={() => window.confirm(t('agenda.deleteConfirm')) && remove.mutate()}
-        >
-          {t('common.delete')}
-        </button>
+        {manager ? (
+          <button
+            className="text-sm text-rose-700 hover:underline"
+            onClick={() => window.confirm(t('agenda.deleteConfirm')) && remove.mutate()}
+          >
+            {t('common.delete')}
+          </button>
+        ) : <span />}
         <button className="btn-secondary" onClick={onClose}>{t('common.close')}</button>
       </div>
     </Modal>

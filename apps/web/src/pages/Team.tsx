@@ -14,7 +14,7 @@ import { useProfessionals, useServices } from '../lib/queries';
 export function TeamPage() {
   const { t } = useTranslation();
   const { user, tenant } = useAuth();
-  const isOwner = user?.role === 'owner';
+  const isOwner = user?.role === 'owner' || user?.role === 'admin';
   const isClasses = tenant?.kind === 'classes';
   const pros = useProfessionals();
   const services = useServices();

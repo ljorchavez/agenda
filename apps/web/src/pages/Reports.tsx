@@ -27,7 +27,7 @@ import {
 import type { ReportDto, ReportGranularity, ReportKpis, ServiceDto } from '@agenda/shared';
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
 import { useProfessionals, useSpaces } from '../lib/queries';
 import { dateLocale, money, percent } from '../lib/format';
 
@@ -156,6 +156,7 @@ export function ReportsPage() {
   const [customizing, setCustomizing] = useState(false);
 
   const { tenant } = useAuth();
+  const { scoped } = useAccess();
   const isRentals = tenant?.kind === 'rentals';
   const preset = (PRESETS as readonly string[]).includes(params.get('p') ?? '') ? (params.get('p') as Preset) : 'last3Months';
   const range = preset === 'custom'
@@ -179,7 +180,7 @@ export function ReportsPage() {
   const qs = new URLSearchParams({ from: range.from, to: range.to });
   if (granularity) qs.set('granularity', granularity);
   if (serviceId) qs.set('serviceId', serviceId);
-  if (who) qs.set(isRentals ? 'spaceId' : 'professionalId', who);
+  if (who && !scoped) qs.set(isRentals ? 'spaceId' : 'professionalId', who);
   if (source) qs.set('source', source);
 
   const report = useQuery({
@@ -343,7 +344,7 @@ export function ReportsPage() {
             ))}
           </select>
         </label>
-        {resources.length > 1 && (
+        {!scoped && resources.length > 1 && (
           <label className="text-sm">
             <span className="mb-1 block text-slate-600">{isRentals ? t('spaces.space') : t('team.professional')}</span>
             <select className="input" value={who} onChange={(e) => set({ who: e.target.value })}>

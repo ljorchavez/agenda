@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { isManager } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 
 type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
@@ -16,8 +17,10 @@ const NAV: NavItem[] = [
 ];
 
 /** Each kind of business names and shows its sections differently. */
-function navFor(kind: string | undefined): NavItem[] {
+function navFor(kind: string | undefined, manager: boolean): NavItem[] {
   return NAV.flatMap((n): NavItem[] => {
+    // Team members (colaboradores) work their own book; catalogue and team setup stay with managers.
+    if (!manager && (n.key === 'services' || n.key === 'team')) return [];
     if (kind === 'reservations') {
       if (n.key === 'services') return [{ ...n, to: '/tables', key: 'tables', icon: '▣' }];
       if (n.key === 'agenda') return [{ ...n, key: 'reservations' }];
@@ -60,7 +63,7 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
 export function Layout() {
   const { t } = useTranslation();
   const { tenant, user, logout } = useAuth();
-  const nav = navFor(tenant?.kind);
+  const nav = navFor(tenant?.kind, isManager(user?.role));
   const mobileNav = nav.filter((n) => !n.desktopOnly);
   const navigate = useNavigate();
 
@@ -86,7 +89,10 @@ export function Layout() {
           ))}
         </nav>
         <div className="border-t border-slate-200 pt-3">
-          <div className="mb-2 truncate px-2 text-xs text-slate-500">{user?.email}</div>
+          <div className="mb-2 px-2 text-xs text-slate-500">
+            <div className="truncate font-medium text-slate-700">{user?.name}</div>
+            <div className="truncate">{user?.email} · {t(`settings.role.${user?.role ?? 'staff'}`)}</div>
+          </div>
           <div className="flex items-center justify-between px-2">
             <button
               className="text-sm text-slate-600 hover:text-slate-900"
@@ -116,7 +122,10 @@ export function Layout() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-slate-200 bg-white md:hidden">
+      <nav
+        className="fixed inset-x-0 bottom-0 z-30 grid border-t border-slate-200 bg-white md:hidden"
+        style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}
+      >
         {mobileNav.map((n) => (
           <NavLink
             key={n.to}

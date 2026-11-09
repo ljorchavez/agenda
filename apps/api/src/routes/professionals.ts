@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import { and, asc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { professionalInputSchema } from '@agenda/shared';
 import { getDb, type Db } from '../db/client.js';
 import { appointments, professionals, services, users } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
 import { toProfessionalDto } from '../lib/mappers.js';
-import { requireOwner, type AppEnv } from '../middleware/auth.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 /**
  * Team members who attend appointments (barbers, doctors, therapists, instructors).
@@ -37,7 +37,7 @@ professionalRoutes.get('/professionals', async (c) => {
   return c.json(rows.map(toProfessionalDto));
 });
 
-professionalRoutes.post('/professionals', requireOwner, async (c) => {
+professionalRoutes.post('/professionals', requireManager, async (c) => {
   const input = professionalInputSchema.parse(await c.req.json());
   const tenantId = c.get('tenantId');
   const db = getDb();
@@ -49,6 +49,8 @@ professionalRoutes.post('/professionals', requireOwner, async (c) => {
       .from(professionals)
       .where(and(eq(professionals.tenantId, tenantId), eq(professionals.active, true)))
       .limit(1);
+    // A login belongs to one team member at most.
+    if (input.userId) await tx.update(professionals).set({ userId: null }).where(and(eq(professionals.tenantId, tenantId), eq(professionals.userId, input.userId)));
     const [created] = await tx
       .insert(professionals)
       .values({ ...input, serviceIds: [...new Set(input.serviceIds)], userId: input.userId ?? null, tenantId })
@@ -74,11 +76,18 @@ professionalRoutes.post('/professionals', requireOwner, async (c) => {
   return c.json(toProfessionalDto(row), 201);
 });
 
-professionalRoutes.put('/professionals/:id', requireOwner, async (c) => {
+professionalRoutes.put('/professionals/:id', requireManager, async (c) => {
   const input = professionalInputSchema.parse(await c.req.json());
   const tenantId = c.get('tenantId');
   const db = getDb();
   await validateRefs(db, tenantId, input.serviceIds, input.userId);
+  const id = c.req.param('id');
+  if (input.userId) {
+    await db
+      .update(professionals)
+      .set({ userId: null })
+      .where(and(eq(professionals.tenantId, tenantId), eq(professionals.userId, input.userId), ne(professionals.id, id)));
+  }
   const [row] = await db
     .update(professionals)
     .set({ ...input, serviceIds: [...new Set(input.serviceIds)], userId: input.userId ?? null })
@@ -89,7 +98,7 @@ professionalRoutes.put('/professionals/:id', requireOwner, async (c) => {
 });
 
 /** Deletes a professional; with booking history it is deactivated instead so reports keep their name. */
-professionalRoutes.delete('/professionals/:id', requireOwner, async (c) => {
+professionalRoutes.delete('/professionals/:id', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();

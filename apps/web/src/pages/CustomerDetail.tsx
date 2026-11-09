@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
@@ -45,6 +45,7 @@ export function CustomerDetailPage() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
+  const { manager, scoped } = useAccess();
 
   const { data, isLoading } = useQuery({
     queryKey: ['customer', id],
@@ -70,7 +71,7 @@ export function CustomerDetailPage() {
             {data.phone && (
               <a className="btn-secondary" href={`https://wa.me/${data.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer">WhatsApp</a>
             )}
-            <button className="btn-secondary" onClick={() => setPaying(true)}>{t('customers.addPayment')}</button>
+            {!scoped && <button className="btn-secondary" onClick={() => setPaying(true)}>{t('customers.addPayment')}</button>}
             <button className="btn-primary" onClick={() => setEditing(true)}>{t('common.edit')}</button>
           </>
         }
@@ -130,11 +131,13 @@ export function CustomerDetailPage() {
         </section>
       </div>
 
-      <div className="mt-8">
-        <button className="text-sm text-rose-700 hover:underline" onClick={() => window.confirm(t('customers.deleteConfirm')) && remove.mutate()}>
-          {t('common.delete')}
-        </button>
-      </div>
+      {manager && (
+        <div className="mt-8">
+          <button className="text-sm text-rose-700 hover:underline" onClick={() => window.confirm(t('customers.deleteConfirm')) && remove.mutate()}>
+            {t('common.delete')}
+          </button>
+        </div>
+      )}
 
       {editing && <CustomerFormModal customer={data} onClose={() => setEditing(false)} />}
       {paying && <PaymentModal customerId={id} onClose={() => setPaying(false)} />}

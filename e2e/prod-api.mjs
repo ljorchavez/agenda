@@ -431,6 +431,43 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('customer cancels court', (await call('POST', `/api/public/manage/${b.body.managePath.slice(3)}/cancel`)).status === 200);
 }
 
+// ---- Roles: owner / admin see everything, colaboradores only their own
+{
+  const login = async (email) => (await call('POST', '/api/auth/login', { email, password: 'demo1234' })).body;
+  const owner = await login('barberia@agenda.mx');
+  const admin = await login('recepcion@agenda.mx');
+  const memo = await login('memo@agenda.mx');
+  check('demo logins have roles', owner?.user.role === 'owner' && admin?.user.role === 'admin' && memo?.user.role === 'staff' && !!memo.user.professionalId,
+    JSON.stringify([owner?.user, admin?.user, memo?.user]));
+  const from = new Date(Date.now() - 30 * 864e5).toISOString();
+  const to = new Date(Date.now() + 30 * 864e5).toISOString();
+  const q = `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const all = (await call('GET', q, null, admin.token)).body ?? [];
+  const mine = (await call('GET', q, null, memo.token)).body ?? [];
+  const pros = new Set(all.map((a) => a.professionalId));
+  check('admin sees every barber', pros.size >= 2 && all.length > mine.length, `${all.length} vs ${mine.length}`);
+  check('colaborador sees only own bookings', mine.length > 0 && mine.every((a) => a.professionalId === memo.user.professionalId), String(mine.length));
+  const other = all.find((a) => a.professionalId && a.professionalId !== memo.user.professionalId);
+  check("colaborador can't open another barber's booking", (await call('GET', `/api/appointments/${other.id}`, null, memo.token)).status === 404);
+  check("colaborador can't edit another barber's booking", (await call('PATCH', `/api/appointments/${other.id}`, { notes: 'x' }, memo.token)).status === 404);
+  check("colaborador can't delete bookings", (await call('DELETE', `/api/appointments/${mine[0].id}`, null, memo.token)).status === 403);
+  const cust = (await call('GET', '/api/customers?limit=200', null, memo.token)).body;
+  const custAll = (await call('GET', '/api/customers?limit=200', null, admin.token)).body;
+  check('colaborador sees only own customers', cust.total > 0 && cust.total < custAll.total, `${cust.total} vs ${custAll.total}`);
+  check("colaborador can't list users", (await call('GET', '/api/users', null, memo.token)).status === 403);
+  const users = await call('GET', '/api/users', null, admin.token);
+  check('admin lists users with roles', users.status === 200 && users.body.some((u) => u.role === 'staff' && u.professionalName), users.text.slice(0, 200));
+  check("admin can't create an owner", (await call('POST', '/api/users', { name: 'X QA', email: `qa-${Date.now()}@agenda.mx`, password: 'qa-password-1', role: 'owner' }, admin.token)).status === 403);
+  check("admin can't connect Mercado Pago", (await call('PUT', '/api/tenant/mercadopago', { accessToken: 'x'.repeat(30) }, admin.token)).status === 403);
+  const dash = await call('GET', '/api/metrics/dashboard', null, memo.token);
+  check('colaborador dashboard works', dash.status === 200, dash.text.slice(0, 120));
+  const rep = await call('GET', `/api/reports?from=2026-01-01&to=${mxDay(0)}`, null, memo.token);
+  check('colaborador reports scoped', rep.status === 200, rep.text.slice(0, 120));
+  const diego = await login('diego@agenda.mx');
+  const ses = (await call('GET', `/api/class-sessions?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(to)}`, null, diego.token)).body ?? [];
+  check('instructor sees only own classes', ses.length > 0 && ses.every((s) => s.professionalId === diego.user.professionalId), String(ses.length));
+}
+
 // ---- Directory shows the new kinds
 {
   const d = await call('GET', '/api/public-directory');

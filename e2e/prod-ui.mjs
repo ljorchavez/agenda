@@ -291,6 +291,46 @@ async function newKinds(viewport, label) {
     await ctx.close();
   }
 
+  // Roles: colaborador sees only their agenda; admin manages users
+  {
+    const { ctx, page } = await open();
+    await backOffice(page, 'memo@agenda.mx');
+    await page.goto(`${BASE}/agenda`);
+    await page.getByText('Estás viendo solo tus citas').waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] colaborador agenda is personal`, await page.getByText('Estás viendo solo tus citas').isVisible().catch(() => false));
+    check(`[${label}] colaborador has no barber filter`, !(await page.getByRole('button', { name: 'Todos' }).count()));
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: `${out}/${label}-colaborador-agenda.png`, fullPage: true });
+    if (label === 'desktop') {
+      const navText = await page.locator('aside nav').innerText();
+      check(`[${label}] colaborador nav hides services/team`, !/Servicios|Equipo/.test(navText), navText);
+    }
+    await page.goto(`${BASE}/settings`);
+    const acct = page.getByRole('heading', { name: 'Tu cuenta' });
+    await acct.waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] colaborador settings = own account`, (await acct.isVisible().catch(() => false)) && !(await page.getByText('Usuarios con acceso').count()));
+    await page.screenshot({ path: `${out}/${label}-colaborador-settings.png`, fullPage: true });
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open();
+    await backOffice(page, 'recepcion@agenda.mx');
+    await page.goto(`${BASE}/agenda`);
+    await page.getByRole('button', { name: 'Todos' }).first().waitFor({ timeout: 15000 }).catch(() => {});
+    check(`[${label}] admin sees everyone's agenda`, await page.getByRole('button', { name: 'Todos' }).first().isVisible().catch(() => false));
+    await page.goto(`${BASE}/settings`);
+    await page.getByText('Usuarios con acceso').waitFor({ timeout: 15000 }).catch(() => {});
+    await page.getByText('Memo Hernández').first().waitFor({ timeout: 10000 }).catch(() => {});
+    check(`[${label}] admin manages users`, await page.getByText('Memo Hernández').first().isVisible().catch(() => false));
+    check(`[${label}] roles labelled`, (await page.getByText('Colaborador', { exact: true }).count()) > 0 && (await page.getByText('Administrador', { exact: true }).count()) > 0);
+    await page.getByRole('button', { name: 'Editar Memo Hernández' }).click();
+    await page.getByLabel('Rol').waitFor({ timeout: 5000 }).catch(() => {});
+    const opts = await page.getByLabel('Rol').locator('option').allInnerTexts();
+    check(`[${label}] admin can only assign colaborador`, opts.length === 1 && opts[0] === 'Colaborador', opts.join(','));
+    await page.screenshot({ path: `${out}/${label}-admin-users.png`, fullPage: true });
+    await ctx.close();
+  }
+
   // Yoga studio: book a spot in class
   {
     const { ctx, page } = await open();

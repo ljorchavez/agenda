@@ -13,7 +13,7 @@ export function SpacesPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { user } = useAuth();
-  const isOwner = user?.role === 'owner';
+  const isOwner = user?.role === 'owner' || user?.role === 'admin';
   const spaces = useSpaces();
   const [form, setForm] = useState({ name: '', price: '', description: '' });
   const [editing, setEditing] = useState<{ id: string; name: string; price: string; description: string } | null>(null);

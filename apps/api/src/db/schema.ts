@@ -106,7 +106,10 @@ export const professionals = pgTable(
     userId: uuid('user_id'),
     ...timestamps,
   },
-  (t) => [index('professionals_tenant_idx').on(t.tenantId)],
+  (t) => [
+    index('professionals_tenant_idx').on(t.tenantId),
+    uniqueIndex('professionals_user_uq').on(t.tenantId, t.userId).where(sql`user_id is not null`),
+  ],
 );
 
 /** Spaces rented by the hour (courts, meeting rooms, studios). */

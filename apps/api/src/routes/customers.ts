@@ -9,7 +9,8 @@ import { getDb } from '../db/client.js';
 import { customers } from '../db/schema.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { toCustomerDto } from '../lib/mappers.js';
-import type { AppEnv } from '../middleware/auth.js';
+import { getScope, paymentScopeSql, scopeSql, type Scope } from '../lib/access.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const customerRoutes = new Hono<AppEnv>();
 
@@ -65,9 +66,17 @@ function toStats(r: StatsRow): CustomerWithStats {
   };
 }
 
-/** Customers with visit/spend stats. Every subquery is scoped by tenant_id. */
-function statsQuery(tenantId: string, opts: { customerId?: string; q?: string }) {
+/**
+ * Customers with visit/spend stats. Every subquery is scoped by tenant_id; for team members
+ * the stats only count their own bookings, and (unless `anyCustomer`) only their customers are listed.
+ */
+function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; scope?: Scope; anyCustomer?: boolean }) {
+  const scope: Scope = opts.scope ?? { all: true };
+  const sc = scopeSql(scope, 'a');
   const filters = [sql`c.tenant_id = ${tenantId}`];
+  if (!scope.all && !opts.anyCustomer) {
+    filters.push(sql`exists (select 1 from appointments a where a.customer_id = c.id and a.tenant_id = c.tenant_id ${sc})`);
+  }
   if (opts.customerId) filters.push(sql`c.id = ${opts.customerId}`);
   if (opts.q) {
     const like = `%${opts.q}%`;
@@ -86,16 +95,16 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string })
              max(a.starts_at) filter (where a.status = 'completed') as last_visit,
              min(a.starts_at) filter (where a.status = 'completed') as first_visit,
              count(*) filter (where a.status = 'no_show') as no_shows
-      from appointments a where a.customer_id = c.id and a.tenant_id = c.tenant_id
+      from appointments a where a.customer_id = c.id and a.tenant_id = c.tenant_id ${sc}
     ) v on true
     left join lateral (
       select sum(pay.amount_cents) as total from payments pay
-      where pay.customer_id = c.id and pay.tenant_id = c.tenant_id and pay.status = 'paid'
+      where pay.customer_id = c.id and pay.tenant_id = c.tenant_id and pay.status = 'paid' ${paymentScopeSql(scope, 'pay')}
     ) p on true
     left join lateral (
       select min(a.starts_at) as next_at from appointments a
       where a.customer_id = c.id and a.tenant_id = c.tenant_id
-        and a.starts_at > now() and a.status in ('scheduled', 'confirmed')
+        and a.starts_at > now() and a.status in ('scheduled', 'confirmed') ${sc}
     ) n on true
     where ${sql.join(filters, sql` and `)}`;
 }
@@ -107,9 +116,13 @@ customerRoutes.get('/customers', async (c) => {
   const sort = SORTS[sortKey] ?? SORTS.name;
   const limit = Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset')) || 0, 0);
+  const db = getDb();
+  const scope = await getScope(db, c);
+  // The booking form may look up any customer by name/phone so a team member can book them.
+  const anyCustomer = c.req.query('for') === 'booking' && Boolean(q);
 
-  const res = await getDb().execute<StatsRow>(
-    sql`${statsQuery(tenantId, { q })} order by ${sort} limit ${limit} offset ${offset}`,
+  const res = await db.execute<StatsRow>(
+    sql`${statsQuery(tenantId, { q, scope, anyCustomer })} order by ${sort} limit ${limit} offset ${offset}`,
   );
   return c.json({
     items: res.rows.map(toStats),
@@ -121,7 +134,8 @@ customerRoutes.get('/customers/:id', async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();
-  const res = await db.execute<StatsRow>(statsQuery(tenantId, { customerId: id }));
+  const scope = await getScope(db, c);
+  const res = await db.execute<StatsRow>(statsQuery(tenantId, { customerId: id, scope }));
   const row = res.rows[0];
   if (!row) throw notFound('customer');
 
@@ -132,12 +146,12 @@ customerRoutes.get('/customers/:id', async (c) => {
                      where p.appointment_id = a.id and p.tenant_id = a.tenant_id
                        and p.status = 'paid'), 0) as paid_cents
     from appointments a join services s on s.id = a.service_id
-    where a.tenant_id = ${tenantId} and a.customer_id = ${id}
+    where a.tenant_id = ${tenantId} and a.customer_id = ${id} ${scopeSql(scope, 'a')}
     order by a.starts_at desc limit 100`);
 
   const payments = await db.execute(sql`
-    select id, amount_cents, method, status, paid_at, created_at, appointment_id, notes
-    from payments where tenant_id = ${tenantId} and customer_id = ${id}
+    select p.id, p.amount_cents, p.method, p.status, p.paid_at, p.created_at, p.appointment_id, p.notes
+    from payments p where p.tenant_id = ${tenantId} and p.customer_id = ${id} ${paymentScopeSql(scope, 'p')}
     order by coalesce(paid_at, created_at) desc limit 100`);
 
   return c.json({
@@ -196,6 +210,12 @@ customerRoutes.post('/customers', async (c) => {
 
 customerRoutes.put('/customers/:id', async (c) => {
   const input = customerInputSchema.parse(await c.req.json());
+  const db = getDb();
+  const scope = await getScope(db, c);
+  if (!scope.all) {
+    const visible = await db.execute(statsQuery(c.get('tenantId'), { customerId: c.req.param('id'), scope }));
+    if (!visible.rows.length) throw notFound('customer');
+  }
   try {
     const [row] = await getDb()
       .update(customers)
@@ -210,7 +230,7 @@ customerRoutes.put('/customers/:id', async (c) => {
   }
 });
 
-customerRoutes.delete('/customers/:id', async (c) => {
+customerRoutes.delete('/customers/:id', requireManager, async (c) => {
   const [row] = await getDb()
     .delete(customers)
     .where(and(eq(customers.id, c.req.param('id')), eq(customers.tenantId, c.get('tenantId'))))

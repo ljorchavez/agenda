@@ -6,17 +6,18 @@ import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { money, toCents } from '../lib/format';
 import { useServices } from '../lib/queries';
-import { useAuth } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
 
 export function ServicesPage() {
   const { t } = useTranslation();
   const { tenant } = useAuth();
+  const { manager } = useAccess();
   const { data, isLoading } = useServices();
   const [editing, setEditing] = useState<ServiceDto | 'new' | null>(null);
 
   return (
     <>
-      <PageHeader title={tenant?.kind === 'classes' ? t('nav.classTypes') : t('services.title')} actions={<button className="btn-primary" onClick={() => setEditing('new')}>{t('services.new')}</button>} />
+      <PageHeader title={tenant?.kind === 'classes' ? t('nav.classTypes') : t('services.title')} actions={manager && <button className="btn-primary" onClick={() => setEditing('new')}>{t('services.new')}</button>} />
       {isLoading ? (
         <Loading />
       ) : !data?.length ? (
@@ -24,7 +25,7 @@ export function ServicesPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((s) => (
-            <button key={s.id} onClick={() => setEditing(s)} className={`card text-left hover:border-brand-500 ${s.active ? '' : 'opacity-60'}`}>
+            <button key={s.id} disabled={!manager} onClick={() => setEditing(s)} className={`card text-left ${manager ? 'hover:border-brand-500' : ''} ${s.active ? '' : 'opacity-60'}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="font-semibold">{s.name}</div>
                 {!s.active && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{t('services.inactive')}</span>}

@@ -14,6 +14,7 @@ import {
 import { getDb, type Db } from '../db/client.js';
 import { tenants } from '../db/schema.js';
 import { AppError, notFound } from '../lib/errors.js';
+import { getScope } from '../lib/access.js';
 import type { AppEnv } from '../middleware/auth.js';
 
 /**
@@ -165,6 +166,13 @@ reportRoutes.get('/reports', async (c) => {
   const tenantId = c.get('tenantId');
   const q = reportQuerySchema.parse(c.req.query());
   const db = getDb();
+  // Team members only get their own numbers, whatever filter they send.
+  const scope = await getScope(db, c);
+  if (!scope.all) {
+    q.staffUserId = scope.professionalId ? undefined : scope.userId;
+    q.professionalId = scope.professionalId ?? undefined;
+    q.spaceId = undefined;
+  }
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   if (!tenant) throw notFound('tenant');
   const tz = tenant.timezone;

@@ -4,7 +4,7 @@ import { tableInputSchema, type TableDto } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { diningTables, type DiningTable } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
-import { requireOwner, type AppEnv } from '../middleware/auth.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 /** Restaurant tables, scoped by tenant. Only owners can change them. */
 export const tableRoutes = new Hono<AppEnv>();
@@ -21,7 +21,7 @@ tableRoutes.get('/tables', async (c) => {
   return c.json(rows.map(toDto));
 });
 
-tableRoutes.post('/tables', requireOwner, async (c) => {
+tableRoutes.post('/tables', requireManager, async (c) => {
   const input = tableInputSchema.parse(await c.req.json());
   const [row] = await getDb()
     .insert(diningTables)
@@ -30,7 +30,7 @@ tableRoutes.post('/tables', requireOwner, async (c) => {
   return c.json(toDto(row!), 201);
 });
 
-tableRoutes.put('/tables/:id', requireOwner, async (c) => {
+tableRoutes.put('/tables/:id', requireManager, async (c) => {
   const input = tableInputSchema.parse(await c.req.json());
   const [row] = await getDb()
     .update(diningTables)
@@ -42,7 +42,7 @@ tableRoutes.put('/tables/:id', requireOwner, async (c) => {
 });
 
 /** Tables with upcoming reservations are deactivated instead of deleted. */
-tableRoutes.delete('/tables/:id', requireOwner, async (c) => {
+tableRoutes.delete('/tables/:id', requireManager, async (c) => {
   const db = getDb();
   const id = c.req.param('id');
   const tenantId = c.get('tenantId');

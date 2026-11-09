@@ -11,7 +11,7 @@ export function TablesPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { user } = useAuth();
-  const isOwner = user?.role === 'owner';
+  const isOwner = user?.role === 'owner' || user?.role === 'admin';
   const tables = useQuery({ queryKey: ['tables'], queryFn: () => api<TableDto[]>('/tables') });
   const [form, setForm] = useState({ name: '', seats: '4', area: '' });
   const [info, setInfo] = useState('');

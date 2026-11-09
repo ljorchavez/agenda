@@ -7,7 +7,8 @@ import { appointments, classSessions, professionals, services, tenants } from '.
 import { queryAppointments } from '../lib/appointments.js';
 import { instructorBusy, lockSession, querySessions } from '../lib/classes.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import type { AppEnv } from '../middleware/auth.js';
+import { getScope } from '../lib/access.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 /**
  * Group classes, created session by session (with "copy to next week").
@@ -38,18 +39,24 @@ async function one(db: Db, tenantId: string, id: string) {
 
 classRoutes.get('/class-sessions', async (c) => {
   const { from, to } = appointmentListQuerySchema.parse(c.req.query());
-  return c.json(await querySessions(getDb(), c.get('tenantId'), sql`cs.starts_at >= ${from} and cs.starts_at < ${to}`));
+  const db = getDb();
+  const scope = await getScope(db, c);
+  // Instructors see the classes they teach.
+  const mine = scope.all ? sql`` : scope.professionalId ? sql`and cs.professional_id = ${scope.professionalId}` : sql`and false`;
+  return c.json(await querySessions(db, c.get('tenantId'), sql`cs.starts_at >= ${from} and cs.starts_at < ${to} ${mine}`));
 });
 
 classRoutes.get('/class-sessions/:id', async (c) => {
   const db = getDb();
   const tenantId = c.get('tenantId');
   const session = await one(db, tenantId, c.req.param('id'));
+  const scope = await getScope(db, c);
+  if (!scope.all && session.professionalId !== scope.professionalId) throw notFound('class_session');
   const attendees = await queryAppointments(db, tenantId, sql`a.class_session_id = ${session.id}`, sql`order by c.name asc limit 1000`);
   return c.json({ session, attendees });
 });
 
-classRoutes.post('/class-sessions', async (c) => {
+classRoutes.post('/class-sessions', requireManager, async (c) => {
   const input = classSessionInputSchema.parse(await c.req.json());
   const tenantId = c.get('tenantId');
   const db = getDb();
@@ -78,7 +85,7 @@ classRoutes.post('/class-sessions', async (c) => {
   return c.json(await one(db, tenantId, id), 201);
 });
 
-classRoutes.patch('/class-sessions/:id', async (c) => {
+classRoutes.patch('/class-sessions/:id', requireManager, async (c) => {
   const input = classSessionUpdateSchema.parse(await c.req.json());
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
@@ -117,7 +124,7 @@ classRoutes.patch('/class-sessions/:id', async (c) => {
 });
 
 /** Cancels the class and every active booking in it. */
-classRoutes.post('/class-sessions/:id/cancel', async (c) => {
+classRoutes.post('/class-sessions/:id/cancel', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();
@@ -135,7 +142,7 @@ classRoutes.post('/class-sessions/:id/cancel', async (c) => {
 });
 
 /** Copies a class N days later (default: next week), without attendees. */
-classRoutes.post('/class-sessions/:id/copy', async (c) => {
+classRoutes.post('/class-sessions/:id/copy', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const db = getDb();
   const body = (await c.req.json().catch(() => ({}))) as { days?: unknown };
@@ -164,7 +171,7 @@ classRoutes.post('/class-sessions/:id/copy', async (c) => {
 });
 
 /** Only empty classes can be deleted; otherwise cancel them so history is kept. */
-classRoutes.delete('/class-sessions/:id', async (c) => {
+classRoutes.delete('/class-sessions/:id', requireManager, async (c) => {
   const tenantId = c.get('tenantId');
   const id = c.req.param('id');
   const db = getDb();

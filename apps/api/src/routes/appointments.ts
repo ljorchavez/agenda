@@ -17,7 +17,8 @@ import { assertRoom, lockSession } from '../lib/classes.js';
 import { activeProfessionals, assignProfessional, assignSpace, internalService, RENTAL_SERVICE_NAME } from '../lib/resources.js';
 import { assignTable } from '../lib/tables.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import type { AppEnv } from '../middleware/auth.js';
+import { forbiddenScope, getScope, inScope, scopeSql } from '../lib/access.js';
+import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const appointmentRoutes = new Hono<AppEnv>();
 
@@ -52,19 +53,23 @@ const lockTenant = (tx: Pick<Db, 'execute'>, tenantId: string) =>
 
 appointmentRoutes.get('/appointments', async (c) => {
   const { from, to } = appointmentListQuerySchema.parse(c.req.query());
+  const db = getDb();
+  const scope = await getScope(db, c);
   const rows = await queryAppointments(
-    getDb(),
+    db,
     c.get('tenantId'),
-    sql`a.starts_at >= ${from} and a.starts_at < ${to}`,
+    sql`a.starts_at >= ${from} and a.starts_at < ${to} ${scopeSql(scope)}`,
   );
   return c.json(rows);
 });
 
 appointmentRoutes.get('/appointments/:id', async (c) => {
+  const db = getDb();
+  const scope = await getScope(db, c);
   const [row] = await queryAppointments(
-    getDb(),
+    db,
     c.get('tenantId'),
-    sql`a.id = ${c.req.param('id')}`,
+    sql`a.id = ${c.req.param('id')} ${scopeSql(scope)}`,
   );
   if (!row) throw notFound('appointment');
   return c.json(row);
@@ -82,6 +87,16 @@ appointmentRoutes.post('/appointments', async (c) => {
   if (!customer) throw notFound('customer');
   await assertStaffInTenant(db, tenantId, input.staffUserId);
   await assertProfessionalInTenant(db, tenantId, input.professionalId);
+
+  // Team members book only into their own agenda.
+  const scope = await getScope(db, c);
+  if (!scope.all) {
+    if (input.professionalId && input.professionalId !== scope.professionalId) throw forbiddenScope();
+    if (input.staffUserId && input.staffUserId !== scope.userId) throw forbiddenScope();
+    input.allowOverlap = false;
+    if (scope.professionalId) input.professionalId = scope.professionalId;
+    else input.staffUserId = scope.userId;
+  }
 
   let service: Service | undefined;
   if (input.serviceId) {
@@ -106,6 +121,7 @@ appointmentRoutes.post('/appointments', async (c) => {
     // Classes: add the customer to a session if there's room.
     if (input.classSessionId) {
       const { session, booked } = await lockSession(tx, tenantId, input.classSessionId);
+      if (!scope.all && session.professionalId !== scope.professionalId) throw forbiddenScope();
       if (session.status !== 'scheduled') throw new AppError(422, 'class_cancelled', 'The class was cancelled');
       const spots = input.partySize ?? 1;
       if (!input.allowOverlap) assertRoom(session.capacity, booked, spots);
@@ -170,6 +186,7 @@ appointmentRoutes.post('/appointments', async (c) => {
     // Services: per-professional agendas when the business has a team, single agenda otherwise.
     let professionalId: string | null = input.professionalId ?? null;
     if ((await activeProfessionals(tx, tenantId)).length) {
+      if (!scope.all && !scope.professionalId) throw new AppError(403, 'not_linked', 'Your login is not linked to a team member');
       if (!input.allowOverlap) {
         professionalId = (await assignProfessional(tx, tenantId, svc.id, startsAt, endsAt, { professionalId: input.professionalId })).id;
       }
@@ -200,6 +217,14 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
     where: and(eq(appointments.id, id), eq(appointments.tenantId, tenantId)),
   });
   if (!current) throw notFound('appointment');
+  const scope = await getScope(db, c);
+  if (!scope.all) {
+    if (!inScope(scope, current)) throw notFound('appointment');
+    // Team members can't hand a booking to someone else.
+    if (input.professionalId !== undefined && input.professionalId !== current.professionalId) throw forbiddenScope();
+    if (input.staffUserId !== undefined && input.staffUserId !== current.staffUserId) throw forbiddenScope();
+    if (input.allowOverlap) input.allowOverlap = false;
+  }
   const { kind } = await tenantKind(db, tenantId);
   const isClass = Boolean(current.classSessionId);
 
@@ -321,7 +346,7 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
   return c.json(dto);
 });
 
-appointmentRoutes.delete('/appointments/:id', async (c) => {
+appointmentRoutes.delete('/appointments/:id', requireManager, async (c) => {
   const [row] = await getDb()
     .delete(appointments)
     .where(
