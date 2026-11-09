@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
+import { seedDemo } from './db/demo-data.js';
 import { sendDueReminders } from './jobs/reminders.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, type AppEnv } from './middleware/auth.js';
@@ -31,13 +32,21 @@ export function createApp() {
 
   app.get('/health', (c) => c.json({ ok: true }));
 
-  // Scheduled job endpoint (Vercel Cron sends `Authorization: Bearer $CRON_SECRET`).
-  app.get('/cron/reminders', async (c) => {
+  // Scheduled job endpoints (Vercel Cron sends `Authorization: Bearer $CRON_SECRET`).
+  const isCron = (auth: string | undefined) => {
     const secret = process.env.CRON_SECRET;
-    if (!secret || c.req.header('authorization') !== `Bearer ${secret}`) {
-      return c.json({ error: 'unauthorized' }, 401);
-    }
+    return !!secret && auth === `Bearer ${secret}`;
+  };
+  app.get('/cron/reminders', async (c) => {
+    if (!isCron(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
     return c.json(await sendDueReminders());
+  });
+  // Nightly reset of the demo businesses so the demo always has upcoming appointments.
+  app.get('/cron/reset-demo', async (c) => {
+    if (!isCron(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
+    const started = Date.now();
+    await seedDemo();
+    return c.json({ ok: true, ms: Date.now() - started });
   });
 
   // Public (no auth)

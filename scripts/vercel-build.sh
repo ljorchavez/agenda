@@ -26,7 +26,7 @@ cat > "$OUT/functions/api.func/.vc-config.json" <<'JSON'
   "handler": "index.mjs",
   "launcherType": "Nodejs",
   "shouldAddHelpers": false,
-  "maxDuration": 30
+  "maxDuration": 300
 }
 JSON
 
@@ -38,7 +38,10 @@ cat > "$OUT/config.json" <<'JSON'
     { "handle": "filesystem" },
     { "src": "^/(.*)$", "dest": "/index.html" }
   ],
-  "crons": [{ "path": "/api/cron/reminders", "schedule": "0 16 * * *" }]
+  "crons": [
+    { "path": "/api/cron/reminders", "schedule": "0 16 * * *" },
+    { "path": "/api/cron/reset-demo", "schedule": "0 9 * * *" }
+  ]
 }
 JSON
 

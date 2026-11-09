@@ -1,5 +1,5 @@
 /**
- * Demo data: `pnpm db:seed`
+ * Demo data. Run with `pnpm db:seed`, and reset every night by the `/api/cron/reset-demo` job.
  * One owner login (demo@agenda.mx / demo1234) for every demo business, switchable in the app:
  * nutrition clinic, restaurant, barbershop with two locations, yoga studio and padel club.
  * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
@@ -9,7 +9,7 @@ import { and, eq, inArray, like } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
-import { closeDb, getDb } from './client.js';
+import { getDb } from './client.js';
 import { appointments, classSessions, customers, locations, memberships, payments, resources, services, tenants, users } from './schema.js';
 
 const TZ = 'America/Mexico_City';
@@ -53,7 +53,9 @@ let seed = 42;
 const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rand() * arr.length)]!;
 
-async function main() {
+/** Deletes and recreates every demo business. Real businesses are never touched. */
+export async function seedDemo() {
+  seed = 42; // same demo every run, even in a warm serverless instance
   const db = getDb();
   const existing = await db.query.tenants.findFirst({ where: eq(tenants.slug, 'nutricion-demo') });
   if (existing) {
@@ -731,10 +733,3 @@ async function seedDirectory() {
   }
   console.log(`Seeded ${DIRECTORY_DEMOS.length} demo directory listings`);
 }
-
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => closeDb());

@@ -3,7 +3,7 @@
 Este archivo junta las decisiones de negocio y los pendientes para que no se pierdan.
 Detalle técnico de planes: [`billing.md`](billing.md).
 
-Flujo de trabajo: todo directo a `master`, sin pull requests (por ahora).
+Flujo de trabajo: todo directo a `main`, sin pull requests (por ahora).
 
 ---
 
@@ -100,11 +100,12 @@ Necesario:
 ## 5. Cuentas de prueba
 - Dueño demo: `demo@agenda.mx` / `demo1234`
 - Gerente (solo sucursal Guadalajara de la barbería): `gerente@agenda.mx` / `demo1234`
-- Los datos demo se reinician con cada despliegue a producción.
+- Los datos demo se reinician solos cada madrugada (3:00 a. m. hora de CDMX) con el cron
+  `/api/cron/reset-demo`; también a mano con `pnpm db:seed`. Solo toca los negocios demo.
 
 ---
 
 ## 6. Otros pendientes
 - Dominio propio.
 - Definir Premium.
-- Conectar GitHub ↔ Vercel para que cada push a `master` se publique solo.
+- ~~Conectar GitHub ↔ Vercel~~ (hecho: cada push a `main` se publica solo).
