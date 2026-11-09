@@ -21,6 +21,7 @@ import {
   PAYMENT_STATUSES,
   ROLES,
   type BusinessHours,
+  type PlanId,
   type TenantSettings,
 } from '@agenda/shared';
 
@@ -66,6 +67,8 @@ export const tenants = pgTable(
     lng: doublePrecision('lng'),
     /** Opt-in: show this business in the public directory/map */
     directoryListed: boolean('directory_listed').notNull().default(false),
+    /** Subscription plan of this business (limits in packages/shared PLAN_LIMITS) */
+    plan: text('plan').$type<PlanId>().notNull().default('free'),
     ...timestamps,
   },
   (t) => [

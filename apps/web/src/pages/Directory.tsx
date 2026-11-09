@@ -2,12 +2,26 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import type { DirectoryDto, DirectoryEntryDto } from '@agenda/shared';
+import { BUSINESS_CATEGORIES, businessCategory, CATEGORY_TYPES, type BusinessCategory, type BusinessType, type DirectoryDto, type DirectoryEntryDto } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
-import { distanceKm, MapView, TYPE_COLORS, type MapMarker } from '../components/MapView';
+import { distanceKm, MapView, type MapMarker } from '../components/MapView';
+import { LoginModal } from './Auth';
+import { useAuth } from '../lib/auth';
 import { Loading } from '../components/ui';
 import { api } from '../lib/api';
 import { money } from '../lib/format';
+
+/** One icon and colour per category: easier to scan than 20 specific types. */
+export const CATEGORY_STYLE: Record<BusinessCategory, { icon: string; color: string }> = {
+  health: { icon: '🩺', color: '#2563eb' },
+  beauty: { icon: '💈', color: '#db2777' },
+  food: { icon: '🍽️', color: '#ea580c' },
+  classes: { icon: '🧘', color: '#7c3aed' },
+  spaces: { icon: '🎾', color: '#16a34a' },
+  pets: { icon: '🐾', color: '#a16207' },
+  other: { icon: '✨', color: '#475569' },
+};
+const styleOf = (t: BusinessType) => CATEGORY_STYLE[businessCategory(t)];
 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -18,7 +32,9 @@ const bookHref = (e: { slug: string; locationId: string; locationName: string | 
 
 export function DirectoryPage() {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [params, setParams] = useSearchParams();
+  const loginOpen = params.get('login') === '1' && !user;
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<'list' | 'map'>('list');
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
@@ -26,6 +42,7 @@ export function DirectoryPage() {
   const [locError, setLocError] = useState(false);
 
   const type = params.get('tipo') ?? '';
+  const cat = (params.get('categoria') ?? '') as BusinessCategory | '';
   const state = params.get('estado') ?? '';
   const city = params.get('ciudad') ?? '';
   const q = params.get('q') ?? '';
@@ -48,19 +65,26 @@ export function DirectoryPage() {
     !q || norm(`${e.name} ${e.description ?? ''} ${e.neighborhood ?? ''} ${e.city ?? ''} ${t(`businessTypes.${e.businessType}`)}`).includes(norm(q));
 
   const results = useMemo(() => {
-    const list = all.filter((e) => (!type || e.businessType === type) && inZone(e) && matchesText(e) && (!onlineOnly || e.onlineBooking));
+    const list = all.filter((e) => (!cat || businessCategory(e.businessType) === cat) && (!type || e.businessType === type) && inZone(e) && matchesText(e) && (!onlineOnly || e.onlineBooking));
     if (me) list.sort((a, b) => distanceKm(me, a) - distanceKm(me, b));
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, type, state, city, q, onlineOnly, me]);
+  }, [all, cat, type, state, city, q, onlineOnly, me]);
 
-  // Specialty chips: only types present in the current zone/search, with counts
-  const typeCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of all) if (inZone(e) && matchesText(e)) m.set(e.businessType, (m.get(e.businessType) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  // Category tiles (with counts in the current zone/search), then the specific types of the chosen one
+  const counts = useMemo(() => {
+    const byCat = new Map<BusinessCategory, number>();
+    const byType = new Map<string, number>();
+    for (const e of all) {
+      if (!inZone(e) || !matchesText(e)) continue;
+      const c = businessCategory(e.businessType);
+      byCat.set(c, (byCat.get(c) ?? 0) + 1);
+      byType.set(e.businessType, (byType.get(e.businessType) ?? 0) + 1);
+    }
+    return { byCat, byType };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, state, city, q]);
+  const subTypes = cat ? CATEGORY_TYPES[cat].filter((x) => counts.byType.get(x)) : [];
 
   const cities = dir.data?.zones.find((z) => z.state === state)?.cities ?? [];
 
@@ -70,7 +94,7 @@ export function DirectoryPage() {
         id: e.locationId,
         lat: e.lat,
         lng: e.lng,
-        color: TYPE_COLORS[e.businessType] ?? TYPE_COLORS.other!,
+        color: styleOf(e.businessType).color,
         title: e.locationName ? `${e.name} · ${e.locationName}` : e.name,
         popup: {
           heading: e.locationName ? `${e.name} · ${e.locationName}` : e.name,
@@ -98,16 +122,23 @@ export function DirectoryPage() {
     );
   };
 
-  const fitKey = `${type}|${state}|${city}|${q}|${onlineOnly}|${results.length}`;
+  const fitKey = `${cat}|${type}|${state}|${city}|${q}|${onlineOnly}|${results.length}`;
 
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
-          <Link to="/directorio" className="font-bold text-brand-700">Agenda <span className="font-normal text-slate-500">· {t('directory.title')}</span></Link>
+          <Link to="/" className="font-bold text-brand-700">Agenda</Link>
           <div className="flex items-center gap-2">
-            <Link to="/register" className="hidden text-sm font-medium text-brand-700 sm:inline">{t('directory.forBusinesses')}</Link>
             <LanguageSwitch />
+            {user ? (
+              <Link to="/inicio" className="btn-primary !py-1.5 text-sm">{t('directory.myBusiness')}</Link>
+            ) : (
+              <>
+                <Link to="/registro" className="hidden text-sm font-medium text-brand-700 sm:inline">{t('directory.forBusinesses')}</Link>
+                <button type="button" className="btn-primary !py-1.5 text-sm" onClick={() => set({ login: '1' })}>{t('auth.login')}</button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -141,24 +172,44 @@ export function DirectoryPage() {
           </div>
           {locError && <p className="text-sm text-amber-700">{t('directory.locationDenied')}</p>}
 
-          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:overflow-visible sm:px-0 lg:grid-cols-8" role="group" aria-label={t('directory.categories')}>
             <button
-              onClick={() => set({ tipo: null })}
-              className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-sm ${!type ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+              onClick={() => set({ categoria: null, tipo: null })}
+              aria-pressed={!cat}
+              className={`flex min-w-[6.5rem] flex-col items-center gap-1 rounded-xl border px-3 py-2 text-sm font-medium ${!cat ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}`}
             >
+              <span className="text-xl leading-none" aria-hidden>🔎</span>
               {t('directory.allTypes')}
             </button>
-            {typeCounts.map(([bt, n]) => (
+            {BUSINESS_CATEGORIES.filter((c) => counts.byCat.get(c)).map((c) => (
               <button
-                key={bt}
-                onClick={() => set({ tipo: type === bt ? null : bt })}
-                className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm ${type === bt ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+                key={c}
+                data-testid={`category-${c}`}
+                onClick={() => set({ categoria: cat === c ? null : c, tipo: null })}
+                aria-pressed={cat === c}
+                className={`flex min-w-[6.5rem] flex-col items-center gap-1 rounded-xl border px-3 py-2 text-sm font-medium ${cat === c ? 'text-white' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-400'}`}
+                style={cat === c ? { background: CATEGORY_STYLE[c].color, borderColor: CATEGORY_STYLE[c].color } : undefined}
               >
-                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: TYPE_COLORS[bt] ?? TYPE_COLORS.other }} />
-                {t(`businessTypes.${bt}`)} <span className="opacity-60">{n}</span>
+                <span className="text-xl leading-none" aria-hidden>{CATEGORY_STYLE[c].icon}</span>
+                <span className="whitespace-nowrap">{t(`categories.${c}`)}</span>
+                <span className={`text-xs ${cat === c ? 'text-white/80' : 'text-slate-500'}`}>{counts.byCat.get(c)}</span>
               </button>
             ))}
           </div>
+          {subTypes.length > 1 && (
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1" role="group" aria-label={t('directory.specialty')}>
+              {subTypes.map((bt) => (
+                <button
+                  key={bt}
+                  onClick={() => set({ tipo: type === bt ? null : bt })}
+                  aria-pressed={type === bt}
+                  className={`whitespace-nowrap rounded-full border px-3 py-1 text-sm ${type === bt ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+                >
+                  {t(`businessTypes.${bt}`)} <span className="opacity-60">{counts.byType.get(bt)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input type="checkbox" checked={onlineOnly} onChange={(e) => set({ reserva: e.target.checked ? '1' : null })} />
             {t('directory.onlineOnly')}
@@ -194,10 +245,13 @@ export function DirectoryPage() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: TYPE_COLORS[e.businessType] ?? TYPE_COLORS.other }} />
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+                              style={{ background: `${styleOf(e.businessType).color}1a`, color: styleOf(e.businessType).color }}
+                            >
+                              <span aria-hidden>{styleOf(e.businessType).icon}</span>
                               {t(`businessTypes.${e.businessType}`)}
-                            </div>
+                            </span>
                             <h2 className="mt-0.5 truncate font-semibold text-slate-900">{e.name}</h2>
                             {e.locationName && <div className="truncate text-xs font-medium text-brand-700">⌂ {e.locationName}</div>}
                             <p className="truncate text-sm text-slate-500">{[e.neighborhood, e.city].filter(Boolean).join(', ')}</p>
@@ -258,9 +312,10 @@ export function DirectoryPage() {
             <h2 className="text-lg font-semibold">{t('directory.ctaTitle')}</h2>
             <p className="text-brand-50/90 text-sm">{t('directory.ctaText')}</p>
           </div>
-          <Link to="/register" className="mt-3 inline-block rounded-lg bg-white px-4 py-2 font-semibold text-brand-800 sm:mt-0">{t('directory.ctaButton')}</Link>
+          <Link to="/registro" className="mt-3 inline-block rounded-lg bg-white px-4 py-2 font-semibold text-brand-800 sm:mt-0">{t('directory.ctaButton')}</Link>
         </div>
       </main>
+      {loginOpen && <LoginModal onClose={() => set({ login: null })} />}
     </div>
   );
 }

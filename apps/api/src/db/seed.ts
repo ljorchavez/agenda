@@ -2,7 +2,7 @@
  * Demo data: `pnpm db:seed`
  * One owner login (demo@agenda.mx / demo1234) for every demo business, switchable in the app:
  * nutrition clinic, restaurant, barbershop with two locations, yoga studio and padel club.
- * Role demos (same password): recepcion@ (admin), polanco@ (Polanco manager), memo@ and diego@
+ * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
  * (team members), pedro@ (nutrition staff). Plus clearly-labelled `demo-*` directory listings.
  */
 import { and, eq, inArray, like } from 'drizzle-orm';
@@ -71,13 +71,14 @@ async function main() {
       phone: '+525512345678',
       timezone: TZ,
       description: 'Consulta de nutrición, planes alimenticios y bioimpedancia. Cuenta de demostración.',
-      address: 'Av. Álvaro Obregón 120',
-      neighborhood: 'Roma Norte',
-      city: 'Ciudad de México',
-      state: 'Ciudad de México',
-      lat: 19.4194,
-      lng: -99.1617,
+      address: 'Av. San Fernando 450',
+      neighborhood: 'Jardines de la Corregidora',
+      city: 'Colima',
+      state: 'Colima',
+      lat: 19.256,
+      lng: -103.718,
       directoryListed: true,
+      plan: 'premium',
       settings: {
         ...DEFAULT_TENANT_SETTINGS,
         payments: {
@@ -239,13 +240,14 @@ async function seedRestaurant() {
       phone: '+525598765432',
       timezone: TZ,
       description: 'Cocina mexicana contemporánea. Reserva tu mesa en línea. Cuenta de demostración.',
-      address: 'Av. Presidente Masaryk 250',
-      neighborhood: 'Polanco',
-      city: 'Ciudad de México',
-      state: 'Ciudad de México',
-      lat: 19.4318,
-      lng: -99.1967,
+      address: 'Av. Terranova 1200',
+      neighborhood: 'Providencia',
+      city: 'Guadalajara',
+      state: 'Jalisco',
+      lat: 20.696,
+      lng: -103.383,
       directoryListed: true,
+      plan: 'premium',
       settings: {
         ...DEFAULT_TENANT_SETTINGS,
         hours: { days: [2, 3, 4, 5, 6, 7], open: '13:00', close: '23:00', slotMinutes: 30 },
@@ -393,32 +395,33 @@ async function seedBarbershop() {
       phone: '+525544332211',
       timezone: TZ,
       description: 'Dos sucursales, agenda con el barbero que prefieras. Cuenta de demostración.',
-      address: 'Calle Pitágoras 900',
-      neighborhood: 'Narvarte Poniente',
-      city: 'Ciudad de México',
-      state: 'Ciudad de México',
-      lat: 19.3962,
-      lng: -99.1588,
+      address: 'Calle Madero 150',
+      neighborhood: 'Centro',
+      city: 'Colima',
+      state: 'Colima',
+      lat: 19.2436,
+      lng: -103.7262,
       directoryListed: true,
+      plan: 'premium',
       settings: { ...DEFAULT_TENANT_SETTINGS, hours: { days: [1, 2, 3, 4, 5, 6], open: '10:00', close: '20:00', slotMinutes: 30 } },
     })
     .returning();
   const tenantId = tenant!.id;
   const pw = await hashPassword('demo1234');
-  // Two locations: the original one (Narvarte) and Polanco, with its own barber, hours and manager.
-  await db.update(locations).set({ name: 'Narvarte' }).where(and(eq(locations.tenantId, tenantId), eq(locations.isPrimary, true)));
-  const [polanco] = await db
+  // Two locations: the original one in Colima and one in Guadalajara, with its own barber, hours and manager.
+  await db.update(locations).set({ name: 'Colima Centro' }).where(and(eq(locations.tenantId, tenantId), eq(locations.isPrimary, true)));
+  const [gdl] = await db
     .insert(locations)
     .values({
       tenantId,
-      name: 'Polanco',
-      phone: '+525544332299',
-      address: 'Av. Homero 1500',
-      neighborhood: 'Polanco',
-      city: 'Ciudad de México',
-      state: 'Ciudad de México',
-      lat: 19.4335,
-      lng: -99.1997,
+      name: 'Guadalajara Chapultepec',
+      phone: '+523344332299',
+      address: 'Av. Chapultepec 480',
+      neighborhood: 'Americana',
+      city: 'Guadalajara',
+      state: 'Jalisco',
+      lat: 20.6712,
+      lng: -103.3688,
       hours: { days: [1, 2, 3, 4, 5, 6], open: '11:00', close: '21:00', slotMinutes: 30 },
     })
     .returning();
@@ -426,7 +429,7 @@ async function seedBarbershop() {
   const [, memoUser] = await addUsers(db, [
     { tenantId, email: 'recepcion@agenda.mx', name: 'Karla (Recepción)', role: 'admin', passwordHash: pw },
     { tenantId, email: 'memo@agenda.mx', name: 'Memo Hernández', role: 'staff', passwordHash: pw },
-    { tenantId, email: 'polanco@agenda.mx', name: 'Andrea (Gerente Polanco)', role: 'admin', passwordHash: pw, locationId: polanco!.id },
+    { tenantId, email: 'gerente@agenda.mx', name: 'Andrea (Gerente Guadalajara)', role: 'admin', passwordHash: pw, locationId: gdl!.id },
   ]);
   const svc = await db
     .insert(services)
@@ -444,7 +447,7 @@ async function seedBarbershop() {
       { tenantId, name: 'Memo', color: '#ea580c', serviceIds: [], userId: memoUser!.id },
       // Luis doesn't do kids' cuts
       { tenantId, name: 'Luis', color: '#16a34a', serviceIds: [svc[0]!.id, svc[1]!.id, svc[2]!.id] },
-      { tenantId, name: 'Rafa', color: '#9333ea', serviceIds: [], locationId: polanco!.id },
+      { tenantId, name: 'Rafa', color: '#9333ea', serviceIds: [], locationId: gdl!.id },
     ])
     .returning();
   const custs = await demoCustomers(tenantId, 90, '55233', 200);
@@ -454,10 +457,10 @@ async function seedBarbershop() {
     const day = now.plus({ days: d }).startOf('day');
     if (day.weekday === 7) continue;
     for (const p of pros) {
-      // Each barber fills 40-75% of their day (Polanco opens 11-21)
-      const atPolanco = p.locationId === polanco!.id;
-      let t = day.set({ hour: atPolanco ? 11 : 10 });
-      const close = day.set({ hour: atPolanco ? 21 : 20 });
+      // Each barber fills 40-75% of their day (Guadalajara opens 11-21)
+      const atGdl = p.locationId === gdl!.id;
+      let t = day.set({ hour: atGdl ? 11 : 10 });
+      const close = day.set({ hour: atGdl ? 21 : 20 });
       while (t < close) {
         const service = p.name === 'Luis' ? pick(svc.slice(0, 3)) : pick([svc[0]!, svc[0]!, svc[1]!, svc[2]!, svc[3]!]);
         const end = t.plus({ minutes: service.durationMin });
@@ -501,13 +504,14 @@ async function seedClasses() {
       phone: '+525577889900',
       timezone: TZ,
       description: 'Vinyasa, yin y pilates en grupos pequeños. Aparta tu lugar en línea. Cuenta de demostración.',
-      address: 'Calle Higuera 40',
-      neighborhood: 'Del Carmen, Coyoacán',
-      city: 'Ciudad de México',
-      state: 'Ciudad de México',
-      lat: 19.3467,
-      lng: -99.159,
+      address: 'Av. Guadalupe 1100',
+      neighborhood: 'Chapalita',
+      city: 'Guadalajara',
+      state: 'Jalisco',
+      lat: 20.6672,
+      lng: -103.3995,
       directoryListed: true,
+      plan: 'premium',
       settings: { ...DEFAULT_TENANT_SETTINGS, hours: { days: [1, 2, 3, 4, 5, 6], open: '07:00', close: '21:30', slotMinutes: 30 }, selfService: { rescheduleEnabled: true, cancelEnabled: true, minHoursNotice: 4 } },
     })
     .returning();
@@ -613,6 +617,7 @@ async function seedPadel() {
       lat: 20.7101,
       lng: -103.4106,
       directoryListed: true,
+      plan: 'premium',
       settings: { ...DEFAULT_TENANT_SETTINGS, hours: { days: [1, 2, 3, 4, 5, 6, 7], open: '07:00', close: '23:00', slotMinutes: 30 }, rentals: { durations: [60, 90, 120] } },
     })
     .returning();
@@ -673,20 +678,20 @@ const DIRECTORY_DEMOS: {
   neighborhood: string; city: string; state: string; lat: number; lng: number; address: string; desc: string;
   services: [string, number, number][];
 }[] = [
-  { name: 'Barbería El Güero · Demo', type: 'barbershop', neighborhood: 'Condesa', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.4116, lng: -99.1718, address: 'Av. Tamaulipas 88', desc: 'Cortes clásicos, fade y arreglo de barba.', services: [['Corte', 40, 25000], ['Corte + barba', 60, 38000]] },
-  { name: 'Dental Sonrisa · Demo', type: 'dental', neighborhood: 'Del Valle', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.3871, lng: -99.1675, address: 'Av. Insurgentes Sur 1100', desc: 'Limpiezas, resinas y ortodoncia.', services: [['Limpieza dental', 45, 70000], ['Valoración', 30, 30000]] },
-  { name: 'Consultorio Dra. Ruiz · Demo', type: 'medical', neighborhood: 'Coyoacán', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.3497, lng: -99.1617, address: 'Calle Francisco Sosa 45', desc: 'Medicina general y certificados médicos.', services: [['Consulta general', 30, 60000]] },
-  { name: 'Spa Alma · Demo', type: 'spa', neighborhood: 'Polanco', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.4337, lng: -99.1904, address: 'Calle Emilio Castelar 70', desc: 'Masajes relajantes y faciales.', services: [['Masaje relajante 60 min', 60, 120000], ['Facial', 50, 90000]] },
-  { name: 'Café Tostado · Demo', type: 'cafe', neighborhood: 'Roma Sur', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.4068, lng: -99.1597, address: 'Calle Medellín 210', desc: 'Café de especialidad y brunch. Reserva tu mesa el fin de semana.', services: [] },
-  { name: 'Mezcalería La Doña · Demo', type: 'bar', neighborhood: 'Juárez', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.4275, lng: -99.1597, address: 'Calle Havre 64', desc: 'Mezcales artesanales y botanas oaxaqueñas.', services: [] },
-  { name: 'Psicóloga Marina Vega · Demo', type: 'psychology', neighborhood: 'Narvarte', city: 'Ciudad de México', state: 'Ciudad de México', lat: 19.3956, lng: -99.1547, address: 'Calle Luz Saviñón 500', desc: 'Terapia individual y de pareja, presencial y en línea.', services: [['Sesión individual', 50, 80000]] },
+  { name: 'Barbería El Güero · Demo', type: 'barbershop', neighborhood: 'Lomas de Circunvalación', city: 'Colima', state: 'Colima', lat: 19.251, lng: -103.7095, address: 'Av. Ignacio Sandoval 1200', desc: 'Cortes clásicos, fade y arreglo de barba.', services: [['Corte', 40, 25000], ['Corte + barba', 60, 38000]] },
+  { name: 'Dental Sonrisa · Demo', type: 'dental', neighborhood: 'Chapalita', city: 'Guadalajara', state: 'Jalisco', lat: 20.665, lng: -103.401, address: 'Av. Tepeyac 900', desc: 'Limpiezas, resinas y ortodoncia.', services: [['Limpieza dental', 45, 70000], ['Valoración', 30, 30000]] },
+  { name: 'Consultorio Dra. Ruiz · Demo', type: 'medical', neighborhood: 'Centro', city: 'Colima', state: 'Colima', lat: 19.2425, lng: -103.728, address: 'Calle Hidalgo 85', desc: 'Medicina general y certificados médicos.', services: [['Consulta general', 30, 60000]] },
+  { name: 'Spa Alma · Demo', type: 'spa', neighborhood: 'Providencia', city: 'Guadalajara', state: 'Jalisco', lat: 20.693, lng: -103.388, address: 'Calle Rubén Darío 1300', desc: 'Masajes relajantes y faciales.', services: [['Masaje relajante 60 min', 60, 120000], ['Facial', 50, 90000]] },
+  { name: 'Café Tostado · Demo', type: 'cafe', neighborhood: 'Jardines de Vista Hermosa', city: 'Colima', state: 'Colima', lat: 19.2575, lng: -103.716, address: 'Av. San Fernando 820', desc: 'Café de especialidad y brunch. Reserva tu mesa el fin de semana.', services: [] },
+  { name: 'Mezcalería La Doña · Demo', type: 'bar', neighborhood: 'Americana', city: 'Guadalajara', state: 'Jalisco', lat: 20.6745, lng: -103.3655, address: 'Calle Lerdo de Tejada 2100', desc: 'Mezcales artesanales y botanas oaxaqueñas.', services: [] },
+  { name: 'Psicóloga Marina Vega · Demo', type: 'psychology', neighborhood: 'El Diezmo', city: 'Colima', state: 'Colima', lat: 19.262, lng: -103.704, address: 'Calle Gabino Barreda 300', desc: 'Terapia individual y de pareja, presencial y en línea.', services: [['Sesión individual', 50, 80000]] },
   { name: 'Uñas Bonitas · Demo', type: 'cosmetology', neighborhood: 'Chapultepec', city: 'Guadalajara', state: 'Jalisco', lat: 20.6736, lng: -103.3698, address: 'Av. Chapultepec 300', desc: 'Manicure, pedicure y uñas acrílicas.', services: [['Manicure', 45, 25000], ['Acrílicas', 90, 45000]] },
   { name: 'Taquería Don Chuy · Demo', type: 'restaurant', neighborhood: 'Providencia', city: 'Guadalajara', state: 'Jalisco', lat: 20.6905, lng: -103.3906, address: 'Av. Pablo Neruda 2500', desc: 'Tacos de pastor y birria. Reservaciones para grupos.', services: [] },
-  { name: 'Fisio Movimiento · Demo', type: 'physiotherapy', neighborhood: 'San Pedro Garza García', city: 'Monterrey', state: 'Nuevo León', lat: 25.6573, lng: -100.3624, address: 'Calzada del Valle 400', desc: 'Rehabilitación deportiva y terapia física.', services: [['Sesión de fisioterapia', 50, 65000]] },
-  { name: 'Salón Glam · Demo', type: 'beauty_salon', neighborhood: 'Centro', city: 'Monterrey', state: 'Nuevo León', lat: 25.6714, lng: -100.3094, address: 'Calle Morelos 800', desc: 'Corte, color y peinados para eventos.', services: [['Corte dama', 60, 35000], ['Tinte', 120, 90000]] },
-  { name: 'Veterinaria Patitas · Demo', type: 'veterinary', neighborhood: 'Centro', city: 'Querétaro', state: 'Querétaro', lat: 20.5931, lng: -100.392, address: 'Av. Zaragoza 150', desc: 'Consulta, vacunas y estética canina.', services: [['Consulta', 30, 40000], ['Baño y corte', 90, 35000]] },
-  { name: 'Nutrióloga Sofía · Demo', type: 'nutrition', neighborhood: 'Angelópolis', city: 'Puebla', state: 'Puebla', lat: 19.0285, lng: -98.2366, address: 'Blvd. del Niño Poblano 2510', desc: 'Planes de alimentación y seguimiento deportivo.', services: [['Consulta inicial', 60, 60000]] },
-  { name: 'Cocina Yucateca · Demo', type: 'restaurant', neighborhood: 'Centro', city: 'Mérida', state: 'Yucatán', lat: 20.9671, lng: -89.6237, address: 'Calle 60 #470', desc: 'Cochinita pibil, papadzules y más. Reserva tu mesa.', services: [] },
+  { name: 'Fisio Movimiento · Demo', type: 'physiotherapy', neighborhood: 'Las Palmas', city: 'Colima', state: 'Colima', lat: 19.248, lng: -103.732, address: 'Av. Felipe Sevilla del Río 450', desc: 'Rehabilitación deportiva y terapia física.', services: [['Sesión de fisioterapia', 50, 65000]] },
+  { name: 'Salón Glam · Demo', type: 'beauty_salon', neighborhood: 'Jardines del Bosque', city: 'Guadalajara', state: 'Jalisco', lat: 20.66, lng: -103.387, address: 'Av. Niños Héroes 2800', desc: 'Corte, color y peinados para eventos.', services: [['Corte dama', 60, 35000], ['Tinte', 120, 90000]] },
+  { name: 'Veterinaria Patitas · Demo', type: 'veterinary', neighborhood: 'Villa de Álvarez', city: 'Colima', state: 'Colima', lat: 19.269, lng: -103.737, address: 'Av. J. Merced Cabrera 400', desc: 'Consulta, vacunas y estética canina.', services: [['Consulta', 30, 40000], ['Baño y corte', 90, 35000]] },
+  { name: 'Nutrióloga Sofía · Demo', type: 'nutrition', neighborhood: 'Ladrón de Guevara', city: 'Guadalajara', state: 'Jalisco', lat: 20.6815, lng: -103.381, address: 'Calle José Guadalupe Zuno 2150', desc: 'Planes de alimentación y seguimiento deportivo.', services: [['Consulta inicial', 60, 60000]] },
+  { name: 'Cenaduría Colimota · Demo', type: 'restaurant', neighborhood: 'Centro', city: 'Colima', state: 'Colima', lat: 19.244, lng: -103.7245, address: 'Calle Madero 300', desc: 'Sopitos, tostadas y pozole seco. Reserva tu mesa.', services: [] },
 ];
 
 async function seedDirectory() {
@@ -711,6 +716,7 @@ async function seedDirectory() {
         lat: d.lat,
         lng: d.lng,
         directoryListed: true,
+        plan: 'standard',
         settings: isTables
           ? { ...DEFAULT_TENANT_SETTINGS, hours: { days: [2, 3, 4, 5, 6, 7], open: d.type === 'cafe' ? '08:00' : '13:00', close: d.type === 'cafe' ? '18:00' : '23:00', slotMinutes: 30 } }
           : DEFAULT_TENANT_SETTINGS,

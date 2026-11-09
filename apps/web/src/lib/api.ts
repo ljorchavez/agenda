@@ -35,7 +35,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   if (!res.ok) {
     if (res.status === 401 && token) {
       tokenStore.clear();
-      window.location.assign('/login');
+      window.location.assign('/?login=1');
     }
     throw new ApiError(res.status, data.error ?? 'error', data.message, data.details);
   }

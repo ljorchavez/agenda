@@ -337,7 +337,9 @@
     "changeLocation": "cambiar",
     "anyResource": "Cualquiera disponible",
     "people_one": "{{count}} persona",
-    "people_other": "{{count}} personas"
+    "people_other": "{{count}} personas",
+    "plan_limit_customers": "Este negocio no está recibiendo clientes nuevos en línea por ahora. Contáctalo directamente.",
+    "plan_limit_bookings": "Este negocio no tiene más lugares en línea este mes. Contáctalo directamente."
   },
   "paymentSettings": {
     "title": "Métodos de pago",
@@ -498,7 +500,7 @@
   "directory": {
     "title": "Directorio",
     "heading": "Encuentra y reserva en negocios cerca de ti",
-    "subheading": "Doctores, nutriólogos, barberías, spas, restaurantes y más. Reserva en línea en segundos.",
+    "subheading": "Salud, belleza, restaurantes, clases y canchas en Colima y Guadalajara. Reserva en línea en segundos.",
     "forBusinesses": "¿Tienes un negocio?",
     "searchPlaceholder": "Buscar por nombre, servicio o colonia",
     "state": "Estado",
@@ -529,7 +531,10 @@
       "reservations": "Reservar mesa",
       "classes": "Ver clases",
       "rentals": "Rentar espacio"
-    }
+    },
+    "myBusiness": "Mi negocio",
+    "categories": "Categorías",
+    "specialty": "Especialidad"
   },
   "profile": {
     "title": "Perfil público y directorio",
@@ -611,7 +616,12 @@
     "resource_service": "No toma este servicio.",
     "resource_too_small": "Es muy pequeño para ese número de personas.",
     "resource_busy": "Ya está ocupado a esa hora.",
-    "no_resource_available": "No hay nada disponible a esa hora. Elige otro horario."
+    "no_resource_available": "No hay nada disponible a esa hora. Elige otro horario.",
+    "plan_limit_customers": "Llegaste al límite de clientes de tu plan. Cambia de plan en Configuración para agregar más.",
+    "plan_limit_bookings": "Llegaste al límite de reservas del mes de tu plan. Cambia de plan en Configuración.",
+    "plan_limit_locations": "Tu plan incluye una sola sucursal. Cambia al plan Estándar para agregar más.",
+    "plan_limit_businesses": "El plan Gratis incluye un solo negocio. Cambia tu negocio al plan Estándar para abrir otro.",
+    "plan_unavailable": "Ese plan todavía no está disponible."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -749,5 +759,53 @@
     "deleteConfirm": "¿Eliminar?",
     "deactivated": "Tiene reservas, así que lo desactivamos en lugar de eliminarlo.",
     "auto": "Asignar automáticamente"
+  },
+  "plans": {
+    "title": "Elige tu plan",
+    "subtitle": "Empieza gratis y cambia de plan cuando quieras. Sin plazos forzosos.",
+    "free": "Gratis",
+    "standard": "Estándar",
+    "premium": "Premium",
+    "popular": "Más elegido",
+    "freePrice": "$0",
+    "perMonth": "/ mes",
+    "soon": "Próximamente",
+    "premiumSoon": "Funciones avanzadas para negocios grandes. Muy pronto.",
+    "oneBusiness": "1 negocio",
+    "oneLocation": "1 sucursal",
+    "maxCustomers_one": "Hasta {{count}} cliente",
+    "maxCustomers_other": "Hasta {{count}} clientes",
+    "unlimitedCustomers": "Clientes ilimitados",
+    "maxBookings_one": "Hasta {{count}} reserva al mes",
+    "maxBookings_other": "Hasta {{count}} reservas al mes",
+    "unlimitedBookings": "Reservas ilimitadas",
+    "extrasAllowed": "Sucursales y negocios adicionales",
+    "noExtras": "Sin sucursales adicionales",
+    "choose": "Elegir",
+    "current": "Tu plan actual",
+    "change": "cambiar",
+    "changePlan": "Cambiar plan",
+    "extras": "Extras: cada sucursal adicional {{location}} / mes y cada negocio adicional {{business}} / mes. Precios con IVA incluido.",
+    "billingSoon": "El cobro automático con tarjeta se activará pronto; mientras tanto el cambio de plan no tiene cargo.",
+    "section": "Plan y uso",
+    "yourPlan": "Tu plan",
+    "customers": "Clientes",
+    "bookingsMonth": "Reservas este mes",
+    "locations": "Sucursales activas",
+    "used": "{{used}} de {{max}}",
+    "usedUnlimited": "{{used}} (sin límite)",
+    "extraLocationsN_one": "{{count}} sucursal extra",
+    "extraLocationsN_other": "{{count}} sucursales extra",
+    "extraBusinessNote": "Este negocio se cobra como negocio adicional de tu cuenta.",
+    "newBusinessNote": "Cada negocio adicional cuesta {{price}} al mes e incluye lo del plan Estándar."
+  },
+  "categories": {
+    "health": "Salud",
+    "beauty": "Belleza",
+    "food": "Comer y beber",
+    "classes": "Clases",
+    "spaces": "Canchas y espacios",
+    "pets": "Mascotas",
+    "other": "Otros"
   }
 }

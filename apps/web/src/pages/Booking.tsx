@@ -90,7 +90,7 @@ export function BookingPage() {
       <div className="mx-auto max-w-xl">
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <Link to="/directorio" className="text-xs text-slate-500 hover:text-brand-700">← {t('directory.title')}</Link>
+            <Link to="/" className="text-xs text-slate-500 hover:text-brand-700">← {t('directory.title')}</Link>
             <h1 className="text-2xl font-bold text-slate-900">{business.name}</h1>
             {multi && location && (
               <p className="text-sm font-medium text-brand-700">

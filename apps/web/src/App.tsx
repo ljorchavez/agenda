@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
@@ -10,7 +10,7 @@ import { CustomerDetailPage } from './pages/CustomerDetail';
 import { CustomersPage } from './pages/Customers';
 import { DashboardPage } from './pages/Dashboard';
 import { DirectoryPage } from './pages/Directory';
-import { LoginPage, RegisterPage } from './pages/Auth';
+import { RegisterPage } from './pages/Auth';
 import { ManagePage } from './pages/Manage';
 import { PaymentsPage } from './pages/Payments';
 import { ReportsPage } from './pages/Reports';
@@ -22,30 +22,42 @@ function Protected({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const { t } = useTranslation();
   if (loading) return <div className="p-8 text-slate-500">{t('common.loading')}</div>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/?login=1" replace />;
   return children;
+}
+
+/** Old links keep working: /directorio is now the home page and /login opens its sign-in window. */
+function Redirect({ to }: { to: string }) {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const [path, extra] = to.split('?');
+  if (extra) new URLSearchParams(extra).forEach((v, k) => params.set(k, v));
+  const qs = params.toString();
+  return <Navigate to={`${path}${qs ? `?${qs}` : ''}`} replace />;
 }
 
 export function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      {/* Home: public directory/map of businesses, with the sign-in window */}
+      <Route path="/" element={<DirectoryPage />} />
+      <Route path="/directorio" element={<Redirect to="/" />} />
+      <Route path="/login" element={<Redirect to="/?login=1" />} />
+      <Route path="/registro" element={<RegisterPage />} />
+      <Route path="/register" element={<Redirect to="/registro" />} />
       {/* Public booking page for end customers */}
       <Route path="/b/:slug" element={<BookingPage />} />
       {/* Private link for a customer to reschedule/cancel their appointment */}
       <Route path="/c/:token" element={<ManagePage />} />
-      {/* Public directory/map of businesses (no login) */}
-      <Route path="/directorio" element={<DirectoryPage />} />
+      {/* The business back office */}
       <Route
-        path="/"
         element={
           <Protected>
             <Layout />
           </Protected>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route path="inicio" element={<DashboardPage />} />
         <Route path="agenda" element={<AgendaPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="customers/:id" element={<CustomerDetailPage />} />

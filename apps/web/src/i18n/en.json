@@ -337,7 +337,9 @@
     "changeLocation": "change",
     "anyResource": "Anyone available",
     "people_one": "{{count}} person",
-    "people_other": "{{count}} people"
+    "people_other": "{{count}} people",
+    "plan_limit_customers": "This business isn’t taking new customers online right now. Please contact them directly.",
+    "plan_limit_bookings": "This business has no more online spots this month. Please contact them directly."
   },
   "paymentSettings": {
     "title": "Payment methods",
@@ -498,7 +500,7 @@
   "directory": {
     "title": "Directory",
     "heading": "Find and book local businesses near you",
-    "subheading": "Doctors, nutritionists, barbershops, spas, restaurants and more. Book online in seconds.",
+    "subheading": "Health, beauty, restaurants, classes and courts in Colima and Guadalajara. Book online in seconds.",
     "forBusinesses": "Own a business?",
     "searchPlaceholder": "Search by name, service or neighborhood",
     "state": "State",
@@ -529,7 +531,10 @@
       "reservations": "Book a table",
       "classes": "See classes",
       "rentals": "Rent a space"
-    }
+    },
+    "myBusiness": "My business",
+    "categories": "Categories",
+    "specialty": "Specialty"
   },
   "profile": {
     "title": "Public profile & directory",
@@ -611,7 +616,12 @@
     "resource_service": "It does not take this service.",
     "resource_too_small": "Too small for that many people.",
     "resource_busy": "Already busy at that time.",
-    "no_resource_available": "Nothing is available at that time. Choose another."
+    "no_resource_available": "Nothing is available at that time. Choose another.",
+    "plan_limit_customers": "You reached your plan’s customer limit. Change plan in Settings to add more.",
+    "plan_limit_bookings": "You reached your plan’s monthly booking limit. Change plan in Settings.",
+    "plan_limit_locations": "Your plan includes one location. Move to Standard to add more.",
+    "plan_limit_businesses": "The Free plan includes one business. Move your business to Standard to open another.",
+    "plan_unavailable": "That plan is not available yet."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -749,5 +759,53 @@
     "deleteConfirm": "Delete it?",
     "deactivated": "It has bookings, so we deactivated it instead of deleting.",
     "auto": "Assign automatically"
+  },
+  "plans": {
+    "title": "Choose your plan",
+    "subtitle": "Start free and change plans any time. No contracts.",
+    "free": "Free",
+    "standard": "Standard",
+    "premium": "Premium",
+    "popular": "Most popular",
+    "freePrice": "$0",
+    "perMonth": "/ month",
+    "soon": "Coming soon",
+    "premiumSoon": "Advanced features for larger businesses. Coming soon.",
+    "oneBusiness": "1 business",
+    "oneLocation": "1 location",
+    "maxCustomers_one": "Up to {{count}} customer",
+    "maxCustomers_other": "Up to {{count}} customers",
+    "unlimitedCustomers": "Unlimited customers",
+    "maxBookings_one": "Up to {{count}} booking a month",
+    "maxBookings_other": "Up to {{count}} bookings a month",
+    "unlimitedBookings": "Unlimited bookings",
+    "extrasAllowed": "Additional locations and businesses",
+    "noExtras": "No additional locations",
+    "choose": "Choose",
+    "current": "Your current plan",
+    "change": "change",
+    "changePlan": "Change plan",
+    "extras": "Add-ons: each extra location {{location}} / month and each extra business {{business}} / month. Prices include VAT.",
+    "billingSoon": "Automatic card billing is coming soon; until then plan changes have no charge.",
+    "section": "Plan and usage",
+    "yourPlan": "Your plan",
+    "customers": "Customers",
+    "bookingsMonth": "Bookings this month",
+    "locations": "Active locations",
+    "used": "{{used}} of {{max}}",
+    "usedUnlimited": "{{used}} (no limit)",
+    "extraLocationsN_one": "{{count}} extra location",
+    "extraLocationsN_other": "{{count}} extra locations",
+    "extraBusinessNote": "This business is billed as an additional business of your account.",
+    "newBusinessNote": "Each additional business costs {{price}} a month and includes everything in Standard."
+  },
+  "categories": {
+    "health": "Health",
+    "beauty": "Beauty",
+    "food": "Food & drinks",
+    "classes": "Classes",
+    "spaces": "Courts & spaces",
+    "pets": "Pets",
+    "other": "Other"
   }
 }

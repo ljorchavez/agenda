@@ -306,7 +306,8 @@ if (process.env.CRON_SECRET) {
   check('directory includes demo clinic & restaurant', slugs.includes('nutricion-demo') && slugs.includes('restaurante-demo'));
   check('directory entries all have coordinates & city', (d.body?.entries ?? []).every((e) => Number.isFinite(e.lat) && Number.isFinite(e.lng) && e.city));
   check('directory exposes only public fields', !/password|email|customer|token|accessToken/i.test(JSON.stringify(d.body?.entries?.[0] ?? {})));
-  check('directory zones include several states', (d.body?.zones ?? []).length >= 4, JSON.stringify(d.body?.zones));
+  check('directory only in Colima and Jalisco (Guadalajara)', (d.body?.zones ?? []).map((z) => z.state).sort().join(',') === 'Colima,Jalisco', JSON.stringify(d.body?.zones));
+  check('directory cities are Colima and Guadalajara', (d.body?.entries ?? []).every((e) => ['Colima', 'Guadalajara'].includes(e.city)), [...new Set((d.body?.entries ?? []).map((e) => e.city))].join(','));
   check('directory has restaurants and services', d.body.entries.some((e) => e.kind === 'reservations') && d.body.entries.some((e) => e.kind === 'appointments'));
   check('directory is cacheable', /max-age=60/.test(d.headers.get('cache-control') ?? ''));
   const page = await call('GET', '/directorio');
@@ -365,7 +366,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
 {
   const pub = await call('GET', '/api/public/barberia-demo');
   check('barbershop exposes its team', pub.status === 200 && pub.body.kind === 'appointments' && pub.body.resources?.length === 4, pub.text.slice(0, 200));
-  check('barbershop has two locations', pub.body.locations?.map((l) => l.name).sort().join(',') === 'Narvarte,Polanco', JSON.stringify(pub.body.locations));
+  check('barbershop has two locations', pub.body.locations?.map((l) => l.name).sort().join(',') === 'Colima Centro,Guadalajara Chapultepec', JSON.stringify(pub.body.locations));
   const svc = pub.body.services[0];
   const pro = pub.body.resources.find((p) => !p.serviceIds.length || p.serviceIds.includes(svc.id));
   let day = null;
@@ -494,34 +495,63 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('instructor sees only own classes', ses.length > 0 && ses.every((s) => s.resourceId === diego.user.resourceId), String(ses.length));
 }
 
-// ---- Locations (sucursales) and the Polanco manager
+// ---- Locations (sucursales) and the Guadalajara manager
 {
   const owner = await asDemo('barberia-demo');
   const locs = await call('GET', '/api/locations', null, owner.token);
-  const pol = locs.body?.locations?.find((l) => l.name === 'Polanco');
+  const pol = locs.body?.locations?.find((l) => l.name === 'Guadalajara Chapultepec');
   check('locations + plan (1 included, 1 extra)', locs.status === 200 && !!pol && locs.body.plan.extraLocations === 1, locs.text.slice(0, 200));
   const day = mxDay(10);
   const pub = (await call('GET', '/api/public/barberia-demo')).body;
   const rafa = pub.resources.find((p) => p.locationId === pol?.id);
   const slots = (await call('GET', `/api/public/barberia-demo/availability?serviceId=${pub.services[0].id}&date=${day}&locationId=${pol?.id}`)).body?.slots ?? [];
   const hour = (x) => Number(new Date(x).toLocaleTimeString('en-GB', { timeZone: 'America/Mexico_City', hour: '2-digit' }));
-  check('Polanco availability follows its own hours (11-21)', slots.length > 0 && slots.every((x) => hour(x) >= 11 && hour(x) < 21), slots.slice(0, 3).join(','));
+  check('Guadalajara availability follows its own hours (11-21)', slots.length > 0 && slots.every((x) => hour(x) >= 11 && hour(x) < 21), slots.slice(0, 3).join(','));
   const bk = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: pub.services[0].id, startsAt: slots[slots.length - 2], locationId: pol?.id, name: 'Sucursal QA', phone: '5518180001' });
-  check('booking at Polanco goes to its barber', bk.status === 201 && bk.body.resourceName === rafa?.name, bk.text);
-  const gerente = (await call('POST', '/api/auth/login', { email: 'polanco@agenda.mx', password: 'demo1234' })).body;
-  check('gerente limited to Polanco', gerente?.user?.role === 'admin' && gerente.user.locationId === pol?.id, JSON.stringify(gerente?.user));
+  check('booking at Guadalajara goes to its barber', bk.status === 201 && bk.body.resourceName === rafa?.name, bk.text);
+  const gerente = (await call('POST', '/api/auth/login', { email: 'gerente@agenda.mx', password: 'demo1234' })).body;
+  check('gerente limited to Guadalajara', gerente?.user?.role === 'admin' && gerente.user.locationId === pol?.id, JSON.stringify(gerente?.user));
   const from = new Date(Date.now() - 30 * 864e5).toISOString();
   const to = new Date(Date.now() + 30 * 864e5).toISOString();
   const q = `/api/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const gl = (await call('GET', q, null, gerente.token)).body ?? [];
   const ol = (await call('GET', q, null, owner.token)).body ?? [];
-  check('gerente sees only Polanco bookings', gl.length > 0 && gl.every((a) => a.locationId === pol?.id) && ol.length > gl.length, `${gl.length} vs ${ol.length}`);
+  check('gerente sees only Guadalajara bookings', gl.length > 0 && gl.every((a) => a.locationId === pol?.id) && ol.length > gl.length, `${gl.length} vs ${ol.length}`);
   check("gerente can't change business settings", (await call('PATCH', '/api/tenant', { name: 'X' }, gerente.token)).status === 403);
   const rep = await call('GET', `/api/reports?from=${mxDay(-60)}&to=${mxDay(0)}`, null, owner.token);
   check('reports split by location', rep.body?.byLocation?.length === 2, JSON.stringify(rep.body?.byLocation));
-  check('customer cancels Polanco booking', (await call('POST', `/api/public/manage/${bk.body.managePath?.slice(3)}/cancel`)).status === 200);
+  check('customer cancels Guadalajara booking', (await call('POST', `/api/public/manage/${bk.body.managePath?.slice(3)}/cancel`)).status === 200);
   const d = (await call('GET', '/api/public-directory')).body;
   check('directory has a pin per barbershop location', d.entries.filter((e) => e.slug === 'barberia-demo').length === 2);
+}
+
+// ---- Plans
+{
+  const owner = await asDemo('barberia-demo');
+  const p = await call('GET', '/api/tenant/plan', null, owner.token);
+  check('plan info for the business', p.status === 200 && p.body.plan === 'premium' && p.body.usage.activeLocations === 2 && p.body.billingConnected === false, p.text.slice(0, 200));
+  check('plan is part of the session', owner.tenant?.plan === 'premium');
+  check('premium is not selectable yet', (await call('PUT', '/api/tenant/plan', { plan: 'premium' }, owner.token)).status === 422);
+  // Sign-up limits (local runs only: creates a new account)
+  if (process.env.E2E_SIGNUP) {
+    const email = `free-${Date.now()}@test.mx`;
+    const reg = await call('POST', '/api/auth/register', { businessName: 'Gratis QA', businessType: 'nutrition', name: 'QA', email, password: 'password123', plan: 'free' });
+    check('sign up on the free plan', reg.status === 201 && reg.body.tenant.plan === 'free', reg.text.slice(0, 200));
+    const tk = reg.body.token;
+    let okN = 0;
+    for (let i = 0; i < 5; i++) if ((await call('POST', '/api/customers', { name: `Cliente ${i}`, phone: `55700000${10 + i}` }, tk)).status === 201) okN++;
+    const sixth = await call('POST', '/api/customers', { name: 'Cliente 6', phone: '5570000099' }, tk);
+    check('free plan: 5 customers, the 6th is refused', okN === 5 && sixth.status === 402 && sixth.body.error === 'plan_limit_customers', sixth.text);
+    const loc = await call('POST', '/api/locations', { name: 'Segunda', active: true }, tk);
+    check('free plan: one location', loc.status === 402 && loc.body.error === 'plan_limit_locations', loc.text);
+    const biz = await call('POST', '/api/businesses', { businessName: 'Otro QA', businessType: 'barbershop' }, tk);
+    check('free plan: one business', biz.status === 402 && biz.body.error === 'plan_limit_businesses', biz.text);
+    const up = await call('PUT', '/api/tenant/plan', { plan: 'standard' }, tk);
+    check('owner moves to Estándar', up.status === 200 && up.body.plan.plan === 'standard' && up.body.plan.monthlyTotalCents === 39900, up.text);
+    check('Estándar: more customers allowed', (await call('POST', '/api/customers', { name: 'Cliente 6', phone: '5570000099' }, tk)).status === 201);
+    const down = await call('PUT', '/api/tenant/plan', { plan: 'free' }, tk);
+    check('back to Free refused while over its limits', down.status === 402 && down.body.error === 'plan_limit_customers', down.text);
+  }
 }
 
 // ---- Directory shows the new kinds

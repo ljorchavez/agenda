@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth';
 type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
 
 const NAV: NavItem[] = [
-  { to: '/', key: 'dashboard', icon: '◧', end: true },
+  { to: '/inicio', key: 'dashboard', icon: '◧', end: true },
   { to: '/agenda', key: 'calendar', icon: '▦' },
   { to: '/customers', key: 'customers', icon: '☺' },
   { to: '/services', key: 'services', icon: '✂' },
@@ -46,7 +46,7 @@ function BusinessSwitcher({ className = '' }: { className?: string }) {
       onChange={(e) => {
         const v = e.target.value;
         if (v === '__new') return navigate('/new-business');
-        void switchBusiness(v).then(() => navigate('/'));
+        void switchBusiness(v).then(() => navigate('/inicio'));
       }}
     >
       {(businesses.length ? businesses : tenant ? [{ id: tenant.id, name: tenant.name }] : []).map((b) => (
@@ -115,7 +115,7 @@ export function Layout() {
               className="text-sm text-slate-600 hover:text-slate-900"
               onClick={() => {
                 logout();
-                navigate('/login');
+                navigate('/');
               }}
             >
               {t('nav.logout')}

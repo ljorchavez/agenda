@@ -38,6 +38,21 @@ export const BUSINESS_TYPES = [
 ] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
+/** Directory groups: a few easy categories instead of 20 specific types. */
+export const BUSINESS_CATEGORIES = ['health', 'beauty', 'food', 'classes', 'spaces', 'pets', 'other'] as const;
+export type BusinessCategory = (typeof BUSINESS_CATEGORIES)[number];
+export const CATEGORY_TYPES: Record<BusinessCategory, readonly BusinessType[]> = {
+  health: ['medical', 'dental', 'nutrition', 'psychology', 'physiotherapy'],
+  beauty: ['barbershop', 'beauty_salon', 'cosmetology', 'spa'],
+  food: ['restaurant', 'cafe', 'bar'],
+  classes: ['fitness', 'yoga', 'dance'],
+  spaces: ['sports', 'coworking', 'studio'],
+  pets: ['veterinary'],
+  other: ['other'],
+};
+export const businessCategory = (t: BusinessType): BusinessCategory =>
+  BUSINESS_CATEGORIES.find((c) => CATEGORY_TYPES[c].includes(t)) ?? 'other';
+
 /**
  * How a business takes bookings:
  * - appointments: a service at a time slot (optionally with a professional)
@@ -319,6 +334,8 @@ export const registerSchema = z.object({
   password: z.string().min(8).max(200),
   phone: phoneSchema.optional(),
   locale: z.enum(LOCALES).default('es'),
+  /** Plan chosen before creating the account */
+  plan: z.enum(['free', 'standard']).default('free'),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
@@ -416,6 +433,57 @@ export interface DirectoryDto {
  * includes this many locations; every extra active location is an add-on.
  */
 export const PLAN_INCLUDED_LOCATIONS = 1;
+
+// ---------- Subscription plans ----------
+// Each business has its own plan. Prices are provisional and live only here.
+
+export const PLANS = ['free', 'standard', 'premium'] as const;
+export type PlanId = (typeof PLANS)[number];
+/** Plans a customer can pick today (Premium is coming soon). */
+export const SELECTABLE_PLANS: readonly PlanId[] = ['free', 'standard'];
+
+export interface PlanLimits {
+  /** null = unlimited */
+  maxCustomers: number | null;
+  /** Bookings created per calendar month; null = unlimited */
+  maxBookingsPerMonth: number | null;
+  /** Can add locations (each extra one is billed) */
+  extraLocations: boolean;
+  /** Can be one of several businesses of the same owner */
+  extraBusinesses: boolean;
+  /** Monthly price in cents (MXN, IVA incluido); null = to be defined */
+  priceCents: number | null;
+}
+
+export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
+  free: { maxCustomers: 5, maxBookingsPerMonth: null, extraLocations: false, extraBusinesses: false, priceCents: 0 },
+  standard: { maxCustomers: null, maxBookingsPerMonth: 500, extraLocations: true, extraBusinesses: true, priceCents: 39_900 },
+  premium: { maxCustomers: null, maxBookingsPerMonth: null, extraLocations: true, extraBusinesses: true, priceCents: null },
+};
+
+/** Add-ons, per month (MXN, IVA incluido). */
+export const ADDON_PRICES = { extraLocationCents: 19_900, extraBusinessCents: 29_900 } as const;
+
+export interface PlanUsage {
+  customers: number;
+  bookingsThisMonth: number;
+  activeLocations: number;
+}
+
+export interface PlanInfoDto {
+  plan: PlanId;
+  limits: PlanLimits;
+  usage: PlanUsage;
+  /** Monthly total: plan + extra locations (+ extra business when it is not the owner's first) */
+  monthlyTotalCents: number | null;
+  extraLocations: number;
+  /** This business is billed as an additional business of its owner */
+  extraBusiness: boolean;
+  /** Card payments for subscriptions are connected (otherwise plan changes apply without a charge) */
+  billingConnected: boolean;
+}
+
+export const planChangeSchema = z.object({ plan: z.enum(PLANS) });
 
 export const locationInputSchema = z
   .object({
@@ -771,6 +839,7 @@ export interface TenantDto {
   profile: TenantProfile;
   /** Never includes the token itself. */
   mercadoPago: { connected: boolean; account: string | null };
+  plan: PlanId;
 }
 
 export interface AuthResponse {

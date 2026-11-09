@@ -19,6 +19,7 @@ import { activeResources, assignResource, defaultService, findResource } from '.
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { assertLocation, forbiddenScope, getScope, inScope, scopeSql } from '../lib/access.js';
 import { locationForWrite } from '../lib/locations.js';
+import { assertCanAddBooking } from '../lib/plan.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const appointmentRoutes = new Hono<AppEnv>();
@@ -137,6 +138,7 @@ appointmentRoutes.post('/appointments', async (c) => {
 
   const row = await db.transaction(async (tx) => {
     await lockTenant(tx, tenantId);
+    await assertCanAddBooking(tx, tenantId);
     const base = {
       tenantId,
       customerId: customer.id,

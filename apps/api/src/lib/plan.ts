@@ -1,0 +1,107 @@
+import { and, eq, sql } from 'drizzle-orm';
+import { ADDON_PRICES, PLAN_INCLUDED_LOCATIONS, PLAN_LIMITS, type PlanId, type PlanInfoDto, type PlanUsage } from '@agenda/shared';
+import type { Db } from '../db/client.js';
+import { memberships, tenants } from '../db/schema.js';
+import { AppError } from './errors.js';
+
+/**
+ * Subscription plans: limits are checked here, for every kind of business. Prices and limits
+ * live in packages/shared (PLAN_LIMITS, ADDON_PRICES). Card charges go through `billing`.
+ */
+
+type Q = Pick<Db, 'execute'>;
+const num = (v: unknown) => Number(v ?? 0);
+
+export async function planUsage(db: Q, tenantId: string): Promise<PlanUsage> {
+  const res = await db.execute<{ customers: string; bookings: string; locations: string }>(sql`
+    select
+      (select count(*) from customers where tenant_id = ${tenantId}) as customers,
+      (select count(*) from appointments where tenant_id = ${tenantId}
+         and created_at >= date_trunc('month', now())) as bookings,
+      (select count(*) from locations where tenant_id = ${tenantId} and active) as locations`);
+  const r = res.rows[0];
+  return { customers: num(r?.customers), bookingsThisMonth: num(r?.bookings), activeLocations: num(r?.locations) };
+}
+
+const planOf = async (db: Q, tenantId: string): Promise<PlanId> => {
+  const res = await db.execute<{ plan: PlanId }>(sql`select plan from tenants where id = ${tenantId}`);
+  return res.rows[0]?.plan ?? 'free';
+};
+
+/** 402 when one more customer doesn't fit the plan. */
+export async function assertCanAddCustomer(db: Q, tenantId: string) {
+  const limit = PLAN_LIMITS[await planOf(db, tenantId)].maxCustomers;
+  if (limit == null) return;
+  if ((await planUsage(db, tenantId)).customers >= limit) {
+    throw new AppError(402, 'plan_limit_customers', `This plan includes up to ${limit} customers`);
+  }
+}
+
+/** 402 when one more booking this month doesn't fit the plan. */
+export async function assertCanAddBooking(db: Q, tenantId: string) {
+  const limit = PLAN_LIMITS[await planOf(db, tenantId)].maxBookingsPerMonth;
+  if (limit == null) return;
+  if ((await planUsage(db, tenantId)).bookingsThisMonth >= limit) {
+    throw new AppError(402, 'plan_limit_bookings', `This plan includes up to ${limit} bookings a month`);
+  }
+}
+
+/** 402 when the plan doesn't allow another active location. */
+export async function assertCanAddLocation(db: Q, tenantId: string) {
+  if (PLAN_LIMITS[await planOf(db, tenantId)].extraLocations) return;
+  if ((await planUsage(db, tenantId)).activeLocations >= PLAN_INCLUDED_LOCATIONS) {
+    throw new AppError(402, 'plan_limit_locations', 'This plan includes one location');
+  }
+}
+
+/** 402 when the owner can't open another business (a free business can't have siblings). */
+export async function assertCanAddBusiness(db: Pick<Db, 'select'>, userId: string) {
+  const owned = await db
+    .select({ plan: tenants.plan })
+    .from(memberships)
+    .innerJoin(tenants, eq(tenants.id, memberships.tenantId))
+    .where(and(eq(memberships.userId, userId), eq(memberships.role, 'owner')));
+  if (owned.some((t) => !PLAN_LIMITS[t.plan].extraBusinesses)) {
+    throw new AppError(402, 'plan_limit_businesses', 'The free plan includes one business');
+  }
+}
+
+/** Is this business an additional one of its owner (billed as an add-on)? */
+async function isExtraBusiness(db: Q, tenantId: string): Promise<boolean> {
+  const res = await db.execute<{ n: string }>(sql`
+    select count(*) as n from memberships m
+    join memberships o on o.user_id = m.user_id and o.role = 'owner'
+    join tenants t on t.id = o.tenant_id
+    where m.tenant_id = ${tenantId} and m.role = 'owner' and t.created_at < (select created_at from tenants where id = ${tenantId})`);
+  return num(res.rows[0]?.n) > 0;
+}
+
+export async function planInfo(db: Q, tenantId: string, billingConnected: boolean): Promise<PlanInfoDto> {
+  const plan = await planOf(db, tenantId);
+  const limits = PLAN_LIMITS[plan];
+  const usage = await planUsage(db, tenantId);
+  const extraLocations = Math.max(0, usage.activeLocations - PLAN_INCLUDED_LOCATIONS);
+  const extraBusiness = plan !== 'free' && (await isExtraBusiness(db, tenantId));
+  const base = extraBusiness ? ADDON_PRICES.extraBusinessCents : limits.priceCents;
+  return {
+    plan,
+    limits,
+    usage,
+    extraLocations,
+    extraBusiness,
+    monthlyTotalCents: base == null ? null : base + extraLocations * ADDON_PRICES.extraLocationCents,
+    billingConnected,
+  };
+}
+
+/** 402 when moving to `plan` would leave the business over its limits (e.g. back to Free). */
+export async function assertFitsPlan(db: Q, tenantId: string, plan: PlanId) {
+  const limits = PLAN_LIMITS[plan];
+  const usage = await planUsage(db, tenantId);
+  if (limits.maxCustomers != null && usage.customers > limits.maxCustomers) {
+    throw new AppError(402, 'plan_limit_customers', `This plan includes up to ${limits.maxCustomers} customers`);
+  }
+  if (!limits.extraLocations && usage.activeLocations > PLAN_INCLUDED_LOCATIONS) {
+    throw new AppError(402, 'plan_limit_locations', 'This plan includes one location');
+  }
+}

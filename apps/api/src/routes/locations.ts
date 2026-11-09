@@ -5,6 +5,7 @@ import { getDb } from '../db/client.js';
 import { locations } from '../db/schema.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { listLocations, planFor, toLocationDto } from '../lib/locations.js';
+import { assertCanAddLocation } from '../lib/plan.js';
 import { requireBusinessManager, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -35,6 +36,7 @@ const clean = (input: ReturnType<typeof locationInputSchema.parse>) => ({
 locationRoutes.post('/locations', requireBusinessManager, async (c) => {
   const input = locationInputSchema.parse(await c.req.json());
   const db = getDb();
+  if (input.active) await assertCanAddLocation(db, c.get('tenantId'));
   const [row] = await db
     .insert(locations)
     .values({ ...clean(input), tenantId: c.get('tenantId'), isPrimary: false })
@@ -50,6 +52,7 @@ locationRoutes.put('/locations/:id', requireBusinessManager, async (c) => {
   const db = getDb();
   const current = await db.query.locations.findFirst({ where: and(eq(locations.id, id), eq(locations.tenantId, tenantId)) });
   if (!current) throw notFound('location');
+  if (!current.active && input.active) await assertCanAddLocation(db, tenantId);
   if (current.isPrimary && !input.active) throw new AppError(422, 'primary_location', 'The main location cannot be deactivated');
   if (current.active && !input.active) {
     const upcoming = await db.execute(sql`

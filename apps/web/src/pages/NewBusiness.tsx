@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
-import { BUSINESS_TYPES, type AuthResponse, type BusinessType } from '@agenda/shared';
+import { ADDON_PRICES, BUSINESS_TYPES, type AuthResponse, type BusinessType } from '@agenda/shared';
+import { money } from '../lib/format';
 import { ErrorText, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -32,6 +33,7 @@ export function NewBusinessPage() {
         }}
       >
         <p className="text-sm text-slate-600">{t('business.newHelp', { count: businesses.length })}</p>
+        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">{t('plans.newBusinessNote', { price: money(ADDON_PRICES.extraBusinessCents) })}</p>
         <div>
           <label className="label" htmlFor="nb-name">{t('auth.businessName')}</label>
           <input id="nb-name" required minLength={2} className="input" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} />

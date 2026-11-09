@@ -12,7 +12,11 @@ import {
   loginSchema,
   mercadoPagoConnectSchema,
   normalizeMxPhone,
+  PLAN_LIMITS,
+  planChangeSchema,
   registerSchema,
+  SELECTABLE_PLANS,
+  type PlanId,
   assignableRoles,
   staffCreateSchema,
   tenantUpdateSchema,
@@ -32,6 +36,8 @@ import { toTenantDto } from '../lib/mappers.js';
 import { getAccount } from '../integrations/mercadopago.js';
 import { requireAuth, requireBusinessManager, requireManager, requireOwner, type AppEnv } from '../middleware/auth.js';
 import { resolveLocation } from '../lib/locations.js';
+import { assertCanAddBusiness, assertFitsPlan, planInfo } from '../lib/plan.js';
+import { billingProvider } from '../lib/billing.js';
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -101,7 +107,7 @@ async function uniqueSlug(base: string): Promise<string> {
 /** Creates a business with the starter resources for its kind. Its primary location is created by a DB trigger. */
 async function createBusiness(
   tx: Pick<Db, 'insert'>,
-  input: { businessName: string; businessType: BusinessType; phone?: string; locale?: 'es' | 'en' },
+  input: { businessName: string; businessType: BusinessType; phone?: string; locale?: 'es' | 'en'; plan: PlanId },
 ): Promise<Tenant> {
   const slug = await uniqueSlug(input.businessName);
   const [tenant] = await tx
@@ -113,6 +119,7 @@ async function createBusiness(
       phone: input.phone ? normalizeMxPhone(input.phone) : null,
       locale: input.locale ?? 'es',
       settings: DEFAULT_TENANT_SETTINGS,
+      plan: input.plan,
     })
     .returning();
   const kind = businessKind(input.businessType);
@@ -201,8 +208,10 @@ authRoutes.post('/businesses', requireAuth, async (c) => {
   const db = getDb();
   const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
   if (!user) throw new AppError(401, 'unauthorized');
+  // A free business can't have siblings; additional businesses start on Estándar (billed as an add-on).
+  await assertCanAddBusiness(db, user.id);
   const tenant = await db.transaction(async (tx) => {
-    const t = await createBusiness(tx, input);
+    const t = await createBusiness(tx, { ...input, plan: 'standard' });
     await tx.insert(memberships).values({ tenantId: t.id, userId: user.id, role: 'owner' });
     return t;
   });
@@ -225,6 +234,38 @@ authRoutes.patch('/auth/me', requireAuth, async (c) => {
     ? await db.update(users).set(patch).where(eq(users.id, user.id)).returning()
     : [user];
   return c.json(await sessionUser(db, updated!, c.get('tenantId')));
+});
+
+// ---------- Subscription plan ----------
+
+authRoutes.get('/tenant/plan', requireAuth, requireBusinessManager, async (c) => {
+  return c.json(await planInfo(getDb(), c.get('tenantId'), billingProvider() !== null));
+});
+
+/**
+ * Owner changes the plan. With card billing connected this returns a checkout page and the plan
+ * changes when the payment is confirmed; until then it applies right away without a charge.
+ */
+authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
+  const { plan } = planChangeSchema.parse(await c.req.json());
+  if (!SELECTABLE_PLANS.includes(plan)) throw new AppError(422, 'plan_unavailable', 'This plan is not available yet');
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  await assertFitsPlan(db, tenantId, plan);
+  if (!PLAN_LIMITS[plan].extraBusinesses) {
+    const owned = await db.select({ id: memberships.id }).from(memberships).where(and(eq(memberships.userId, c.get('userId')), eq(memberships.role, 'owner')));
+    if (owned.length > 1) throw new AppError(402, 'plan_limit_businesses', 'The free plan includes one business');
+  }
+  const billing = billingProvider();
+  if (billing && plan !== 'free') {
+    const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
+    const info = await planInfo(db, tenantId, true);
+    const returnUrl = `${new URL(c.req.url).origin}/settings#plan`;
+    const url = await billing.checkoutUrl({ tenantId, plan, extraLocations: info.extraLocations, extraBusiness: info.extraBusiness, email: user!.email, returnUrl });
+    return c.json({ checkoutUrl: url, plan: info });
+  }
+  await db.update(tenants).set({ plan }).where(eq(tenants.id, tenantId));
+  return c.json({ checkoutUrl: null, plan: await planInfo(db, tenantId, billing !== null) });
 });
 
 authRoutes.patch('/tenant', requireAuth, requireBusinessManager, async (c) => {

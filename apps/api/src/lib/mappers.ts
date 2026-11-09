@@ -80,6 +80,7 @@ export function toTenantDto(t: Tenant): TenantDto {
       directoryListed: t.directoryListed,
     },
     mercadoPago: { connected: Boolean(t.mpAccessTokenEnc), account: t.mpAccount },
+    plan: t.plan,
   };
 }
 

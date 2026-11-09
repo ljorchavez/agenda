@@ -92,7 +92,7 @@ export function PublicProfileSection({ disabled }: { disabled: boolean }) {
           <h2 className="font-semibold">{t('profile.title')}</h2>
           <p className="text-sm text-slate-500">{t('profile.subtitle')}</p>
         </div>
-        <Link to="/directorio" target="_blank" className="text-sm font-medium text-brand-700">{t('profile.viewDirectory')} ↗</Link>
+        <Link to="/" target="_blank" className="text-sm font-medium text-brand-700">{t('profile.viewDirectory')} ↗</Link>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

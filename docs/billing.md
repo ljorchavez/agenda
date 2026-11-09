@@ -1,19 +1,29 @@
-# Billing model (notes)
+# Billing model
 
-Decided with the founder: **charge per business, plus extra locations**.
+Each business (tenant) has its own plan (`tenants.plan`). Limits and prices live only in
+`packages/shared` (`PLAN_LIMITS`, `ADDON_PRICES`) and are enforced in `apps/api/src/lib/plan.ts`.
 
-- **Per business.** Each business (tenant) has its own plan, even when one person owns several.
-  One login can own several businesses (`memberships`), but each one is billed separately.
-- **Locations.** A plan includes `PLAN_INCLUDED_LOCATIONS` (1, in `packages/shared`).
-  Every additional **active** location is an add-on. Inactive locations aren't billed.
-- `GET /api/locations` returns `plan: { includedLocations, activeLocations, extraLocations }`.
-  Settings → Sucursales shows it, and a warning appears before adding a location.
+| Plan     | Price (provisional) | Customers | Bookings / month | Locations | Other businesses |
+|----------|---------------------|-----------|------------------|-----------|------------------|
+| Gratis   | $0                  | 5         | no limit         | 1         | no               |
+| Estándar | $399 / month        | no limit  | 500              | 1 + extras| yes (each extra) |
+| Premium  | to be defined       | no limit  | no limit         | 1 + extras| yes              |
 
-## Not built yet
+Add-ons: extra active location $199 / month, extra business $299 / month (includes Estándar).
+Over a limit the API answers **402** with `plan_limit_customers | plan_limit_bookings |
+plan_limit_locations | plan_limit_businesses`. Logins (admins, gerentes, colaboradores) are free.
 
-- Plans, prices and payment collection (subscriptions). Suggested approach: Mercado Pago
-  subscriptions (preapproval) on the platform's own account, one per business, with the
-  quantity of extra locations as a line item; webhook updates `tenants.plan_status`.
-- Limits when a plan is unpaid (read-only mode, booking page paused).
-- Proration when locations are added or removed mid-cycle (simplest: bill the peak count of the month).
-- Seats are not billed: logins (admins, gerentes, colaboradores) are unlimited.
+- Sign-up (`/registro`) starts with the plan cards, then the account form (`plan` in `/auth/register`).
+- Settings → Plan y uso: current plan, usage, monthly total and plan change (`GET/PUT /api/tenant/plan`, owner only).
+- Demo businesses are seeded on Premium so their history doesn't hit limits.
+
+## Card billing (to connect)
+
+`apps/api/src/lib/billing.ts` defines `BillingProvider` (`checkoutUrl`, `portalUrl`).
+`billingProvider()` returns `null` today, so plan changes apply right away without a charge.
+When a provider is set, `PUT /api/tenant/plan` returns its checkout URL and the plan should
+change from the provider's webhook (to add: `/api/webhooks/billing`, `tenants.plan_status`,
+read-only mode when a payment fails).
+
+Options considered: Stripe Billing (subscriptions with proration, customer portal, receipts)
+or Mercado Pago Suscripciones (preapproval; plan changes = cancel + new subscription).

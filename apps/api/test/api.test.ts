@@ -16,6 +16,8 @@ d('API (integration)', () => {
   let b: AuthResponse;
 
   const call = async (method: string, path: string, body?: unknown, token?: string) => {
+    // Test businesses sign up on Estándar (no customer cap) unless a test picks a plan.
+    if (path === '/auth/register' && body && typeof body === 'object' && !('plan' in body)) body = { ...body, plan: 'standard' };
     const res = await app.request(`/api${path}`, {
       method,
       headers: {

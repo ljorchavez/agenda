@@ -8,6 +8,7 @@ import {
 import { getDb } from '../db/client.js';
 import { customers } from '../db/schema.js';
 import { conflict, notFound } from '../lib/errors.js';
+import { assertCanAddCustomer } from '../lib/plan.js';
 import { toCustomerDto } from '../lib/mappers.js';
 import { getScope, paymentScopeSql, scopeSql, type Scope } from '../lib/access.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
@@ -196,6 +197,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 customerRoutes.post('/customers', async (c) => {
   const input = customerInputSchema.parse(await c.req.json());
+  await assertCanAddCustomer(getDb(), c.get('tenantId'));
   try {
     const [row] = await getDb()
       .insert(customers)

@@ -23,6 +23,7 @@ import {
 import { PaymentSettingsSection } from '../components/PaymentSettings';
 import { PublicProfileSection } from '../components/PublicProfile';
 import { LocationSelect, LocationsSection } from '../components/Locations';
+import { PlanSection } from '../components/Plans';
 import { ErrorText, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
@@ -370,6 +371,7 @@ function BusinessSettings() {
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <AccountSection />
       </div>
+      {businessManager && <PlanSection canChange={isOwner} />}
       <LocationsSection editable={businessManager} />
       <UsersSection kind={kind} />
     </>

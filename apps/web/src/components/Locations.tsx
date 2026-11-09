@@ -137,7 +137,7 @@ function LocationModal({ target, onClose }: { target: LocationDto | null; onClos
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="loc-name">{t('locations.name')}</label>
-            <input id="loc-name" required minLength={2} className="input" placeholder="Polanco" value={f.name} onChange={(e) => set({ name: e.target.value })} />
+            <input id="loc-name" required minLength={2} className="input" placeholder="Chapultepec" value={f.name} onChange={(e) => set({ name: e.target.value })} />
           </div>
           <div>
             <label className="label" htmlFor="loc-phone">{t('auth.phone')}</label>
