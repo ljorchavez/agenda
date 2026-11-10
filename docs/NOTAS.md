@@ -123,3 +123,13 @@ Necesario:
 - Límite de intentos de inicio de sesión: 5 por persona+dispositivo, 30 por IP y 100 por correo
   cada 15 min; 3 correos de recuperación por hora.
 
+---
+
+## 8. Horarios, bloqueos, fotos y calificación (hecho)
+- Cada persona/espacio puede tener horario propio; negocio, sucursales y personas aceptan
+  descansos (horario quebrado, hasta 4).
+- Bloqueos de días u horas (todo el negocio, una sucursal o un recurso) desde la agenda.
+- Fotos de equipo/espacios y servicios en Vercel Blob (store `agenda-fotos`, variable `BLOB_READ_WRITE_TOKEN`).
+- Nota y calificación interna 1–5 por cita; promedio por cliente.
+- Pendiente sugerido: que el cliente califique su visita con un enlace por WhatsApp.
+
