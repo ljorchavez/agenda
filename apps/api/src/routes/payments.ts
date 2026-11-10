@@ -141,7 +141,7 @@ paymentRoutes.get('/collections', async (c) => {
     left join locations l on l.id = a.location_id
     left join lateral (
       select sum(pp.amount_cents) as paid_cents,
-             array_agg(distinct pp.method) as methods,
+             array_agg(distinct pp.method::text) as methods,
              max(pp.paid_at) as last_paid_at
       from payments pp
       where pp.appointment_id = a.id and pp.tenant_id = a.tenant_id and pp.status = 'paid'
