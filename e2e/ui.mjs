@@ -187,7 +187,7 @@ const after = await api(`/appointments/${bk.id}`, null, tok);
 ok('charge in place settles it', after.paidCents >= after.priceCents && after.paidMethods.includes('card'), JSON.stringify(after.paidMethods));
 ok('window shows both methods', ((await page.getByTestId('paid-methods').textContent()) ?? '').includes('Tarjeta'));
 await page.keyboard.press('Escape');
-await api(`/appointments/${bk.id}`, null, tok, 'DELETE');
+await api(`/appointments/${bk.id}`, null, tok, 'DELETE').catch(() => null);
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));
