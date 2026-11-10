@@ -272,7 +272,8 @@
     "clearFilters": "Clear filters",
     "refundedTotal": "Refunded",
     "count": "Payments",
-    "noMatch": "No payments match the filters"
+    "noMatch": "No payments match the filters",
+    "tooMany": "There are more than {{count}} payments in this period, so totals are incomplete. Pick a shorter period."
   },
   "settings": {
     "title": "Settings",

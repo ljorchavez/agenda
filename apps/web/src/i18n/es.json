@@ -272,7 +272,8 @@
     "clearFilters": "Quitar filtros",
     "refundedTotal": "Reembolsado",
     "count": "Pagos",
-    "noMatch": "Ningún pago coincide con los filtros"
+    "noMatch": "Ningún pago coincide con los filtros",
+    "tooMany": "Hay más de {{count}} pagos en este periodo: los totales están incompletos. Elige un periodo más corto."
   },
   "settings": {
     "title": "Configuración",

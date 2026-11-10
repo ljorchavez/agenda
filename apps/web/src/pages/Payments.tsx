@@ -34,6 +34,9 @@ function presetRange(p: Preset, custom: { from: string; to: string }): [Date, Da
   }
 }
 
+/** Same cap as the API: getting exactly this many means the period has more. */
+const MAX_ROWS = 5000;
+
 const EMPTY_FILTERS = { business: 'current', location: '', method: '', status: '', min: '', max: '', q: '' };
 
 /**
@@ -187,6 +190,9 @@ export function PaymentsPage() {
         )}
       </div>
 
+      {data?.length === MAX_ROWS && (
+        <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{t('payments.tooMany', { count: MAX_ROWS })}</p>
+      )}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="card"><div className="text-sm text-slate-500">{t('payments.paidTotal')}</div><div className="text-xl font-semibold text-emerald-700">{money(totals.paid)}</div></div>
         <div className="card"><div className="text-sm text-slate-500">{t('payments.pendingTotal')}</div><div className="text-xl font-semibold text-amber-700">{money(totals.pending)}</div></div>

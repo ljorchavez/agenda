@@ -66,7 +66,7 @@ paymentRoutes.get('/payments', async (c) => {
     .leftJoin(services, eq(services.id, appointments.serviceId))
     .where(and(...filters))
     .orderBy(desc(when))
-    .limit(1000);
+    .limit(5000); // the page warns when it gets exactly this many
   return c.json(
     rows.map((r) => ({
       ...toPaymentDto({ ...r.p, customerName: r.customerName }),
