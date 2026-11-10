@@ -48,10 +48,10 @@ await page.goto('http://localhost:5173/agenda');
 await page.waitForSelector('[data-testid=calendar-event]');
 if (y.getDay() === 1) await page.getByRole('button', { name: /Anterior|anterior|prev/i }).first().click();
 await page.waitForTimeout(500);
-const label = await page.evaluate((id) => {
+const label = await page.evaluate((name) => {
   const evs = [...document.querySelectorAll('[data-testid=calendar-event]')];
-  return evs.map((e) => e.getAttribute('aria-label')).find((l) => l && l.includes('7:00') || l?.includes('07:00')) ?? null;
-}, past.id);
+  return evs.map((e) => e.getAttribute('aria-label') ?? '').find((l) => l.startsWith('07:00') && l.includes(name)) ?? null;
+}, cust0.name);
 ok('past unpaid booking says Debe', !!label && label.includes('Debe'), String(label));
 // 3. No-show not charged setting
 const me = await api('/auth/me', null, tok);
