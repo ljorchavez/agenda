@@ -5,7 +5,7 @@
  * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
  * (team members), pedro@ (nutrition staff). Plus clearly-labelled `demo-*` directory listings.
  */
-import { and, eq, inArray, like } from 'drizzle-orm';
+import { and, eq, inArray, like, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
@@ -217,6 +217,7 @@ async function seedPageLooks() {
     'medico-demo': { facebook: 'consultoriodemo', notice: 'Trae tus estudios previos a tu primera consulta' },
     'yoga-demo': { instagram: '@yogademo' },
     'restaurante-demo': { instagram: '@restaurantedemo', notice: 'Grupos de 6 o más: menú especial con anticipo' },
+    'nutricion-demo': { instagram: '@nutriciondemo', notice: 'Primera consulta con 15% usando el cupón BIENVENIDA' },
   };
   for (const [slug, page] of Object.entries(looks)) {
     const t = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
@@ -233,11 +234,62 @@ async function seedPageLooks() {
         },
       })
       .where(eq(tenants.id, t.id));
-    await db.insert(coupons).values([
-      { tenantId: t.id, code: 'BIENVENIDA', discountType: 'percent', value: 15 },
-      { tenantId: t.id, code: 'AMIGO50', discountType: 'amount', value: 5000, maxUses: 100 },
-    ]);
+    const [welcome, friend] = await db
+      .insert(coupons)
+      .values([
+        { tenantId: t.id, code: 'BIENVENIDA', discountType: 'percent', value: 15 },
+        { tenantId: t.id, code: 'AMIGO50', discountType: 'amount', value: 5000, maxUses: 100 },
+        { tenantId: t.id, code: 'VERANO20', discountType: 'percent', value: 20, validUntil: DateTime.now().minus({ months: 2 }).toISODate()! },
+      ])
+      .returning();
+    await discountExamples(t.id, welcome!.id, friend!.id);
   }
+}
+
+/**
+ * Examples of every discount on existing demo bookings, past and upcoming: the visit reward
+ * (10%), the BIENVENIDA coupon (15%) and AMIGO50 ($50). Payments that would now exceed the
+ * discounted price are trimmed so the money states stay right (paid, deposit, owes).
+ */
+async function discountExamples(tenantId: string, welcomeId: string, friendId: string) {
+  const db = getDb();
+  await db.execute(sql`
+    with picked as (
+      select id, price_cents,
+             row_number() over (order by starts_at) as n
+      from appointments
+      where tenant_id = ${tenantId} and price_cents >= 10000 and class_session_id is null and status <> 'cancelled'
+    ), chosen as (
+      select id, price_cents,
+             case when n % 13 = 0 then 'reward' when n % 17 = 0 then 'welcome' when n % 29 = 0 then 'friend' end as kind
+      from picked
+    ), off as (
+      select id, kind,
+             case kind when 'reward' then round(price_cents * 0.10) when 'welcome' then round(price_cents * 0.15) else least(5000, price_cents) end::int as cents
+      from chosen where kind is not null
+    )
+    update appointments a set
+      price_cents = a.price_cents - off.cents,
+      discount_cents = off.cents,
+      discount_reason = case when off.kind = 'reward' then 'reward' else 'coupon' end,
+      coupon_id = case off.kind when 'welcome' then ${welcomeId}::uuid when 'friend' then ${friendId}::uuid end
+    from off where a.id = off.id`);
+  // Trim what was paid over the new price (the payment made last absorbs the difference).
+  await db.execute(sql`
+    with over as (
+      select a.id, sum(p.amount_cents) - a.price_cents as excess
+      from appointments a join payments p on p.appointment_id = a.id and p.status = 'paid'
+      where a.tenant_id = ${tenantId} and a.discount_cents > 0
+      group by a.id, a.price_cents
+      having sum(p.amount_cents) > a.price_cents
+    ), last_pay as (
+      select distinct on (p.appointment_id) p.id, over.excess, p.amount_cents
+      from payments p join over on over.id = p.appointment_id
+      where p.status = 'paid'
+      order by p.appointment_id, p.paid_at desc
+    )
+    update payments p set amount_cents = greatest(100, p.amount_cents - last_pay.excess)
+    from last_pay where p.id = last_pay.id`);
 }
 
 /** Inserts in chunks to stay under Postgres' parameter limit. */
