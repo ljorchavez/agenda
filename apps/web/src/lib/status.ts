@@ -15,11 +15,25 @@ export const BOOKING_ICON: Record<AppointmentStatus, string> = {
 
 export type PaymentState = 'free' | 'paid' | 'partial' | 'unpaid' | 'owed';
 
-export function paymentState(a: Pick<AppointmentDto, 'priceCents' | 'paidCents' | 'status'>): PaymentState {
+/**
+ * - Fully paid → pagada. Cancelled or free → nothing to collect.
+ * - Its time already passed (or it was marked attended) and money is missing → debe.
+ * - A no-show owes too, unless the business chose not to charge no-shows.
+ * - Still ahead: anticipo if something was paid, otherwise por cobrar.
+ */
+export function paymentState(
+  a: Pick<AppointmentDto, 'priceCents' | 'paidCents' | 'status'> & { endsAt?: string },
+  opts: { noShowOwes?: boolean; now?: Date } = {},
+): PaymentState {
+  if (a.status === 'cancelled') return a.paidCents > 0 ? 'paid' : 'free';
   if (a.priceCents <= 0) return a.paidCents > 0 ? 'paid' : 'free';
   if (a.paidCents >= a.priceCents) return 'paid';
-  // After the visit (or a no-show) money still missing is a debt.
-  if (a.status === 'completed' || a.status === 'no_show') return 'owed';
+  if (a.status === 'no_show') {
+    if (opts.noShowOwes === false) return a.paidCents > 0 ? 'paid' : 'free';
+    return 'owed';
+  }
+  const over = a.status === 'completed' || (a.endsAt != null && new Date(a.endsAt) <= (opts.now ?? new Date()));
+  if (over) return 'owed';
   return a.paidCents > 0 ? 'partial' : 'unpaid';
 }
 

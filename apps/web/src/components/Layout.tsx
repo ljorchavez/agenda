@@ -8,7 +8,6 @@ type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOn
 const NAV: NavItem[] = [
   // The agenda is the daily screen, so it comes first (and is where login lands).
   { to: '/agenda', key: 'calendar', icon: '▦' },
-  { to: '/inicio', key: 'dashboard', icon: '◧', end: true },
   { to: '/customers', key: 'customers', icon: '☺' },
   { to: '/services', key: 'services', icon: '✂' },
   { to: '/resources', key: 'resources', icon: '♟', desktopOnly: true },

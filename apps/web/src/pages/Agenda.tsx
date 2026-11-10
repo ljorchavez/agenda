@@ -8,6 +8,7 @@ import {
   eligibleResources,
   intervalsOnWeekday,
   kindConfig,
+  noShowOwes,
   paymentSettingsOf,
   rentalSettingsOf,
   selfServiceOf,
@@ -23,13 +24,14 @@ import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
-import { useCustomers, useMyLocations, useResources, useServices } from '../lib/queries';
+import { useMyLocations, useResources, useServices } from '../lib/queries';
 import { LocationSelect } from '../components/Locations';
 import { CalendarGrid, type CalBlock, type CalColumn, type CalEvent } from '../components/CalendarGrid';
 import type { HoursValue } from '../components/Schedule';
 import { StarRating } from '../components/Rating';
 import { BOOKING_ICON, PAYMENT_PILL, PAYMENT_PILL_TEXT, paymentState } from '../lib/status';
 import { NewSessionModal, SessionModal } from '../components/ClassModals';
+import { CustomerPicker } from '../components/CustomerPicker';
 
 type View = 'day' | 'week';
 const VIEW_KEY = 'agenda.view';
@@ -97,6 +99,7 @@ export function AgendaPage() {
   const { tenant } = useAuth();
   const kind = tenant?.kind ?? 'appointments';
   const cfg = kindConfig(kind);
+  const owesNoShow = noShowOwes(tenant!.settings);
   const { manager, scoped, resourceId, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
   const small = useSmallScreen();
@@ -238,7 +241,7 @@ export function AgendaPage() {
             detail: showResource ? a.resourceName : null,
             icon: BOOKING_ICON[a.status],
             badge: (() => {
-              const ps = paymentState(a);
+              const ps = paymentState(a, { noShowOwes: owesNoShow });
               return ps === 'free' || a.status === 'cancelled' ? undefined : { text: PAYMENT_PILL_TEXT[ps], className: PAYMENT_PILL[ps] };
             })(),
             tone: a.status === 'cancelled' ? 'cancelled' : a.status === 'no_show' ? 'alert' : a.status === 'completed' ? 'muted' : 'normal',
@@ -248,7 +251,7 @@ export function AgendaPage() {
               sub,
               a.resourceName,
               t(`status.${a.status}`),
-              paymentState(a) !== 'free' && t(`payState.${paymentState(a)}`),
+              paymentState(a, { noShowOwes: owesNoShow }) !== 'free' && t(`payState.${paymentState(a, { noShowOwes: owesNoShow })}`),
             ].filter(Boolean).join(' · '),
             onClick: () => setSelected(a),
           };
@@ -607,8 +610,6 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
   const [resourceId, setResourceId] = useState(presetResource ?? '');
   const [partySize, setPartySize] = useState('2');
   const services = useServices();
-  const [search, setSearch] = useState('');
-  const customers = useCustomers(search, 'name', scoped);
   const [customerId, setCustomerId] = useState('');
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
   const [serviceId, setServiceId] = useState('');
@@ -707,12 +708,7 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
             </div>
           ) : (
             <>
-              <input placeholder={t('customers.searchPlaceholder')} className="input mb-2" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <select required className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)} size={Math.min(5, Math.max(2, customers.data?.items.length ?? 2))}>
-                {(customers.data?.items ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''}</option>
-                ))}
-              </select>
+              <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={scoped} />
             </>
           )}
         </div>
@@ -940,7 +936,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <StatusBadge status={status} />
-            <PaymentBadge appt={{ priceCents: appt.priceCents, paidCents: appt.paidCents, status }} />
+            <PaymentBadge appt={{ priceCents: appt.priceCents, paidCents: appt.paidCents, status, endsAt: appt.endsAt }} noShowOwes={noShowOwes(tenant!.settings)} />
           </div>
         </div>
         <div className="pt-1 text-slate-600">{appt.serviceName}</div>

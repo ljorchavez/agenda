@@ -92,9 +92,15 @@ export function Loading() {
 }
 
 /** Payment state of a booking as a pill: "$✓ Pagada", "$½ Anticipo", "$ Por cobrar", "$! Debe". */
-export function PaymentBadge({ appt }: { appt: Pick<AppointmentDto, 'priceCents' | 'paidCents' | 'status'> }) {
+export function PaymentBadge({
+  appt,
+  noShowOwes,
+}: {
+  appt: Pick<AppointmentDto, 'priceCents' | 'paidCents' | 'status'> & { endsAt?: string };
+  noShowOwes?: boolean;
+}) {
   const { t } = useTranslation();
-  const state = paymentState(appt);
+  const state = paymentState(appt, { noShowOwes });
   if (state === 'free') return null;
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${PAYMENT_PILL[state]}`}>

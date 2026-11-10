@@ -6,8 +6,9 @@ import { ErrorText, Loading, Modal, StatusBadge } from './ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
 import { dateTime, money, timeOnly, toLocalInput } from '../lib/format';
-import { useCustomers, useMyLocations, useResources, useServices } from '../lib/queries';
+import { useMyLocations, useResources, useServices } from '../lib/queries';
 import { LocationSelect } from './Locations';
+import { CustomerPicker } from './CustomerPicker';
 
 /** Group classes: schedule one, and manage one (attendees, edit, copy, cancel). Opened from the calendar. */
 
@@ -260,8 +261,6 @@ export function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () 
 function AddAttendee({ sessionId, onDone }: { sessionId: string; onDone: () => void }) {
   const { t } = useTranslation();
   const { manager, scoped } = useAccess();
-  const [search, setSearch] = useState('');
-  const customers = useCustomers(search, 'name', scoped);
   const [customerId, setCustomerId] = useState('');
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
   const [spots, setSpots] = useState('1');
@@ -291,10 +290,7 @@ function AddAttendee({ sessionId, onDone }: { sessionId: string; onDone: () => v
         </div>
       ) : (
         <>
-          <input placeholder={t('customers.searchPlaceholder')} className="input" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select required className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)} size={Math.min(5, Math.max(2, customers.data?.items.length ?? 2))}>
-            {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''}</option>)}
-          </select>
+          <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={scoped} />
         </>
       )}
       <div className="flex flex-wrap items-center gap-3">

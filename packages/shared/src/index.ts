@@ -274,6 +274,8 @@ export const paymentSettingsSchema = z.object({
     message: 'percent_out_of_range',
     path: ['value'],
   }),
+  /** A no-show still owes the booking (default) or is not charged. */
+  noShowOwes: z.boolean().optional(),
 });
 export type PaymentSettings = z.infer<typeof paymentSettingsSchema>;
 
@@ -295,6 +297,9 @@ export function computeDepositCents(priceCents: number, payments?: PaymentSettin
 export function paymentSettingsOf(settings: { payments?: PaymentSettings }): PaymentSettings {
   return settings.payments ?? DEFAULT_PAYMENT_SETTINGS;
 }
+
+/** Whether a customer who didn't show up still owes the booking (business setting; yes by default). */
+export const noShowOwes = (settings: { payments?: PaymentSettings }) => paymentSettingsOf(settings).noShowOwes !== false;
 
 /** Validates a CLABE check digit (Mexican interbank account number). */
 export function isValidClabe(clabe: string): boolean {

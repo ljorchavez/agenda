@@ -193,7 +193,9 @@
     "notesPlaceholder": "Algo a recordar de esta cita (preferencias, observaciones…)",
     "saveNotes": "Guardar nota",
     "status": "Estado",
-    "notesError": "No se pudo guardar la nota; revisa tu conexión."
+    "notesError": "No se pudo guardar la nota; revisa tu conexión.",
+    "changeCustomer": "Cambiar",
+    "noCustomerFound": "Ningún cliente coincide. Usa \"+ Cliente nuevo\"."
   },
   "customers": {
     "title": "Clientes",
@@ -414,7 +416,11 @@
     "mercadopago_invalid_token": "El token de Mercado Pago no es válido",
     "mercadopago_not_mexico": "La cuenta de Mercado Pago debe ser de México",
     "mercadopago_not_connected": "Primero conecta tu cuenta de Mercado Pago",
-    "validation_error": "Revisa los datos (por ejemplo, la CLABE o el porcentaje)"
+    "validation_error": "Revisa los datos (por ejemplo, la CLABE o el porcentaje)",
+    "noShowTitle": "Cuando un cliente no asiste",
+    "noShowHelp": "Las citas cuya hora ya pasó y no están pagadas se marcan como \"Debe\" ($!). Elige qué pasa con quien no asistió.",
+    "noShowOwes": "Debe pagar la cita",
+    "noShowFree": "No se le cobra"
   },
   "navShort": {
     "dashboard": "Inicio",
@@ -501,13 +507,18 @@
       "sources": "Origen de las citas",
       "weekday": "Por día de la semana",
       "heatmap": "Horarios más ocupados",
-      "topCustomers": "Mejores clientes"
+      "topCustomers": "Mejores clientes",
+      "locations": "Sucursales",
+      "resources": "Equipo / espacios",
+      "upcoming": "Próximas citas"
     },
     "range_too_long": "El periodo es demasiado largo; agrupa por semana o mes.",
     "invalid_range": "Fechas no válidas.",
     "validation_error": "Revisa las fechas del filtro.",
     "bookingsN_one": "{{count}} reserva",
-    "bookingsN_other": "{{count}} reservas"
+    "bookingsN_other": "{{count}} reservas",
+    "dragHint": "Arrastra el ícono ⠿ de cada gráfico para reacomodarlos. El orden se guarda en este dispositivo.",
+    "dragBlock": "Mover «{{name}}»"
   },
   "manage": {
     "title": "Tu cita",
@@ -910,5 +921,9 @@
     "unpaid": "Por cobrar",
     "owed": "Debe",
     "free": "Sin costo"
+  },
+  "filters": {
+    "more": "Filtros",
+    "clear": "Quitar filtros"
   }
 }

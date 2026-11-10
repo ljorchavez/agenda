@@ -193,7 +193,9 @@
     "notesPlaceholder": "Anything to remember about this booking (preferences, remarks…)",
     "saveNotes": "Save note",
     "status": "Status",
-    "notesError": "Couldn't save the note; check your connection."
+    "notesError": "Couldn't save the note; check your connection.",
+    "changeCustomer": "Change",
+    "noCustomerFound": "No customer matches. Use \"+ New customer\"."
   },
   "customers": {
     "title": "Customers",
@@ -414,7 +416,11 @@
     "mercadopago_invalid_token": "Invalid Mercado Pago token",
     "mercadopago_not_mexico": "The Mercado Pago account must be from Mexico",
     "mercadopago_not_connected": "Connect your Mercado Pago account first",
-    "validation_error": "Check the data (e.g. CLABE or percentage)"
+    "validation_error": "Check the data (e.g. CLABE or percentage)",
+    "noShowTitle": "When a customer doesn't show up",
+    "noShowHelp": "Bookings whose time has passed and aren't paid are marked \"Owes\" ($!). Choose what happens with no-shows.",
+    "noShowOwes": "They owe the booking",
+    "noShowFree": "They aren't charged"
   },
   "navShort": {
     "dashboard": "Home",
@@ -501,13 +507,18 @@
       "sources": "Booking source",
       "weekday": "By weekday",
       "heatmap": "Busiest times",
-      "topCustomers": "Top customers"
+      "topCustomers": "Top customers",
+      "locations": "Locations",
+      "resources": "Team / spaces",
+      "upcoming": "Upcoming bookings"
     },
     "range_too_long": "Range too long; group by week or month.",
     "invalid_range": "Invalid dates.",
     "validation_error": "Check the filter dates.",
     "bookingsN_one": "{{count}} booking",
-    "bookingsN_other": "{{count}} bookings"
+    "bookingsN_other": "{{count}} bookings",
+    "dragHint": "Drag the ⠿ grip on each chart to rearrange them. The order is saved on this device.",
+    "dragBlock": "Move “{{name}}”"
   },
   "manage": {
     "title": "Your appointment",
@@ -910,5 +921,9 @@
     "unpaid": "To collect",
     "owed": "Owes",
     "free": "Free"
+  },
+  "filters": {
+    "more": "Filters",
+    "clear": "Clear filters"
   }
 }

@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateTime, money, toCents } from '../lib/format';
 import { SortTh, sortRows, useSort } from '../components/SortableTable';
+import { FILTER_CTRL, FilterBar } from '../components/FilterBar';
 
 type Preset = 'thisMonth' | 'lastMonth' | 'last7' | 'last30' | 'thisYear' | 'custom';
 
@@ -108,96 +109,77 @@ export function PaymentsPage() {
   }, [filtered]);
 
   const showLocation = locationOptions.length > 1;
-  const active = Object.entries(f).filter(([k, v]) => v !== EMPTY_FILTERS[k as keyof typeof EMPTY_FILTERS]).length;
 
   return (
     <>
       <PageHeader title={t('payments.title')} />
 
-      <div className="card mb-4 space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <label className="label" htmlFor="pf-period">{t('payments.period')}</label>
-            <select id="pf-period" className="input" value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
+      <FilterBar
+        active={[f.location, f.method, f.status, f.min, f.max, multiBusiness && f.business !== 'current' ? 'b' : ''].filter(Boolean).length}
+        onClear={() => setF({ ...EMPTY_FILTERS, q: f.q })}
+        primary={
+          <>
+            <select className={FILTER_CTRL} aria-label={t('payments.period')} value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
               {(['thisMonth', 'lastMonth', 'last7', 'last30', 'thisYear', 'custom'] as const).map((p) => (
                 <option key={p} value={p}>{t(`payments.presets.${p}`)}</option>
               ))}
             </select>
-          </div>
-          {preset === 'custom' && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label" htmlFor="pf-from">{t('payments.from')}</label>
-                <input id="pf-from" type="date" className="input" value={custom.from} max={custom.to} onChange={(e) => e.target.value && setCustom({ ...custom, from: e.target.value })} />
-              </div>
-              <div>
-                <label className="label" htmlFor="pf-to">{t('payments.to')}</label>
-                <input id="pf-to" type="date" className="input" value={custom.to} min={custom.from} onChange={(e) => e.target.value && setCustom({ ...custom, to: e.target.value })} />
-              </div>
-            </div>
-          )}
-          {multiBusiness && (
-            <div>
-              <label className="label" htmlFor="pf-biz">{t('payments.business')}</label>
-              <select id="pf-biz" className="input" value={f.business} onChange={(e) => set({ business: e.target.value, location: '' })}>
-                <option value="current">{tenant?.name}</option>
-                <option value="all">{t('payments.allBusinesses')}</option>
-                {ownBusinesses.filter((b) => b.id !== tenant?.id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </div>
-          )}
-          {showLocation && (
-            <div>
-              <label className="label" htmlFor="pf-loc">{t('locations.location')}</label>
-              <select id="pf-loc" className="input" value={f.location} onChange={(e) => set({ location: e.target.value })}>
-                <option value="">{t('locations.all')}</option>
-                {locationOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                <option value="none">{t('payments.noLocation')}</option>
-              </select>
-            </div>
-          )}
-          <div>
-            <label className="label" htmlFor="pf-method">{t('payments.method')}</label>
-            <select id="pf-method" className="input" value={f.method} onChange={(e) => set({ method: e.target.value })}>
-              <option value="">{t('payments.any')}</option>
-              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label" htmlFor="pf-status">{t('payments.status')}</label>
-            <select id="pf-status" className="input" value={f.status} onChange={(e) => set({ status: e.target.value })}>
-              <option value="">{t('payments.any')}</option>
-              {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{t(`paymentStatus.${s}`)}</option>)}
-            </select>
-          </div>
-          <div>
-            <div className="label">{t('payments.amountRange')}</div>
-            <div className="flex items-center gap-2">
-              <input type="number" min={0} step="0.01" inputMode="decimal" className="input" aria-label={t('payments.min')} placeholder={t('payments.min')} value={f.min} onChange={(e) => set({ min: e.target.value })} />
-              <span className="text-slate-400">–</span>
-              <input type="number" min={0} step="0.01" inputMode="decimal" className="input" aria-label={t('payments.max')} placeholder={t('payments.max')} value={f.max} onChange={(e) => set({ max: e.target.value })} />
-            </div>
-          </div>
-          <div>
-            <label className="label" htmlFor="pf-q">{t('payments.search')}</label>
-            <input id="pf-q" className="input" placeholder={t('payments.searchPlaceholder')} value={f.q} onChange={(e) => set({ q: e.target.value })} />
-          </div>
-        </div>
-        {active > 0 && (
-          <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => setF({ ...EMPTY_FILTERS, business: f.business })}>
-            {t('payments.clearFilters')}
-          </button>
+            {preset === 'custom' && (
+              <span className="flex items-center gap-1">
+                <input type="date" className={FILTER_CTRL} aria-label={t('payments.from')} value={custom.from} max={custom.to} onChange={(e) => e.target.value && setCustom({ ...custom, from: e.target.value })} />
+                <span className="text-slate-400">–</span>
+                <input type="date" className={FILTER_CTRL} aria-label={t('payments.to')} value={custom.to} min={custom.from} onChange={(e) => e.target.value && setCustom({ ...custom, to: e.target.value })} />
+              </span>
+            )}
+            <input
+              type="search"
+              className={`${FILTER_CTRL} min-w-0 flex-1 sm:!w-56 sm:flex-none`}
+              aria-label={t('payments.search')}
+              placeholder={t('payments.searchPlaceholder')}
+              value={f.q}
+              onChange={(e) => set({ q: e.target.value })}
+            />
+          </>
+        }
+      >
+        {multiBusiness && (
+          <select id="pf-biz" className={FILTER_CTRL} aria-label={t('payments.business')} value={f.business} onChange={(e) => set({ business: e.target.value, location: '' })}>
+            <option value="current">{t('payments.business')}: {tenant?.name}</option>
+            <option value="all">{t('payments.allBusinesses')}</option>
+            {ownBusinesses.filter((b) => b.id !== tenant?.id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
         )}
-      </div>
+        {showLocation && (
+          <select id="pf-loc" className={FILTER_CTRL} aria-label={t('locations.location')} value={f.location} onChange={(e) => set({ location: e.target.value })}>
+            <option value="">{t('locations.location')}: {t('payments.any')}</option>
+            {locationOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            <option value="none">{t('payments.noLocation')}</option>
+          </select>
+        )}
+        <select id="pf-method" className={FILTER_CTRL} aria-label={t('payments.method')} value={f.method} onChange={(e) => set({ method: e.target.value })}>
+          <option value="">{t('payments.method')}: {t('payments.any')}</option>
+          {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
+        </select>
+        <select id="pf-status" className={FILTER_CTRL} aria-label={t('payments.status')} value={f.status} onChange={(e) => set({ status: e.target.value })}>
+          <option value="">{t('payments.status')}: {t('payments.any')}</option>
+          {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{t(`paymentStatus.${s}`)}</option>)}
+        </select>
+        <span className="flex items-center gap-1 text-sm text-slate-600">
+          $
+          <input type="number" min={0} step="0.01" inputMode="decimal" className={`${FILTER_CTRL} !w-24`} aria-label={t('payments.min')} placeholder={t('payments.min')} value={f.min} onChange={(e) => set({ min: e.target.value })} />
+          –
+          <input type="number" min={0} step="0.01" inputMode="decimal" className={`${FILTER_CTRL} !w-24`} aria-label={t('payments.max')} placeholder={t('payments.max')} value={f.max} onChange={(e) => set({ max: e.target.value })} />
+        </span>
+      </FilterBar>
 
       {data?.length === MAX_ROWS && (
         <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{t('payments.tooMany', { count: MAX_ROWS })}</p>
       )}
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="card"><div className="text-sm text-slate-500">{t('payments.paidTotal')}</div><div className="text-xl font-semibold text-emerald-700">{money(totals.paid)}</div></div>
-        <div className="card"><div className="text-sm text-slate-500">{t('payments.pendingTotal')}</div><div className="text-xl font-semibold text-amber-700">{money(totals.pending)}</div></div>
-        <div className="card"><div className="text-sm text-slate-500">{t('payments.refundedTotal')}</div><div className="text-xl font-semibold text-slate-600">{money(totals.refunded)}</div></div>
-        <div className="card"><div className="text-sm text-slate-500">{t('payments.count')}</div><div className="text-xl font-semibold">{filtered.length}</div></div>
+      <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm">
+        <span>{t('payments.paidTotal')}: <b className="text-emerald-700">{money(totals.paid)}</b></span>
+        <span>{t('payments.pendingTotal')}: <b className="text-amber-700">{money(totals.pending)}</b></span>
+        {totals.refunded > 0 && <span>{t('payments.refundedTotal')}: <b className="text-slate-600">{money(totals.refunded)}</b></span>}
+        <span className="text-slate-500">{t('payments.count')}: {filtered.length}</span>
       </div>
 
       {isLoading ? (

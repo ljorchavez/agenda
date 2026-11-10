@@ -15,6 +15,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  addDays,
   format,
   startOfMonth,
   startOfYear,
@@ -24,12 +25,14 @@ import {
   endOfMonth,
   endOfYear,
 } from 'date-fns';
-import type { ReportDto, ReportGranularity, ReportKpis, ServiceDto } from '@agenda/shared';
-import { ErrorText, Loading, Modal, PageHeader } from '../components/ui';
+import type { DashboardDto, ReportDto, ReportGranularity, ReportKpis, ServiceDto } from '@agenda/shared';
+import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
+import { DragHandle, SortableWidgets } from '../components/SortableWidgets';
+import { FILTER_CTRL, FilterBar } from '../components/FilterBar';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
 import { useMyLocations, useResources } from '../lib/queries';
-import { dateLocale, money, percent } from '../lib/format';
+import { dateLocale, dateTime, money, percent } from '../lib/format';
 
 const PRESETS = [
   'last7',
@@ -83,26 +86,57 @@ const WIDGETS = [
   'appointments',
   'newCustomers',
   'services',
+  'locations',
+  'resources',
   'methods',
   'sources',
   'weekday',
   'heatmap',
   'topCustomers',
+  'upcoming',
 ] as const;
 type Widget = (typeof WIDGETS)[number];
-const WIDGET_KEY = 'agenda.reports.widgets';
+/** Blocks that take the full width of the grid */
+const WIDE: ReadonlySet<Widget> = new Set<Widget>(['kpis', 'revenue']);
+const LAYOUT_KEY = 'agenda.reports.layout';
+const OLD_WIDGET_KEY = 'agenda.reports.widgets';
 
-function loadWidgets(): Widget[] {
+/** Order of every block plus the hidden ones, saved in this browser. */
+interface Layout {
+  order: Widget[];
+  hidden: Widget[];
+}
+const isWidget = (w: string): w is Widget => (WIDGETS as readonly string[]).includes(w);
+
+function loadLayout(): Layout {
   try {
-    const raw = localStorage.getItem(WIDGET_KEY);
+    const raw = localStorage.getItem(LAYOUT_KEY);
     if (raw) {
-      const list = (JSON.parse(raw) as string[]).filter((w): w is Widget => (WIDGETS as readonly string[]).includes(w));
-      if (list.length) return list;
+      const l = JSON.parse(raw) as { order?: string[]; hidden?: string[] };
+      const order = (l.order ?? []).filter(isWidget);
+      // Blocks added after the layout was saved go at the end.
+      for (const w of WIDGETS) if (!order.includes(w)) order.push(w);
+      return { order, hidden: (l.hidden ?? []).filter(isWidget) };
+    }
+    // Earlier version only saved the visible blocks.
+    const old = localStorage.getItem(OLD_WIDGET_KEY);
+    if (old) {
+      const visible = (JSON.parse(old) as string[]).filter(isWidget);
+      const known = ['kpis', 'revenue', 'appointments', 'newCustomers', 'services', 'methods', 'sources', 'weekday', 'heatmap', 'topCustomers'];
+      return { order: [...WIDGETS], hidden: WIDGETS.filter((w) => known.includes(w) && !visible.includes(w)) };
     }
   } catch {
     /* storage unavailable */
   }
-  return [...WIDGETS];
+  return { order: [...WIDGETS], hidden: [] };
+}
+
+function storeLayout(l: Layout) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+  } catch {
+    /* ignore */
+  }
 }
 
 const BRAND = '#0f766e';
@@ -142,17 +176,67 @@ function Delta({ cur, prev, k, rate }: { cur: number; prev: number; k: keyof Rep
 
 function Card({ title, children, className = '' }: { title: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`card ${className}`}>
-      <h2 className="mb-4 font-semibold">{title}</h2>
+    <section className={`card h-full ${className}`}>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h2 className="font-semibold">{title}</h2>
+        <DragHandle label={title} />
+      </div>
       {children}
     </section>
+  );
+}
+
+/** Next appointments (what the old "Inicio" page listed). */
+function UpcomingCard() {
+  const { t } = useTranslation();
+  const q = useQuery({
+    queryKey: ['dashboard', 'upcoming'],
+    queryFn: () => {
+      const from = new Date();
+      return api<DashboardDto>(`/metrics/dashboard?from=${encodeURIComponent(addDays(from, -30).toISOString())}&to=${encodeURIComponent(from.toISOString())}`);
+    },
+  });
+  const list = q.data?.upcoming ?? [];
+  return (
+    <Card title={t('dashboard.upcoming')}>
+      {q.isLoading ? (
+        <Loading />
+      ) : list.length === 0 ? (
+        <p className="text-sm text-slate-500">{t('dashboard.noUpcoming')}</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {list.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <div>
+                <div className="font-medium">{a.customerName}</div>
+                <div className="text-sm text-slate-500">{a.serviceName}</div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-600">{dateTime(a.startsAt)}</span>
+                <StatusBadge status={a.status} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
 export function ReportsPage() {
   const { t, i18n } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const [widgets, setWidgets] = useState<Widget[]>(loadWidgets);
+  const [layout, setLayout] = useState<Layout>(loadLayout);
+  const widgets = layout.order.filter((w) => !layout.hidden.includes(w));
+  const updateLayout = (l: Layout) => {
+    setLayout(l);
+    storeLayout(l);
+  };
+  /** New order of the visible blocks; hidden ones keep their place. */
+  const saveWidgets = (visibleOrder: Widget[]) => {
+    const queue = [...visibleOrder];
+    updateLayout({ ...layout, order: layout.order.map((w) => (layout.hidden.includes(w) ? w : queue.shift()!)) });
+  };
   const [customizing, setCustomizing] = useState(false);
 
   const { tenant } = useAuth();
@@ -245,16 +329,8 @@ export function ReportsPage() {
     URL.revokeObjectURL(a.href);
   };
 
-  const toggleWidget = (w: Widget) => {
-    const next = widgets.includes(w) ? widgets.filter((x) => x !== w) : WIDGETS.filter((x) => x === w || widgets.includes(x));
-    setWidgets(next);
-    try {
-      localStorage.setItem(WIDGET_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore */
-    }
-  };
-  const show = (w: Widget) => widgets.includes(w);
+  const toggleWidget = (w: Widget) =>
+    updateLayout({ ...layout, hidden: layout.hidden.includes(w) ? layout.hidden.filter((x) => x !== w) : [...layout.hidden, w] });
 
   const k = data?.kpis;
   const pk = data?.previousKpis;
@@ -284,6 +360,286 @@ export function ReportsPage() {
     return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   }, [data]);
 
+  /** One report block by key (each can be shown/hidden and dragged to a new place). */
+  const renderWidget = (w: Widget): ReactNode => {
+    if (!data || !k || !pk) return null;
+    switch (w) {
+      case 'kpis':
+        return (
+        <Card title={t('reports.widgets.kpis')}>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {kpiDefs.map((d) => (
+              <div key={d.key} className="rounded-lg border border-slate-200 p-3">
+                <div className="text-sm text-slate-500">{d.label}</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{d.fmt(k[d.key])}</div>
+                {d.sub && <div className="text-xs text-slate-500">{d.sub}</div>}
+                {compare && <Delta cur={k[d.key]} prev={pk[d.key]} k={d.key} rate={d.rate} />}
+              </div>
+            ))}
+          </div>
+        </Card>
+        );
+      case 'revenue':
+        return (
+        <Card title={t('reports.charts.revenue')}>
+          <div className="h-72">
+            <ResponsiveContainer>
+              <ComposedChart data={rows} margin={{ left: 4, right: 8 }}>
+                <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
+                <YAxis tickLine={false} axisLine={false} fontSize={12} width={48} tickFormatter={tickMoney} />
+                <Tooltip formatter={(v) => money(Number(v) * 100)} cursor={{ fill: '#f1f5f9' }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="revenue" name={t('reports.current')} fill={BRAND} radius={[4, 4, 0, 0]} />
+                {compare && (
+                  <Line dataKey="prevRevenue" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+        );
+      case 'appointments':
+        return (
+        <Card title={t('reports.charts.appointments')}>
+          <div className="h-64">
+            <ResponsiveContainer>
+              <ComposedChart data={rows}>
+                <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={32} />
+                <Tooltip cursor={{ fill: '#f1f5f9' }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar stackId="a" dataKey="completed" name={t('status.completed')} fill={C.completed} />
+                <Bar stackId="a" dataKey="pending" name={t('reports.pending')} fill={C.pending} />
+                <Bar stackId="a" dataKey="noShows" name={t('status.no_show')} fill={C.no_show} />
+                <Bar stackId="a" dataKey="cancelled" name={t('status.cancelled')} fill={C.cancelled} radius={[4, 4, 0, 0]} />
+                {compare && (
+                  <Line dataKey="prevAppointments" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+        );
+      case 'newCustomers':
+        return (
+        <Card title={t('reports.charts.newCustomers')}>
+          <div className="h-64">
+            <ResponsiveContainer>
+              <ComposedChart data={rows}>
+                <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={32} />
+                <Tooltip cursor={{ fill: '#f1f5f9' }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="newCustomers" name={t('reports.current')} fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                {compare && (
+                  <Line dataKey="prevNewCustomers" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+        );
+      case 'services':
+        return (
+        <Card title={t('reports.charts.services')}>
+          {data.byService.length === 0 ? (
+            <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+          ) : (
+            <div style={{ height: Math.max(160, data.byService.length * 36) }}>
+              <ResponsiveContainer>
+                <BarChart data={data.byService.map((s) => ({ ...s, revenue: s.revenueCents / 100 }))} layout="vertical" margin={{ left: 8, right: 48 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} fontSize={12} width={130} />
+                  <Tooltip formatter={(v, name) => (name === 'revenue' ? money(Number(v) * 100) : v)} cursor={{ fill: '#f1f5f9' }} />
+                  <Bar dataKey="count" name={t('reports.completedAppts')} fill={BRAND} radius={[0, 4, 4, 0]} label={{ position: 'right', fontSize: 12 }} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+        );
+      case 'locations':
+        return (data.byLocation?.length ?? 0) > 1 ? (
+        <Card title={t('reports.charts.locations')}>
+          <ul className="space-y-3">
+            {data.byLocation.map((r) => {
+              const top = Math.max(...data.byLocation.map((x) => x.revenueCents), 1);
+              return (
+                <li key={r.id}>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>⌂ {r.name} <span className="text-slate-400">· {t('reports.bookingsN', { count: r.count })}</span></span>
+                    <span className="font-medium">{money(r.revenueCents)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: BRAND }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+        ) : null;
+      case 'resources':
+        return data.byResource.length > 0 ? (
+        <Card title={t(`kinds.${kind}.resources`)}>
+          <ul className="space-y-3">
+            {data.byResource.map((r) => {
+              const top = Math.max(...data.byResource.map((x) => x.revenueCents), 1);
+              return (
+                <li key={r.id}>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>{r.name} <span className="text-slate-400">· {t('reports.bookingsN', { count: r.count })}</span></span>
+                    <span className="font-medium">{money(r.revenueCents)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: r.color }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+        ) : null;
+      case 'methods':
+        return (
+        <Card title={t('reports.charts.methods')}>
+          {data.byMethod.length === 0 ? (
+            <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+          ) : (
+            <ul className="space-y-3">
+              {data.byMethod.map((m, i) => {
+                const share = k.revenueCents > 0 ? m.revenueCents / k.revenueCents : 0;
+                return (
+                  <li key={m.method}>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span>{t(`methods.${m.method}`)} <span className="text-slate-400">· {m.count}</span></span>
+                      <span className="font-medium">{money(m.revenueCents)} <span className="text-slate-400">({percent(share)})</span></span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full" style={{ width: `${share * 100}%`, background: METHOD_COLORS[i % METHOD_COLORS.length] }} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+        );
+      case 'sources':
+        return (
+        <Card title={t('reports.charts.sources')}>
+          {data.bySource.length === 0 ? (
+            <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+          ) : (
+            <ul className="space-y-3">
+              {(['online', 'staff'] as const).map((s) => {
+                const count = data.bySource.find((x) => x.source === s)?.count ?? 0;
+                const share = k.appointments > 0 ? count / k.appointments : 0;
+                return (
+                  <li key={s}>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span>{t(`source.${s}`)}</span>
+                      <span className="font-medium">{count} <span className="text-slate-400">({percent(share)})</span></span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full" style={{ width: `${share * 100}%`, background: s === 'online' ? '#0ea5e9' : BRAND }} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+        );
+      case 'weekday':
+        return (
+        <Card title={t('dashboard.byWeekday')}>
+          <div className="h-56">
+            <ResponsiveContainer>
+              <BarChart data={[1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: weekdayName(d), count: data.byWeekday.find((w) => w.weekday === d)?.count ?? 0 }))}>
+                <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={32} />
+                <Tooltip cursor={{ fill: '#f1f5f9' }} />
+                <Bar dataKey="count" name={t('dashboard.appointments')} fill={BRAND} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+        );
+      case 'heatmap':
+        return (
+        <Card title={t('reports.charts.heatmap')}>
+          {heatHours.length === 0 ? (
+            <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-separate border-spacing-1 text-xs">
+                <thead>
+                  <tr>
+                    <th />
+                    {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                      <th key={d} className="font-medium capitalize text-slate-500">{weekdayName(d)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {heatHours.map((h) => (
+                    <tr key={h}>
+                      <td className="pr-1 text-right text-slate-500">{String(h).padStart(2, '0')}:00</td>
+                      {[1, 2, 3, 4, 5, 6, 7].map((d) => {
+                        const v = data.heatmap.find((x) => x.weekday === d && x.hour === h)?.count ?? 0;
+                        const a = v / maxHeat;
+                        return (
+                          <td
+                            key={d}
+                            title={`${weekdayName(d)} ${h}:00 · ${v}`}
+                            className="h-6 min-w-8 rounded text-center"
+                            style={{ background: v ? `rgba(15,118,110,${0.12 + a * 0.88})` : '#f1f5f9', color: a > 0.55 ? 'white' : '#334155' }}
+                          >
+                            {v || ''}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+        );
+      case 'topCustomers':
+        return (
+        <Card title={t('dashboard.topCustomers')}>
+          {data.topCustomers.length === 0 ? (
+            <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+          ) : (
+            <ol className="divide-y divide-slate-100">
+              {data.topCustomers.map((c, i) => (
+                <li key={c.id} className="flex items-center justify-between gap-2 py-2">
+                  <span className="flex items-center gap-2">
+                    <span className="w-5 text-right text-xs text-slate-400">{i + 1}</span>
+                    <Link to={`/customers/${c.id}`} className="font-medium text-slate-800 hover:text-brand-700">{c.name}</Link>
+                  </span>
+                  <span className="text-right">
+                    <span className="block font-medium">{money(c.totalSpentCents)}</span>
+                    <span className="block text-xs text-slate-500">{t('dashboard.visits', { count: c.visits })}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+        );
+      case 'upcoming':
+        return <UpcomingCard />;
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -296,94 +652,74 @@ export function ReportsPage() {
         }
       />
 
-      {/* Filters */}
-      <div className="card mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t('reports.period')}</span>
-          <select
-            className="input"
-            value={preset}
-            onChange={(e) => {
-              const p = e.target.value as Preset;
-              if (p === 'custom') set({ p, from: range.from, to: range.to });
-              else set({ p, from: null, to: null });
-            }}
-          >
-            {PRESETS.map((p) => (
-              <option key={p} value={p}>{t(`reports.presets.${p}`)}</option>
-            ))}
-          </select>
-        </label>
-        {preset === 'custom' ? (
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <label>
-              <span className="mb-1 block text-slate-600">{t('reports.from')}</span>
-              <input type="date" className="input" value={range.from} max={range.to} onChange={(e) => e.target.value && set({ from: e.target.value })} />
-            </label>
-            <label>
-              <span className="mb-1 block text-slate-600">{t('reports.to')}</span>
-              <input type="date" className="input" value={range.to} min={range.from} onChange={(e) => e.target.value && set({ to: e.target.value })} />
-            </label>
-          </div>
-        ) : (
-          <div className="flex items-end pb-2 text-sm text-slate-500">{fmtRange(range)}</div>
-        )}
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t('reports.groupBy')}</span>
-          <select className="input" value={granularity} onChange={(e) => set({ g: e.target.value })}>
-            <option value="">{t('reports.auto')}</option>
-            <option value="day">{t('reports.granularity.day')}</option>
-            <option value="week">{t('reports.granularity.week')}</option>
-            <option value="month">{t('reports.granularity.month')}</option>
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t('reports.service')}</span>
-          <select className="input" value={serviceId} onChange={(e) => set({ service: e.target.value })}>
-            <option value="">{t('reports.all')}</option>
-            {services.data?.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}{s.active ? '' : ` (${t('services.inactive')})`}</option>
-            ))}
-          </select>
-        </label>
-        {!scoped && !ownLocation && locs.multi && (
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t('locations.location')}</span>
-            <select className="input" value={loc} onChange={(e) => set({ loc: e.target.value, who: null })}>
-              <option value="">{t('reports.all')}</option>
-              {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-          </label>
-        )}
-        {!scoped && resources.length > 1 && (
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t(`kinds.${kind}.resource`)}</span>
-            <select className="input" value={who} onChange={(e) => set({ who: e.target.value })}>
-              <option value="">{t('reports.all')}</option>
-              {resources.map((u) => (
-                <option key={u.id} value={u.id}>{u.name}{u.active ? '' : ` (${t('services.inactive')})`}</option>
+      {/* Filters: period on top, the rest behind "Filtros" */}
+      <FilterBar
+        active={[serviceId, who, source, granularity, loc].filter(Boolean).length}
+        onClear={() => set({ service: null, who: null, source: null, g: null, loc: null })}
+        primary={
+          <>
+            <select
+              className={FILTER_CTRL}
+              aria-label={t('reports.period')}
+              value={preset}
+              onChange={(e) => {
+                const p = e.target.value as Preset;
+                if (p === 'custom') set({ p, from: range.from, to: range.to });
+                else set({ p, from: null, to: null });
+              }}
+            >
+              {PRESETS.map((p) => (
+                <option key={p} value={p}>{t(`reports.presets.${p}`)}</option>
               ))}
             </select>
-          </label>
-        )}
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t('reports.source')}</span>
-          <select className="input" value={source} onChange={(e) => set({ source: e.target.value })}>
-            <option value="">{t('reports.all')}</option>
-            <option value="online">{t('source.online')}</option>
-            <option value="staff">{t('source.staff')}</option>
+            {preset === 'custom' ? (
+              <span className="flex items-center gap-1">
+                <input type="date" className={FILTER_CTRL} aria-label={t('reports.from')} value={range.from} max={range.to} onChange={(e) => e.target.value && set({ from: e.target.value })} />
+                <span className="text-slate-400">–</span>
+                <input type="date" className={FILTER_CTRL} aria-label={t('reports.to')} value={range.to} min={range.from} onChange={(e) => e.target.value && set({ to: e.target.value })} />
+              </span>
+            ) : (
+              <span className="text-sm text-slate-500">{fmtRange(range)}</span>
+            )}
+            <label className="flex items-center gap-1.5 text-sm text-slate-700">
+              <input type="checkbox" checked={compare} onChange={(e) => set({ compare: e.target.checked ? null : '0' })} />
+              {t('reports.compare')}
+            </label>
+          </>
+        }
+      >
+        <select className={FILTER_CTRL} aria-label={t('reports.groupBy')} value={granularity} onChange={(e) => set({ g: e.target.value })}>
+          <option value="">{t('reports.groupBy')}: {t('reports.auto')}</option>
+          <option value="day">{t('reports.granularity.day')}</option>
+          <option value="week">{t('reports.granularity.week')}</option>
+          <option value="month">{t('reports.granularity.month')}</option>
+        </select>
+        <select className={FILTER_CTRL} aria-label={t('reports.service')} value={serviceId} onChange={(e) => set({ service: e.target.value })}>
+          <option value="">{t('reports.service')}: {t('reports.all')}</option>
+          {services.data?.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}{s.active ? '' : ` (${t('services.inactive')})`}</option>
+          ))}
+        </select>
+        {!scoped && !ownLocation && locs.multi && (
+          <select className={FILTER_CTRL} aria-label={t('locations.location')} value={loc} onChange={(e) => set({ loc: e.target.value, who: null })}>
+            <option value="">{t('locations.location')}: {t('reports.all')}</option>
+            {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
-        </label>
-        <label className="flex items-center gap-2 self-end pb-2 text-sm">
-          <input type="checkbox" checked={compare} onChange={(e) => set({ compare: e.target.checked ? null : '0' })} />
-          {t('reports.compare')}
-        </label>
-        {(serviceId || who || source || granularity) && (
-          <button className="self-end pb-2 text-left text-sm text-brand-700" onClick={() => set({ service: null, who: null, source: null, g: null })}>
-            {t('reports.clear')}
-          </button>
         )}
-      </div>
+        {!scoped && resources.length > 1 && (
+          <select className={FILTER_CTRL} aria-label={t(`kinds.${kind}.resource`)} value={who} onChange={(e) => set({ who: e.target.value })}>
+            <option value="">{t(`kinds.${kind}.resource`)}: {t('reports.all')}</option>
+            {resources.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}{u.active ? '' : ` (${t('services.inactive')})`}</option>
+            ))}
+          </select>
+        )}
+        <select className={FILTER_CTRL} aria-label={t('reports.source')} value={source} onChange={(e) => set({ source: e.target.value })}>
+          <option value="">{t('reports.source')}: {t('reports.all')}</option>
+          <option value="online">{t('source.online')}</option>
+          <option value="staff">{t('source.staff')}</option>
+        </select>
+      </FilterBar>
 
       {range.from > range.to && <p className="mb-4 text-sm text-rose-700">{t('reports.invalidRange')}</p>}
       <ErrorText error={report.error} ns="reports" />
@@ -396,286 +732,23 @@ export function ReportsPage() {
               {t('reports.comparing', { range: fmtRange(data.previousRange) })}
             </p>
           )}
+          <p className="mb-3 text-xs text-slate-500">{t('reports.dragHint')}</p>
 
-          {show('kpis') && (
-            <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {kpiDefs.map((d) => (
-                <div key={d.key} className="card">
-                  <div className="text-sm text-slate-500">{d.label}</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">{d.fmt(k[d.key])}</div>
-                  {d.sub && <div className="text-xs text-slate-500">{d.sub}</div>}
-                  {compare && <Delta cur={k[d.key]} prev={pk[d.key]} k={d.key} rate={d.rate} />}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            {show('revenue') && (
-              <Card title={t('reports.charts.revenue')} className="lg:col-span-2">
-                <div className="h-72">
-                  <ResponsiveContainer>
-                    <ComposedChart data={rows} margin={{ left: 4, right: 8 }}>
-                      <CartesianGrid vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
-                      <YAxis tickLine={false} axisLine={false} fontSize={12} width={48} tickFormatter={tickMoney} />
-                      <Tooltip formatter={(v) => money(Number(v) * 100)} cursor={{ fill: '#f1f5f9' }} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="revenue" name={t('reports.current')} fill={BRAND} radius={[4, 4, 0, 0]} />
-                      {compare && (
-                        <Line dataKey="prevRevenue" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />
-                      )}
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
-
-            {show('appointments') && (
-              <Card title={t('reports.charts.appointments')}>
-                <div className="h-64">
-                  <ResponsiveContainer>
-                    <ComposedChart data={rows}>
-                      <CartesianGrid vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
-                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={32} />
-                      <Tooltip cursor={{ fill: '#f1f5f9' }} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar stackId="a" dataKey="completed" name={t('status.completed')} fill={C.completed} />
-                      <Bar stackId="a" dataKey="pending" name={t('reports.pending')} fill={C.pending} />
-                      <Bar stackId="a" dataKey="noShows" name={t('status.no_show')} fill={C.no_show} />
-                      <Bar stackId="a" dataKey="cancelled" name={t('status.cancelled')} fill={C.cancelled} radius={[4, 4, 0, 0]} />
-                      {compare && (
-                        <Line dataKey="prevAppointments" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />
-                      )}
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
-
-            {show('newCustomers') && (
-              <Card title={t('reports.charts.newCustomers')}>
-                <div className="h-64">
-                  <ResponsiveContainer>
-                    <ComposedChart data={rows}>
-                      <CartesianGrid vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
-                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={32} />
-                      <Tooltip cursor={{ fill: '#f1f5f9' }} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="newCustomers" name={t('reports.current')} fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-                      {compare && (
-                        <Line dataKey="prevNewCustomers" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />
-                      )}
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
-
-            {show('services') && (
-              <Card title={t('reports.charts.services')}>
-                {data.byService.length === 0 ? (
-                  <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
-                ) : (
-                  <div style={{ height: Math.max(160, data.byService.length * 36) }}>
-                    <ResponsiveContainer>
-                      <BarChart data={data.byService.map((s) => ({ ...s, revenue: s.revenueCents / 100 }))} layout="vertical" margin={{ left: 8, right: 48 }}>
-                        <XAxis type="number" hide />
-                        <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} fontSize={12} width={130} />
-                        <Tooltip formatter={(v, name) => (name === 'revenue' ? money(Number(v) * 100) : v)} cursor={{ fill: '#f1f5f9' }} />
-                        <Bar dataKey="count" name={t('reports.completedAppts')} fill={BRAND} radius={[0, 4, 4, 0]} label={{ position: 'right', fontSize: 12 }} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {(data.byLocation?.length ?? 0) > 1 && (
-              <Card title={t('reports.charts.locations')}>
-                <ul className="space-y-3">
-                  {data.byLocation.map((r) => {
-                    const top = Math.max(...data.byLocation.map((x) => x.revenueCents), 1);
-                    return (
-                      <li key={r.id}>
-                        <div className="mb-1 flex justify-between text-sm">
-                          <span>⌂ {r.name} <span className="text-slate-400">· {t('reports.bookingsN', { count: r.count })}</span></span>
-                          <span className="font-medium">{money(r.revenueCents)}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-100">
-                          <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: BRAND }} />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Card>
-            )}
-
-            {data.byResource.length > 0 && (
-              <Card title={t(`kinds.${kind}.resources`)}>
-                <ul className="space-y-3">
-                  {data.byResource.map((r) => {
-                    const top = Math.max(...data.byResource.map((x) => x.revenueCents), 1);
-                    return (
-                      <li key={r.id}>
-                        <div className="mb-1 flex justify-between text-sm">
-                          <span>{r.name} <span className="text-slate-400">· {t('reports.bookingsN', { count: r.count })}</span></span>
-                          <span className="font-medium">{money(r.revenueCents)}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-100">
-                          <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: r.color }} />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Card>
-            )}
-
-            {show('methods') && (
-              <Card title={t('reports.charts.methods')}>
-                {data.byMethod.length === 0 ? (
-                  <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {data.byMethod.map((m, i) => {
-                      const share = k.revenueCents > 0 ? m.revenueCents / k.revenueCents : 0;
-                      return (
-                        <li key={m.method}>
-                          <div className="mb-1 flex justify-between text-sm">
-                            <span>{t(`methods.${m.method}`)} <span className="text-slate-400">· {m.count}</span></span>
-                            <span className="font-medium">{money(m.revenueCents)} <span className="text-slate-400">({percent(share)})</span></span>
-                          </div>
-                          <div className="h-2 rounded-full bg-slate-100">
-                            <div className="h-2 rounded-full" style={{ width: `${share * 100}%`, background: METHOD_COLORS[i % METHOD_COLORS.length] }} />
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </Card>
-            )}
-
-            {show('sources') && (
-              <Card title={t('reports.charts.sources')}>
-                {data.bySource.length === 0 ? (
-                  <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {(['online', 'staff'] as const).map((s) => {
-                      const count = data.bySource.find((x) => x.source === s)?.count ?? 0;
-                      const share = k.appointments > 0 ? count / k.appointments : 0;
-                      return (
-                        <li key={s}>
-                          <div className="mb-1 flex justify-between text-sm">
-                            <span>{t(`source.${s}`)}</span>
-                            <span className="font-medium">{count} <span className="text-slate-400">({percent(share)})</span></span>
-                          </div>
-                          <div className="h-2 rounded-full bg-slate-100">
-                            <div className="h-2 rounded-full" style={{ width: `${share * 100}%`, background: s === 'online' ? '#0ea5e9' : BRAND }} />
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </Card>
-            )}
-
-            {show('weekday') && (
-              <Card title={t('dashboard.byWeekday')}>
-                <div className="h-56">
-                  <ResponsiveContainer>
-                    <BarChart data={[1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: weekdayName(d), count: data.byWeekday.find((w) => w.weekday === d)?.count ?? 0 }))}>
-                      <CartesianGrid vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
-                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={32} />
-                      <Tooltip cursor={{ fill: '#f1f5f9' }} />
-                      <Bar dataKey="count" name={t('dashboard.appointments')} fill={BRAND} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </Card>
-            )}
-
-            {show('heatmap') && (
-              <Card title={t('reports.charts.heatmap')}>
-                {heatHours.length === 0 ? (
-                  <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-separate border-spacing-1 text-xs">
-                      <thead>
-                        <tr>
-                          <th />
-                          {[1, 2, 3, 4, 5, 6, 7].map((d) => (
-                            <th key={d} className="font-medium capitalize text-slate-500">{weekdayName(d)}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {heatHours.map((h) => (
-                          <tr key={h}>
-                            <td className="pr-1 text-right text-slate-500">{String(h).padStart(2, '0')}:00</td>
-                            {[1, 2, 3, 4, 5, 6, 7].map((d) => {
-                              const v = data.heatmap.find((x) => x.weekday === d && x.hour === h)?.count ?? 0;
-                              const a = v / maxHeat;
-                              return (
-                                <td
-                                  key={d}
-                                  title={`${weekdayName(d)} ${h}:00 · ${v}`}
-                                  className="h-6 min-w-8 rounded text-center"
-                                  style={{ background: v ? `rgba(15,118,110,${0.12 + a * 0.88})` : '#f1f5f9', color: a > 0.55 ? 'white' : '#334155' }}
-                                >
-                                  {v || ''}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {show('topCustomers') && (
-              <Card title={t('dashboard.topCustomers')}>
-                {data.topCustomers.length === 0 ? (
-                  <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
-                ) : (
-                  <ol className="divide-y divide-slate-100">
-                    {data.topCustomers.map((c, i) => (
-                      <li key={c.id} className="flex items-center justify-between gap-2 py-2">
-                        <span className="flex items-center gap-2">
-                          <span className="w-5 text-right text-xs text-slate-400">{i + 1}</span>
-                          <Link to={`/customers/${c.id}`} className="font-medium text-slate-800 hover:text-brand-700">{c.name}</Link>
-                        </span>
-                        <span className="text-right">
-                          <span className="block font-medium">{money(c.totalSpentCents)}</span>
-                          <span className="block text-xs text-slate-500">{t('dashboard.visits', { count: c.visits })}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </Card>
-            )}
-          </div>
+          <SortableWidgets
+            order={widgets}
+            wide={WIDE}
+            onReorder={saveWidgets}
+            render={renderWidget}
+          />
         </div>
       )}
 
       <Modal open={customizing} title={t('reports.customize')} onClose={() => setCustomizing(false)}>
         <p className="mb-3 text-sm text-slate-600">{t('reports.customizeHelp')}</p>
         <div className="grid gap-2 sm:grid-cols-2">
-          {WIDGETS.map((w) => (
+          {layout.order.map((w) => (
             <label key={w} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm">
-              <input type="checkbox" checked={widgets.includes(w)} onChange={() => toggleWidget(w)} />
+              <input type="checkbox" checked={!layout.hidden.includes(w)} onChange={() => toggleWidget(w)} />
               {t(`reports.widgets.${w}`)}
             </label>
           ))}

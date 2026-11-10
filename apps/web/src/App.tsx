@@ -8,7 +8,6 @@ import { AgendaPage } from './pages/Agenda';
 import { BookingPage } from './pages/Booking';
 import { CustomerDetailPage } from './pages/CustomerDetail';
 import { CustomersPage } from './pages/Customers';
-import { DashboardPage } from './pages/Dashboard';
 import { DirectoryPage } from './pages/Directory';
 import { RegisterPage, ResetPasswordPage } from './pages/Auth';
 import { ManagePage } from './pages/Manage';
@@ -58,7 +57,8 @@ export function App() {
           </Protected>
         }
       >
-        <Route path="inicio" element={<DashboardPage />} />
+        {/* "Inicio" was merged into Reportes */}
+        <Route path="inicio" element={<Navigate to="/reports" replace />} />
         <Route path="agenda" element={<AgendaPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="customers/:id" element={<CustomerDetailPage />} />

@@ -178,6 +178,23 @@ export function PaymentSettingsSection({
           </>
         )}
       </section>
+
+      <section className="card space-y-3">
+        <div>
+          <h2 className="font-semibold">{t('paymentSettings.noShowTitle')}</h2>
+          <p className="text-sm text-slate-500">{t('paymentSettings.noShowHelp')}</p>
+        </div>
+        <div className="flex flex-col gap-2 text-sm sm:flex-row sm:gap-6" role="radiogroup" aria-label={t('paymentSettings.noShowTitle')}>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="no-show" disabled={disabled} checked={value.noShowOwes !== false} onChange={() => onChange({ ...value, noShowOwes: true })} />
+            <span><span className="font-medium">{t('paymentSettings.noShowOwes')}</span> <span className="rounded bg-rose-600 px-1 text-[10px] font-bold text-white">$!</span></span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="no-show" disabled={disabled} checked={value.noShowOwes === false} onChange={() => onChange({ ...value, noShowOwes: false })} />
+            <span className="font-medium">{t('paymentSettings.noShowFree')}</span>
+          </label>
+        </div>
+      </section>
     </>
   );
 }

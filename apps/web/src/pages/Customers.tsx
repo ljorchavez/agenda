@@ -9,6 +9,7 @@ import { dateOnly, money } from '../lib/format';
 import { useCustomers } from '../lib/queries';
 import { SortTh, useSort, type SortDir } from '../components/SortableTable';
 import { StarRating } from '../components/Rating';
+import { FILTER_CTRL } from '../components/FilterBar';
 
 /** Columns sorted on the server (the list is paginated); first click direction per column. */
 type SortKey = 'name' | 'visits' | 'totalSpent' | 'rating' | 'lastVisit' | 'frequency' | 'nextAppointment';
@@ -40,8 +41,8 @@ export function CustomersPage() {
   return (
     <>
       <PageHeader title={t('customers.title')} actions={<button className="btn-primary" onClick={() => setCreating(true)}>{t('customers.new')}</button>} />
-      <div className="mb-4 flex flex-wrap gap-2">
-        <input className="input max-w-md flex-1" placeholder={t('customers.searchPlaceholder')} value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="mb-4">
+        <input type="search" className={`${FILTER_CTRL} w-full sm:!w-80`} aria-label={t('customers.searchPlaceholder')} placeholder={t('customers.searchPlaceholder')} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       {isLoading ? (
