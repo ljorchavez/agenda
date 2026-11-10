@@ -146,7 +146,9 @@ await page.getByRole('tab', { name: 'Usuarios' }).click();
 ok('users tab shows logins', await page.getByText('Usuarios con acceso').isVisible());
 ok('payments not on users tab', (await page.getByText('Métodos de pago').count()) === 0);
 // Booking window: status from its chip, payment methods under the pill, edit in place
-const bk = await api('/appointments', { customerId: cust0.id, serviceId: svcs.find((x) => x.active && x.priceCents > 0).id, startsAt: new Date(Date.now() + 2 * 864e5 + 3 * 3600e3).toISOString(), allowOverlap: true }, tok);
+// Tomorrow before opening, so it isn't folded into a busy hour's "+N más"
+const tmw = new Date(Date.now() + 864e5); tmw.setHours(7, 30, 0, 0);
+const bk = await api('/appointments', { customerId: cust0.id, serviceId: svcs.find((x) => x.active && x.priceCents > 0).id, startsAt: tmw.toISOString(), allowOverlap: true }, tok);
 await api('/payments', { customerId: cust0.id, appointmentId: bk.id, amountCents: 5000, method: 'cash' }, tok);
 await page.addInitScript(() => localStorage.setItem('agenda.view', 'week'));
 await page.goto('http://localhost:5173/agenda');
