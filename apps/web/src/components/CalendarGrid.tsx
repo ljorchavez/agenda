@@ -330,7 +330,9 @@ export function CalendarGrid(props: Props) {
                 const avail = p.chips ? `(100% - ${CHIP_LANE_PX}px)` : '100%';
                 const left = `calc(${avail} * ${p.lane / p.lanes} + 3px)`;
                 const width = `calc(${avail} / ${p.lanes} - 6px)`;
-                const narrow = p.lanes > 1;
+                // Short name ("Ana G.") whenever the card is thin, not only when bookings sit side by side.
+                const cardPx = (colWidth - (p.chips ? CHIP_LANE_PX : 0)) / p.lanes - 6;
+                const narrow = p.lanes > 1 || cardPx < 170;
                 const startM = minutesOfDay(ev.start);
                 const dur = Math.max(1, (ev.end.getTime() - ev.start.getTime()) / 60000);
                 const h = Math.max(MIN_EVENT_PX, dur * pxPerMin - 4);
