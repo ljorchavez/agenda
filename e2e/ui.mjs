@@ -238,6 +238,18 @@ await page.getByText('Cuando un cliente no asiste').waitFor();
 const noShowBox = await page.getByText('Cuando un cliente no asiste').boundingBox();
 const methodsBox = await page.getByText('Métodos de pago').boundingBox();
 ok('no-show in right column', !!noShowBox && !!methodsBox && noShowBox.x > methodsBox.x + 200, JSON.stringify([noShowBox?.x, methodsBox?.x]));
+// Promotions: settings tab, coupon in a new booking
+await page.goto('http://localhost:5173/settings?tab=promos');
+await page.getByTestId('coupons-section').waitFor();
+ok('promotions tab shows rewards and coupons', (await page.getByTestId('rewards-section').isVisible()) && ((await page.getByTestId('coupons-section').textContent()) ?? '').includes('BIENVENIDA'));
+await page.goto('http://localhost:5173/agenda');
+await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
+await page.locator('[role=listbox] button').first().click();
+if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
+await page.fill('#na-coupon', 'bienvenida');
+await page.getByTestId('discount-preview').waitFor({ timeout: 6000 }).catch(() => {});
+ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('BIENVENIDA'));
+await page.keyboard.press('Escape');
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));
