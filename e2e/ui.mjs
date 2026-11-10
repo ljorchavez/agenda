@@ -30,7 +30,7 @@ await search.fill(firstName);
 await page.waitForTimeout(600);
 await page.locator('[role=listbox] button').first().click();
 ok('customer picked shows card', (await page.locator('[data-testid=picked-customer]').count()) === 1);
-const pickedName = await page.locator('[data-testid=picked-customer] .font-medium').textContent();
+const pickedName = await page.locator('[data-testid=picked-customer] .truncate').first().textContent();
 await page.fill('input[type=datetime-local]', '2026-12-01T07:00');
 await page.locator('form .btn-primary').last().click();
 await page.waitForTimeout(1500);
