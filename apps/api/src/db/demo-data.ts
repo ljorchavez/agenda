@@ -1,7 +1,7 @@
 /**
  * Demo data. Run with `pnpm db:seed`, and reset every night by the `/api/cron/reset-demo` job.
  * One owner login (demo@agenda.mx / demo1234) for every demo business, switchable in the app:
- * nutrition clinic, restaurant, barbershop with two locations, yoga studio and padel club.
+ * nutrition clinic, restaurant, barbershop with two locations, yoga studio, padel club and medical practice.
  * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
  * (team members), pedro@ (nutrition staff). Plus clearly-labelled `demo-*` directory listings.
  */
@@ -191,21 +191,10 @@ export async function seedDemo() {
   }
 
   const inserted = await db.insert(appointments).values(apptValues).returning();
-  const payValues = inserted
-    .filter((a) => a.status === 'completed')
-    .map((a) => ({
-      tenantId,
-      customerId: a.customerId,
-      appointmentId: a.id,
-      amountCents: a.priceCents,
-      method: pick(['cash', 'card', 'transfer', 'cash'] as const),
-      status: 'paid' as const,
-      paidAt: a.endsAt,
-    }));
-  if (payValues.length) await db.insert(payments).values(payValues);
+  const payValues = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'transfer', 'cash'] });
 
   console.log(
-    `Seeded tenant "${tenant!.name}" with ${custs.length} customers, ${inserted.length} appointments, ${payValues.length} payments`,
+    `Seeded tenant "${tenant!.name}" with ${custs.length} customers, ${inserted.length} appointments, ${payValues} payments`,
   );
   console.log('Login: demo@agenda.mx / demo1234 — public page: /b/nutricion-demo');
 
@@ -213,6 +202,7 @@ export async function seedDemo() {
   await seedBarbershop();
   await seedClasses();
   await seedPadel();
+  await seedDoctor();
   await seedDirectory();
   console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
 }
@@ -318,7 +308,8 @@ async function seedRestaurant() {
         startsAt: start.toJSDate(),
         endsAt: start.plus({ minutes: 90 }).toJSDate(),
         status,
-        priceCents: status === 'completed' ? party * (28000 + Math.floor(rand() * 20) * 1000) : 0,
+        // Groups of 6+ book a set menu, so the price is known ahead and they can leave a deposit
+        priceCents: status === 'completed' ? party * (28000 + Math.floor(rand() * 20) * 1000) : party >= 6 ? party * 35000 : 0,
         source: rand() > 0.45 ? 'online' : 'staff',
         partySize: party,
         resourceId: table.id,
@@ -327,18 +318,7 @@ async function seedRestaurant() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const pays = inserted
-    .filter((a) => a.status === 'completed')
-    .map((a) => ({
-      tenantId,
-      customerId: a.customerId,
-      appointmentId: a.id,
-      amountCents: a.priceCents,
-      method: pick(['card', 'card', 'cash', 'transfer'] as const),
-      status: 'paid' as const,
-      paidAt: a.endsAt,
-    }));
-  await insertChunked(payments, pays);
+  await seedPayments(tenantId, inserted, { manual: ['card', 'card', 'cash', 'transfer'] });
   console.log(`Seeded restaurant with ${tables.length} tables, ${inserted.length} reservations`);
 }
 
@@ -363,18 +343,54 @@ async function demoCustomers(tenantId: string, count: number, phonePrefix: strin
   )) as unknown as (typeof customers.$inferSelect)[];
 }
 
-async function payCompleted(tenantId: string, rows: (typeof appointments.$inferSelect)[]) {
-  const pays = rows
-    .filter((a) => a.status === 'completed' && a.priceCents > 0)
-    .map((a) => ({
+type Method = 'cash' | 'card' | 'transfer';
+/**
+ * Payments for demo bookings, covering every collection state: online deposits (Mercado Pago),
+ * deposits later settled in person, deposits never settled (they owe), unpaid past bookings,
+ * prepaid upcoming bookings and no-shows that lost their deposit.
+ */
+async function seedPayments(
+  tenantId: string,
+  rows: (typeof appointments.$inferSelect)[],
+  opts: { manual: readonly Method[]; depositPct?: number; online?: number },
+) {
+  const now = Date.now();
+  const pct = opts.depositPct ?? 30;
+  const online = opts.online ?? 0.35;
+  const pays: (typeof payments.$inferInsert)[] = [];
+  const add = (a: (typeof appointments.$inferSelect), amountCents: number, method: Method | 'mercadopago', paidAt: Date) =>
+    pays.push({
       tenantId,
       customerId: a.customerId,
       appointmentId: a.id,
-      amountCents: a.priceCents,
-      method: pick(['cash', 'card', 'card', 'transfer'] as const),
-      status: 'paid' as const,
-      paidAt: a.endsAt,
-    }));
+      amountCents,
+      method,
+      status: 'paid',
+      provider: method === 'mercadopago' ? 'mercadopago' : null,
+      paidAt,
+    });
+  for (const a of rows) {
+    if (a.priceCents <= 0) continue;
+    const deposit = Math.max(100, Math.round((a.priceCents * pct) / 10000) * 100);
+    const depositAt = new Date(a.startsAt.getTime() - (1 + Math.floor(rand() * 5)) * 86400e3);
+    const depositMethod = () => (rand() < 0.75 ? 'mercadopago' : 'transfer');
+    const r = rand();
+    if (a.endsAt.getTime() > now && a.status !== 'completed') {
+      // Upcoming
+      if (a.status === 'cancelled' || a.status === 'no_show') continue;
+      if (r < 0.3) add(a, deposit, depositMethod(), new Date(Math.min(depositAt.getTime(), now)));
+      else if (r < 0.3 + online * 0.35) add(a, a.priceCents, 'mercadopago', new Date(Math.min(depositAt.getTime(), now)));
+      continue;
+    }
+    if (a.status === 'completed') {
+      if (r < 0.06) continue; // never paid: owes everything
+      if (r < 0.14) add(a, deposit, depositMethod(), depositAt); // deposit only: owes the balance
+      else if (r < 0.14 + online) {
+        add(a, deposit, depositMethod(), depositAt);
+        add(a, a.priceCents - deposit, pick(opts.manual), a.endsAt);
+      } else add(a, a.priceCents, pick(opts.manual), a.endsAt);
+    } else if (a.status === 'no_show' && r < 0.4) add(a, deposit, depositMethod(), depositAt);
+  }
   await insertChunked(payments, pays);
   return pays.length;
 }
@@ -489,7 +505,7 @@ async function seedBarbershop() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await payCompleted(tenantId, inserted);
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'] });
   console.log(`Seeded barbershop with ${pros.length} barbers, ${inserted.length} appointments, ${paid} payments`);
 }
 
@@ -595,7 +611,7 @@ async function seedClasses() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await payCompleted(tenantId, inserted);
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'], depositPct: 50, online: 0.5 });
   console.log(`Seeded yoga studio with ${sessions.length} classes, ${inserted.length} bookings, ${paid} payments`);
 }
 
@@ -670,8 +686,105 @@ async function seedPadel() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await payCompleted(tenantId, inserted);
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'] });
   console.log(`Seeded padel club with ${courts.length} courts, ${inserted.length} bookings, ${paid} payments`);
+}
+
+/** Medical practice: two doctors, first visits with an online deposit, follow-ups and certificates. */
+async function seedDoctor() {
+  const db = getDb();
+  await resetTenant('medico-demo');
+  const [tenant] = await db
+    .insert(tenants)
+    .values({
+      name: 'Consultorio Médico Demo',
+      slug: 'medico-demo',
+      businessType: 'medical',
+      phone: '+523121234567',
+      timezone: TZ,
+      description: 'Medicina general y medicina interna. Consulta de primera vez con anticipo en línea. Cuenta de demostración.',
+      address: 'Av. Rey de Colimán 230',
+      neighborhood: 'Centro',
+      city: 'Colima',
+      state: 'Colima',
+      lat: 19.2449,
+      lng: -103.7241,
+      directoryListed: true,
+      plan: 'premium',
+      settings: {
+        ...DEFAULT_TENANT_SETTINGS,
+        hours: { days: [1, 2, 3, 4, 5, 6], open: '09:00', close: '19:00', slotMinutes: 30 },
+        payments: {
+          ...DEFAULT_PAYMENT_SETTINGS,
+          transfer: { bank: 'Banorte', accountHolder: 'Consultorio Médico Demo SC', clabe: '072090001234567891' },
+          deposit: { enabled: true, type: 'percent', value: 50 },
+        },
+      },
+    })
+    .returning();
+  const tenantId = tenant!.id;
+  await addOwner(db, tenantId);
+  const svc = await db
+    .insert(services)
+    .values([
+      { tenantId, name: 'Consulta de primera vez', durationMin: 45, priceCents: 80000 },
+      { tenantId, name: 'Consulta de seguimiento', durationMin: 30, priceCents: 60000 },
+      { tenantId, name: 'Certificado médico', durationMin: 20, priceCents: 35000 },
+      { tenantId, name: 'Consulta de medicina interna', durationMin: 45, priceCents: 120000 },
+    ])
+    .returning();
+  const docs = await db
+    .insert(resources)
+    .values([
+      { tenantId, name: 'Dra. Valeria Ortiz', color: '#0f766e', description: 'Medicina general', serviceIds: [svc[0]!.id, svc[1]!.id, svc[2]!.id] },
+      { tenantId, name: 'Dr. Arturo Méndez', color: '#2563eb', description: 'Medicina interna', serviceIds: [svc[0]!.id, svc[1]!.id, svc[3]!.id] },
+    ])
+    .returning();
+  const custs = await demoCustomers(tenantId, 85, '31212', 300);
+  const seen = new Set<string>();
+  const now = DateTime.now().setZone(TZ);
+  const rows: (typeof appointments.$inferInsert)[] = [];
+  for (let d = -240; d <= 14; d++) {
+    const day = now.plus({ days: d }).startOf('day');
+    if (day.weekday === 7) continue;
+    for (const doc of docs) {
+      let t = day.set({ hour: 9 });
+      const close = day.set({ hour: day.weekday === 6 ? 14 : 19 });
+      while (t < close) {
+        if (t.hour === 14 && day.weekday !== 6) {
+          t = day.set({ hour: 16 }); // lunch break
+          continue;
+        }
+        const cu = pick(custs);
+        const firstVisit = !seen.has(cu.id + doc.id);
+        const options = (doc.serviceIds ?? []).map((id) => svc.find((s) => s.id === id)!).filter((s) => s.name !== 'Consulta de primera vez');
+        const service = firstVisit ? svc[0]! : pick(options);
+        const end = t.plus({ minutes: service.durationMin });
+        if (end > close) break;
+        if (rand() < 0.55 && !(d >= 0 && t < now)) {
+          seen.add(cu.id + doc.id);
+          rows.push({
+            tenantId,
+            customerId: cu.id,
+            serviceId: service.id,
+            resourceId: doc.id,
+            startsAt: t.toJSDate(),
+            endsAt: end.toJSDate(),
+            status: d < 0 || t < now ? pastStatus() : rand() > 0.5 ? 'confirmed' : 'scheduled',
+            priceCents: service.priceCents,
+            source: rand() > 0.5 ? 'online' : 'staff',
+            reminderSentAt: d < 0 ? t.minus({ hours: 24 }).toJSDate() : null,
+          });
+          t = end;
+        } else {
+          t = t.plus({ minutes: 30 });
+        }
+      }
+    }
+  }
+  const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'], depositPct: 50, online: 0.45 });
+  console.log(`Seeded medical practice with ${docs.length} doctors, ${inserted.length} appointments, ${paid} payments`);
 }
 
 /** Demo listings for the public directory (clearly labelled "Demo"). */
