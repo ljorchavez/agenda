@@ -1,17 +1,27 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, addMonths, format, startOfDay, startOfMonth, startOfYear } from 'date-fns';
-import { PAYMENT_METHODS, PAYMENT_STATUSES, type PaymentDto } from '@agenda/shared';
-import { Empty, Loading, PageHeader } from '../components/ui';
+import {
+  MANUAL_METHODS,
+  OWED_STATES,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  paymentSettingsOf,
+  type CollectionDto,
+  type CollectionState,
+  type PaymentDto,
+} from '@agenda/shared';
+import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
+import { COLLECTION_PILL, PAYMENT_PILL, PAYMENT_PILL_TEXT } from '../lib/status';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateTime, money, toCents } from '../lib/format';
 import { SortTh, sortRows, useSort } from '../components/SortableTable';
 import { FILTER_CTRL, FilterBar } from '../components/FilterBar';
 
-type Preset = 'thisMonth' | 'lastMonth' | 'last7' | 'last30' | 'thisYear' | 'custom';
+type Preset = 'thisMonth' | 'lastMonth' | 'next7' | 'next30' | 'last7' | 'last30' | 'thisYear' | 'custom';
 
 /** [from, to) of a preset, in local time. */
 function presetRange(p: Preset, custom: { from: string; to: string }): [Date, Date] {
@@ -21,6 +31,10 @@ function presetRange(p: Preset, custom: { from: string; to: string }): [Date, Da
       return [startOfMonth(today), addMonths(startOfMonth(today), 1)];
     case 'lastMonth':
       return [addMonths(startOfMonth(today), -1), startOfMonth(today)];
+    case 'next7':
+      return [today, addDays(today, 7)];
+    case 'next30':
+      return [today, addDays(today, 30)];
     case 'last7':
       return [addDays(today, -6), addDays(today, 1)];
     case 'last30':
@@ -38,13 +52,16 @@ function presetRange(p: Preset, custom: { from: string; to: string }): [Date, Da
 /** Same cap as the API: getting exactly this many means the period has more. */
 const MAX_ROWS = 5000;
 
+const MOVEMENT_PRESETS: Preset[] = ['thisMonth', 'lastMonth', 'last7', 'last30', 'thisYear', 'custom'];
+const COLLECTION_PRESETS: Preset[] = ['thisMonth', 'next7', 'next30', 'last7', 'last30', 'lastMonth', 'thisYear', 'custom'];
+
 const EMPTY_FILTERS = { business: 'current', location: '', method: '', status: '', min: '', max: '', q: '' };
 
 /**
- * Every payment with filters: dates, business (owners with several), location, method, status,
- * amount and customer. Totals follow the filters.
+ * Money movements (payments actually recorded): dates, business, location, method, status, amount
+ * and customer. Totals follow the filters.
  */
-export function PaymentsPage() {
+function MovementsTab() {
   const { t } = useTranslation();
   const { tenant, businesses } = useAuth();
   const [preset, setPreset] = useState<Preset>('thisMonth');
@@ -112,15 +129,13 @@ export function PaymentsPage() {
 
   return (
     <>
-      <PageHeader title={t('payments.title')} />
-
       <FilterBar
         active={[f.location, f.method, f.status, f.min, f.max, multiBusiness && f.business !== 'current' ? 'b' : ''].filter(Boolean).length}
         onClear={() => setF({ ...EMPTY_FILTERS, q: f.q })}
         primary={
           <>
             <select className={FILTER_CTRL} aria-label={t('payments.period')} value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
-              {(['thisMonth', 'lastMonth', 'last7', 'last30', 'thisYear', 'custom'] as const).map((p) => (
+              {MOVEMENT_PRESETS.map((p) => (
                 <option key={p} value={p}>{t(`payments.presets.${p}`)}</option>
               ))}
             </select>
@@ -229,5 +244,313 @@ export function PaymentsPage() {
         </div>
       )}
     </>
+  );
+}
+
+/** Cobros: bookings with their money state (default tab) and money movements. */
+export function PaymentsPage() {
+  const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'movements' ? 'movements' : 'bookings';
+  const tabBtn = (k: 'bookings' | 'movements') =>
+    `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
+  return (
+    <>
+      <PageHeader
+        title={t('payments.title')}
+        actions={
+          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'bookings'} className={tabBtn('bookings')} onClick={() => setParams({})}>
+              {t('payments.tabs.bookings')}
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'movements'} className={tabBtn('movements')} onClick={() => setParams({ tab: 'movements' })}>
+              {t('payments.tabs.movements')}
+            </button>
+          </div>
+        }
+      />
+      {tab === 'bookings' ? <CollectionsTab /> : <MovementsTab />}
+    </>
+  );
+}
+
+const UPCOMING: CollectionState[] = ['upcoming_unpaid', 'upcoming_deposit', 'upcoming_paid'];
+const PAST: CollectionState[] = ['past_unpaid', 'past_partial', 'past_paid'];
+
+function StateBadge({ state }: { state: CollectionState }) {
+  const { t } = useTranslation();
+  const pill = COLLECTION_PILL[state].pill;
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${PAYMENT_PILL[pill]}`}>
+      <span aria-hidden>{PAYMENT_PILL_TEXT[pill]}</span>
+      {t(`collections.states.${state}`)}
+    </span>
+  );
+}
+
+/** Every booking of the period: price, paid, balance and one of six states; record payments in place. */
+function CollectionsTab() {
+  const { t } = useTranslation();
+  const { tenant, businesses } = useAuth();
+  const [preset, setPreset] = useState<Preset>('thisMonth');
+  const [custom, setCustom] = useState(() => ({ from: format(startOfMonth(new Date()), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') }));
+  const [f, setF] = useState({ business: 'current', location: '', state: '' as CollectionState | '', q: '' });
+  const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
+  const [from, to] = presetRange(preset, custom);
+  const [paying, setPaying] = useState<CollectionDto | null>(null);
+
+  const ownBusinesses = businesses.filter((b) => b.role === 'owner' || b.role === 'admin');
+  const multiBusiness = ownBusinesses.length > 1;
+  const allBusinesses = multiBusiness && f.business !== 'current';
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['collections', from.toISOString(), to.toISOString(), allBusinesses],
+    queryFn: () =>
+      api<CollectionDto[]>(
+        `/collections?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}${allBusinesses ? '&all=1' : ''}`,
+      ),
+  });
+
+  const locationOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of data ?? []) if (r.locationName) m.set(r.locationId, allBusinesses ? `${r.businessName} · ${r.locationName}` : r.locationName);
+    return [...m].sort((a, b) => a[1].localeCompare(b[1], 'es'));
+  }, [data, allBusinesses]);
+
+  // Everything but the state filter, so the state tiles always show their full counts.
+  const base = useMemo(() => {
+    const q = f.q.trim().toLocaleLowerCase('es');
+    return (data ?? []).filter(
+      (r) =>
+        (!allBusinesses || f.business === 'all' || r.tenantId === f.business) &&
+        (!f.location || r.locationId === f.location) &&
+        (!q || r.customerName.toLocaleLowerCase('es').includes(q) || (r.serviceName ?? '').toLocaleLowerCase('es').includes(q)),
+    );
+  }, [data, f.business, f.location, f.q, allBusinesses]);
+  const filtered = useMemo(() => (f.state ? base.filter((r) => r.state === f.state) : base), [base, f.state]);
+
+  const tiles = useMemo(() => {
+    const by = new Map<CollectionState, { count: number; amount: number }>();
+    for (const s of [...UPCOMING, ...PAST]) by.set(s, { count: 0, amount: 0 });
+    for (const r of base) {
+      const x = by.get(r.state)!;
+      x.count++;
+      // Paid states show money in; the rest show what's still to collect.
+      x.amount += r.state.endsWith('_paid') ? r.paidCents : r.balanceCents;
+    }
+    return by;
+  }, [base]);
+  const totals = useMemo(() => {
+    let collected = 0, upcoming = 0, owed = 0;
+    for (const r of base) {
+      collected += r.paidCents;
+      if (OWED_STATES.includes(r.state)) owed += r.balanceCents;
+      else upcoming += r.balanceCents;
+    }
+    return { collected, upcoming, owed };
+  }, [base]);
+
+  type Key = 'date' | 'customer' | 'state' | 'price' | 'paid' | 'balance' | 'location' | 'business';
+  const { sort, toggle } = useSort<Key>({ key: 'date', dir: 'desc' }, { date: 'desc', price: 'desc', paid: 'desc', balance: 'desc' });
+  const rows = useMemo(() => {
+    const order = [...PAST, ...UPCOMING];
+    const get: Record<Key, (r: CollectionDto) => string | number | null> = {
+      date: (r) => new Date(r.startsAt).getTime(),
+      customer: (r) => r.customerName,
+      state: (r) => order.indexOf(r.state),
+      price: (r) => r.priceCents,
+      paid: (r) => r.paidCents,
+      balance: (r) => r.balanceCents,
+      location: (r) => r.locationName,
+      business: (r) => r.businessName,
+    };
+    return sortRows(filtered, get[sort.key], sort.dir);
+  }, [filtered, sort]);
+  const showLocation = locationOptions.length > 1;
+
+  const tile = (s: CollectionState) => {
+    const x = tiles.get(s)!;
+    const on = f.state === s;
+    return (
+      <button
+        key={s}
+        type="button"
+        aria-pressed={on}
+        onClick={() => set({ state: on ? '' : s })}
+        className={`flex min-w-0 flex-1 flex-col items-start rounded-lg border px-3 py-2 text-left ${on ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-slate-200 bg-white hover:border-slate-400'}`}
+      >
+        <StateBadge state={s} />
+        <span className="mt-1 text-lg font-semibold">{money(x.amount)}</span>
+        <span className="text-xs text-slate-500">{t('collections.bookingsN', { count: x.count })}</span>
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <FilterBar
+        active={[f.location, multiBusiness && f.business !== 'current' ? 'b' : ''].filter(Boolean).length}
+        onClear={() => set({ business: 'current', location: '' })}
+        primary={
+          <>
+            <select className={FILTER_CTRL} aria-label={t('payments.period')} value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
+              {COLLECTION_PRESETS.map((p) => (
+                <option key={p} value={p}>{t(`payments.presets.${p}`)}</option>
+              ))}
+            </select>
+            {preset === 'custom' && (
+              <span className="flex items-center gap-1">
+                <input type="date" className={FILTER_CTRL} aria-label={t('payments.from')} value={custom.from} max={custom.to} onChange={(e) => e.target.value && setCustom({ ...custom, from: e.target.value })} />
+                <span className="text-slate-400">–</span>
+                <input type="date" className={FILTER_CTRL} aria-label={t('payments.to')} value={custom.to} min={custom.from} onChange={(e) => e.target.value && setCustom({ ...custom, to: e.target.value })} />
+              </span>
+            )}
+            <input type="search" className={`${FILTER_CTRL} min-w-0 flex-1 sm:!w-56 sm:flex-none`} aria-label={t('payments.search')} placeholder={t('payments.searchPlaceholder')} value={f.q} onChange={(e) => set({ q: e.target.value })} />
+          </>
+        }
+      >
+        {multiBusiness && (
+          <select className={FILTER_CTRL} aria-label={t('payments.business')} value={f.business} onChange={(e) => set({ business: e.target.value, location: '' })}>
+            <option value="current">{t('payments.business')}: {tenant?.name}</option>
+            <option value="all">{t('payments.allBusinesses')}</option>
+            {ownBusinesses.filter((b) => b.id !== tenant?.id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+        {showLocation && (
+          <select className={FILTER_CTRL} aria-label={t('locations.location')} value={f.location} onChange={(e) => set({ location: e.target.value })}>
+            <option value="">{t('locations.location')}: {t('payments.any')}</option>
+            {locationOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+        )}
+      </FilterBar>
+
+      <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm">
+        <span>{t('collections.collected')}: <b className="text-emerald-700">{money(totals.collected)}</b></span>
+        <span>{t('collections.toCollect')}: <b className="text-slate-700">{money(totals.upcoming)}</b></span>
+        <span>{t('collections.owed')}: <b className="text-rose-700">{money(totals.owed)}</b></span>
+      </div>
+
+      <div className="mb-4 space-y-2">
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('collections.upcoming')}</div>
+          <div className="flex flex-wrap gap-2">{UPCOMING.map(tile)}</div>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('collections.past')}</div>
+          <div className="flex flex-wrap gap-2">{PAST.map(tile)}</div>
+        </div>
+      </div>
+
+      {data?.length === MAX_ROWS && <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{t('payments.tooMany', { count: MAX_ROWS })}</p>}
+
+      {isLoading ? (
+        <Loading />
+      ) : !rows.length ? (
+        <Empty>{data?.length ? t('payments.noMatch') : t('collections.empty')}</Empty>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-500">
+              <tr>
+                <SortTh label={t('collections.booking')} k="date" sort={sort} onSort={toggle} />
+                <SortTh label={t('payments.customer')} k="customer" sort={sort} onSort={toggle} />
+                {allBusinesses && <SortTh label={t('payments.business')} k="business" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
+                {showLocation && <SortTh label={t('locations.location')} k="location" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
+                <SortTh label={t('collections.state')} k="state" sort={sort} onSort={toggle} />
+                <SortTh label={t('collections.price')} k="price" sort={sort} onSort={toggle} align="right" className="hidden sm:table-cell" />
+                <SortTh label={t('collections.paid')} k="paid" sort={sort} onSort={toggle} align="right" className="hidden sm:table-cell" />
+                <SortTh label={t('collections.balance')} k="balance" sort={sort} onSort={toggle} align="right" />
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.appointmentId}>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {dateTime(r.startsAt)}
+                    <div className="text-xs text-slate-500">{t(`status.${r.status}`)}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {r.tenantId === tenant?.id ? (
+                      <Link className="hover:text-brand-700" to={`/customers/${r.customerId}`}>{r.customerName}</Link>
+                    ) : (
+                      r.customerName
+                    )}
+                    <div className="text-xs text-slate-500">{[r.serviceName, r.resourceName].filter(Boolean).join(' · ')}</div>
+                  </td>
+                  {allBusinesses && <td className="hidden px-4 py-3 md:table-cell">{r.businessName}</td>}
+                  {showLocation && <td className="hidden px-4 py-3 md:table-cell">{r.locationName ?? '—'}</td>}
+                  <td className="px-4 py-3">
+                    <StateBadge state={r.state} />
+                    {r.methods.length > 0 && <div className="mt-0.5 text-xs text-slate-500">{r.methods.map((m) => t(`methods.${m}`)).join(', ')}</div>}
+                  </td>
+                  <td className="hidden px-4 py-3 text-right sm:table-cell">{money(r.priceCents)}</td>
+                  <td className="hidden px-4 py-3 text-right text-emerald-700 sm:table-cell">{money(r.paidCents)}</td>
+                  <td className={`px-4 py-3 text-right font-semibold ${r.balanceCents ? (OWED_STATES.includes(r.state) ? 'text-rose-700' : 'text-slate-800') : 'text-slate-400'}`}>
+                    {money(r.balanceCents)}
+                  </td>
+                  <td className="px-2 py-3 text-right">
+                    {r.balanceCents > 0 && r.tenantId === tenant?.id && (
+                      <button type="button" className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setPaying(r)}>
+                        {t('collections.record')}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {paying && <RecordPaymentModal row={paying} onClose={() => setPaying(null)} />}
+    </>
+  );
+}
+
+/** Money received in person (cash, card terminal, transfer). Mercado Pago is recorded by itself. */
+function RecordPaymentModal({ row, onClose }: { row: CollectionDto; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { tenant } = useAuth();
+  const qc = useQueryClient();
+  const accepted = MANUAL_METHODS.filter((m) => paymentSettingsOf(tenant!.settings).methods[m]);
+  const options = accepted.length ? accepted : [...MANUAL_METHODS];
+  const [amount, setAmount] = useState(String(row.balanceCents / 100));
+  const [method, setMethod] = useState<(typeof MANUAL_METHODS)[number]>(options[0]!);
+  const save = useMutation({
+    mutationFn: () =>
+      api('/payments', { method: 'POST', body: { customerId: row.customerId, appointmentId: row.appointmentId, amountCents: toCents(amount), method } }),
+    onSuccess: () => {
+      for (const k of ['collections', 'payments', 'appointments', 'customers']) void qc.invalidateQueries({ queryKey: [k] });
+      onClose();
+    },
+  });
+  return (
+    <Modal open title={t('collections.record')} onClose={onClose}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <p className="text-sm text-slate-600">
+          <b>{row.customerName}</b> · {row.serviceName} · {dateTime(row.startsAt)}
+          <br />
+          {t('collections.balance')}: <b>{money(row.balanceCents)}</b>
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label" htmlFor="rp-amount">{t('payments.amount')}</label>
+            <input id="rp-amount" type="number" min={0.01} step="0.01" required className="input" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <label className="label" htmlFor="rp-method">{t('payments.method')}</label>
+            <select id="rp-method" className="input" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
+              {options.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
+            </select>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500">{t('collections.mpNote')}</p>
+        <ErrorText error={save.error} />
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
+          <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

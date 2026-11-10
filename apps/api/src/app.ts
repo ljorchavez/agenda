@@ -66,7 +66,7 @@ export function createApp() {
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();
   // Auth on explicit prefixes so unknown paths still return 404 instead of 401.
-  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads']) {
+  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections']) {
     priv.use(prefix, requireAuth);
     priv.use(`${prefix}/*`, requireAuth);
   }

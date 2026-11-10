@@ -24,7 +24,7 @@
     "agenda": "Calendar",
     "customers": "Customers",
     "services": "Services",
-    "payments": "Payments",
+    "payments": "Collections",
     "settings": "Settings",
     "logout": "Log out",
     "reports": "Reports"
@@ -97,10 +97,10 @@
     "card": "Card",
     "transfer": "Bank transfer",
     "mercadopago": "Mercado Pago",
-    "spei": "SPEI"
+    "spei": "Mercado Pago · SPEI"
   },
   "paymentStatus": {
-    "pending": "Pending",
+    "pending": "Unpaid link",
     "paid": "Paid",
     "refunded": "Refunded",
     "failed": "Failed"
@@ -242,7 +242,7 @@
     "deactivated": "This service has appointments; it was deactivated instead of deleted."
   },
   "payments": {
-    "title": "Payments",
+    "title": "Collections",
     "date": "Date",
     "customer": "Customer",
     "method": "Method",
@@ -250,7 +250,7 @@
     "amount": "Amount",
     "empty": "No payments in this period",
     "paidTotal": "Collected",
-    "pendingTotal": "Pending",
+    "pendingTotal": "Unpaid links",
     "period": "Period",
     "presets": {
       "thisMonth": "This month",
@@ -258,7 +258,9 @@
       "last7": "Last 7 days",
       "last30": "Last 30 days",
       "thisYear": "This year",
-      "custom": "Pick dates"
+      "custom": "Pick dates",
+      "next7": "Next 7 days",
+      "next30": "Next 30 days"
     },
     "from": "From",
     "to": "To",
@@ -275,7 +277,11 @@
     "refundedTotal": "Refunded",
     "count": "Payments",
     "noMatch": "No payments match the filters",
-    "tooMany": "There are more than {{count}} payments in this period, so totals are incomplete. Pick a shorter period."
+    "tooMany": "There are more than {{count}} payments in this period, so totals are incomplete. Pick a shorter period.",
+    "tabs": {
+      "bookings": "By booking",
+      "movements": "Movements"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -427,7 +433,7 @@
     "agenda": "Calendar",
     "customers": "Customers",
     "services": "Services",
-    "payments": "Payments",
+    "payments": "Collections",
     "reports": "Reports",
     "settings": "Settings"
   },
@@ -682,7 +688,8 @@
     "blocked": "That time is blocked.",
     "unsupported_image": "Use a JPG, PNG or WebP picture.",
     "image_too_large": "The picture is larger than 2 MB.",
-    "uploads_not_configured": "Photo uploads aren't set up yet."
+    "uploads_not_configured": "Photo uploads aren't set up yet.",
+    "online_method_manual": "Mercado Pago payments are recorded automatically when the money arrives."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -925,5 +932,30 @@
   "filters": {
     "more": "Filters",
     "clear": "Clear filters"
+  },
+  "collections": {
+    "states": {
+      "upcoming_unpaid": "Upcoming · unpaid",
+      "upcoming_deposit": "Upcoming · deposit",
+      "upcoming_paid": "Upcoming · paid",
+      "past_unpaid": "Owes",
+      "past_partial": "Owes balance",
+      "past_paid": "Paid"
+    },
+    "upcoming": "Upcoming",
+    "past": "Already happened",
+    "bookingsN_one": "{{count}} booking",
+    "bookingsN_other": "{{count}} bookings",
+    "collected": "Collected",
+    "toCollect": "To collect (upcoming)",
+    "owed": "Owed",
+    "booking": "Booking",
+    "state": "Payment",
+    "price": "Price",
+    "paid": "Paid",
+    "balance": "Balance",
+    "record": "Record payment",
+    "empty": "No bookings in this period",
+    "mpNote": "Record here what you are paid in person. Online Mercado Pago payments are recorded automatically."
   }
 }

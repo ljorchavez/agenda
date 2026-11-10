@@ -1055,4 +1055,64 @@ d('API (integration)', () => {
     expect(back.status).toBe(200);
     expect(back.body.status).toBe('confirmed');
   });
+
+  it('collections: every booking with its money state; Mercado Pago is never entered by hand', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Cobros Prueba', businessType: 'nutrition', name: 'Dra Cobros', email: 'cobros@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const svc = (await call('POST', '/services', { name: 'Consulta', durationMin: 60, priceCents: 50000 }, tok)).body;
+    const cust = (await call('POST', '/customers', { name: 'Paciente Cobros', phone: '5588880001' }, tok)).body;
+    const now = DateTime.now().setZone('America/Mexico_City');
+    const book = async (d: DateTime) =>
+      (await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: d.toISO(), allowOverlap: true }, tok)).body;
+    const pay = (appointmentId: string, amountCents: number) =>
+      call('POST', '/payments', { customerId: cust.id, appointmentId, amountCents, method: 'cash' }, tok);
+    const future = now.plus({ days: 2 }).set({ hour: 10, minute: 0 });
+    const past = now.minus({ days: 2 }).set({ hour: 10, minute: 0 });
+    const fu = await book(future);
+    const fd = await book(future.plus({ hours: 1 }));
+    const fp = await book(future.plus({ hours: 2 }));
+    const pu = await book(past);
+    const pd = await book(past.plus({ hours: 1 }));
+    const pp = await book(past.plus({ hours: 2 }));
+    const ns = await book(past.plus({ hours: 3 }));
+    const cancelled = await book(past.plus({ hours: 4 }));
+    await pay(fd.id, 20000);
+    await pay(fp.id, 50000);
+    await pay(pd.id, 20000);
+    await pay(pp.id, 50000);
+    await call('PATCH', `/appointments/${ns.id}`, { status: 'no_show' }, tok);
+    await call('PATCH', `/appointments/${cancelled.id}`, { status: 'cancelled' }, tok);
+
+    const range = `from=${encodeURIComponent(now.minus({ days: 7 }).toISO()!)}&to=${encodeURIComponent(now.plus({ days: 7 }).toISO()!)}`;
+    const rows = (await call('GET', `/collections?${range}`, undefined, tok)).body as { appointmentId: string; state: string; balanceCents: number; paidCents: number; methods: string[] }[];
+    const st = (id: string) => rows.find((r) => r.appointmentId === id);
+    expect(st(fu.id)?.state).toBe('upcoming_unpaid');
+    expect(st(fd.id)?.state).toBe('upcoming_deposit');
+    expect(st(fd.id)?.balanceCents).toBe(30000);
+    expect(st(fp.id)?.state).toBe('upcoming_paid');
+    expect(st(pu.id)?.state).toBe('past_unpaid');
+    expect(st(pd.id)?.state).toBe('past_partial');
+    expect(st(pp.id)?.state).toBe('past_paid');
+    expect(st(pp.id)?.methods).toEqual(['cash']);
+    expect(st(ns.id)?.state).toBe('past_unpaid'); // a no-show owes by default
+    expect(st(cancelled.id)).toBeUndefined(); // cancelled without money: nothing to collect
+
+    // The business decides no-shows aren't charged
+    const me = (await call('GET', '/auth/me', undefined, tok)).body;
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, payments: { ...me.tenant.settings.payments, noShowOwes: false } } }, tok);
+    const rows2 = (await call('GET', `/collections?${range}`, undefined, tok)).body as { appointmentId: string }[];
+    expect(rows2.find((r) => r.appointmentId === ns.id)).toBeUndefined();
+
+    // Mercado Pago is recorded by the platform only
+    const manualMp = await call('POST', '/payments', { customerId: cust.id, appointmentId: fu.id, amountCents: 100, method: 'mercadopago' }, tok);
+    expect(manualMp.status).toBe(422);
+    expect(manualMp.body.error).toBe('online_method_manual');
+    expect((await call('POST', '/payments', { customerId: cust.id, appointmentId: fu.id, amountCents: 100, method: 'spei' }, tok)).status).toBe(422);
+    expect((await call('GET', '/collections', undefined, tok)).status).toBe(422);
+    // Another business sees none of it
+    const other = (await call('POST', '/auth/register', { businessName: 'Otro Cobros', businessType: 'spa', name: 'Otro', email: 'otro-cobros@test.mx', password: 'password123' })).body;
+    expect((await call('GET', `/collections?${range}&all=1`, undefined, other.token)).body).toHaveLength(0);
+  });
 });

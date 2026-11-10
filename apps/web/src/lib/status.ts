@@ -1,4 +1,4 @@
-import type { AppointmentDto, AppointmentStatus } from '@agenda/shared';
+import { collectionState, type AppointmentDto, type AppointmentStatus, type CollectionState } from '@agenda/shared';
 
 /**
  * Two separate states for every booking, so both are visible at a glance:
@@ -15,26 +15,28 @@ export const BOOKING_ICON: Record<AppointmentStatus, string> = {
 
 export type PaymentState = 'free' | 'paid' | 'partial' | 'unpaid' | 'owed';
 
-/**
- * - Fully paid → pagada. Cancelled or free → nothing to collect.
- * - Its time already passed (or it was marked attended) and money is missing → debe.
- * - A no-show owes too, unless the business chose not to charge no-shows.
- * - Still ahead: anticipo if something was paid, otherwise por cobrar.
- */
+/** Same rules as the Cobros page (shared collectionState), reduced to the pill shown on cards. */
 export function paymentState(
   a: Pick<AppointmentDto, 'priceCents' | 'paidCents' | 'status'> & { endsAt?: string },
   opts: { noShowOwes?: boolean; now?: Date } = {},
 ): PaymentState {
-  if (a.status === 'cancelled') return a.paidCents > 0 ? 'paid' : 'free';
-  if (a.priceCents <= 0) return a.paidCents > 0 ? 'paid' : 'free';
-  if (a.paidCents >= a.priceCents) return 'paid';
-  if (a.status === 'no_show') {
-    if (opts.noShowOwes === false) return a.paidCents > 0 ? 'paid' : 'free';
-    return 'owed';
+  const st = collectionState(
+    { priceCents: a.priceCents, paidCents: a.paidCents, status: a.status, endsAt: a.endsAt ?? new Date(8.64e15) },
+    { noShowOwes: opts.noShowOwes !== false, now: opts.now },
+  );
+  switch (st) {
+    case null:
+      return 'free';
+    case 'upcoming_paid':
+    case 'past_paid':
+      return 'paid';
+    case 'upcoming_deposit':
+      return 'partial';
+    case 'upcoming_unpaid':
+      return a.status === 'completed' ? 'owed' : 'unpaid';
+    default:
+      return 'owed';
   }
-  const over = a.status === 'completed' || (a.endsAt != null && new Date(a.endsAt) <= (opts.now ?? new Date()));
-  if (over) return 'owed';
-  return a.paidCents > 0 ? 'partial' : 'unpaid';
 }
 
 /** Small "$" pill: green paid, amber deposit, grey to collect, red owed. */
@@ -51,3 +53,14 @@ export const PAYMENT_PILL_TEXT: Record<Exclude<PaymentState, 'free'>, string> = 
   unpaid: '$',
   owed: '$!',
 };
+
+/** Badge per collection state (Cobros page), same colors as the calendar pills. */
+export const COLLECTION_PILL: Record<CollectionState, { pill: Exclude<PaymentState, 'free'> }> = {
+  upcoming_unpaid: { pill: 'unpaid' },
+  upcoming_deposit: { pill: 'partial' },
+  upcoming_paid: { pill: 'paid' },
+  past_unpaid: { pill: 'owed' },
+  past_partial: { pill: 'owed' },
+  past_paid: { pill: 'paid' },
+};
+

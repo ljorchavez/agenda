@@ -166,7 +166,7 @@ function PaymentModal({ customerId, onClose }: { customerId: string; onClose: ()
   const [amount, setAmount] = useState('');
   const { tenant } = useAuth();
   const pay = paymentSettingsOf(tenant!.settings);
-  const enabled = (['cash', 'card', 'transfer', 'spei'] as const).filter((m) => pay.methods[m]);
+  const enabled = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
   const options = enabled.length ? enabled : (['cash', 'card', 'transfer'] as const);
   const [method, setMethod] = useState<PaymentMethod>(options[0]!);
   const save = useMutation({

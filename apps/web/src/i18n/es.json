@@ -24,7 +24,7 @@
     "agenda": "Agenda",
     "customers": "Clientes",
     "services": "Servicios",
-    "payments": "Pagos",
+    "payments": "Cobros",
     "settings": "Configuración",
     "logout": "Cerrar sesión",
     "reports": "Reportes"
@@ -97,10 +97,10 @@
     "card": "Tarjeta",
     "transfer": "Transferencia",
     "mercadopago": "Mercado Pago",
-    "spei": "SPEI"
+    "spei": "Mercado Pago · SPEI"
   },
   "paymentStatus": {
-    "pending": "Pendiente",
+    "pending": "Link sin pagar",
     "paid": "Pagado",
     "refunded": "Reembolsado",
     "failed": "Fallido"
@@ -242,7 +242,7 @@
     "deactivated": "El servicio tiene citas; se desactivó en lugar de borrarse."
   },
   "payments": {
-    "title": "Pagos",
+    "title": "Cobros",
     "date": "Fecha",
     "customer": "Cliente",
     "method": "Método",
@@ -250,7 +250,7 @@
     "amount": "Monto",
     "empty": "No hay pagos en este periodo",
     "paidTotal": "Cobrado",
-    "pendingTotal": "Pendiente",
+    "pendingTotal": "Links sin pagar",
     "period": "Periodo",
     "presets": {
       "thisMonth": "Este mes",
@@ -258,7 +258,9 @@
       "last7": "Últimos 7 días",
       "last30": "Últimos 30 días",
       "thisYear": "Este año",
-      "custom": "Elegir fechas"
+      "custom": "Elegir fechas",
+      "next7": "Próximos 7 días",
+      "next30": "Próximos 30 días"
     },
     "from": "Desde",
     "to": "Hasta",
@@ -275,7 +277,11 @@
     "refundedTotal": "Reembolsado",
     "count": "Pagos",
     "noMatch": "Ningún pago coincide con los filtros",
-    "tooMany": "Hay más de {{count}} pagos en este periodo: los totales están incompletos. Elige un periodo más corto."
+    "tooMany": "Hay más de {{count}} pagos en este periodo: los totales están incompletos. Elige un periodo más corto.",
+    "tabs": {
+      "bookings": "Por reserva",
+      "movements": "Movimientos"
+    }
   },
   "settings": {
     "title": "Configuración",
@@ -427,7 +433,7 @@
     "agenda": "Agenda",
     "customers": "Clientes",
     "services": "Servicios",
-    "payments": "Pagos",
+    "payments": "Cobros",
     "reports": "Reportes",
     "settings": "Ajustes"
   },
@@ -682,7 +688,8 @@
     "blocked": "Ese horario está bloqueado.",
     "unsupported_image": "Usa una foto JPG, PNG o WebP.",
     "image_too_large": "La foto pesa más de 2 MB.",
-    "uploads_not_configured": "La subida de fotos aún no está configurada."
+    "uploads_not_configured": "La subida de fotos aún no está configurada.",
+    "online_method_manual": "Los pagos con Mercado Pago se registran solos cuando llega el dinero."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -925,5 +932,30 @@
   "filters": {
     "more": "Filtros",
     "clear": "Quitar filtros"
+  },
+  "collections": {
+    "states": {
+      "upcoming_unpaid": "Por venir · sin pago",
+      "upcoming_deposit": "Por venir · anticipo",
+      "upcoming_paid": "Por venir · pagada",
+      "past_unpaid": "Debe",
+      "past_partial": "Debe saldo",
+      "past_paid": "Pagada"
+    },
+    "upcoming": "Por venir",
+    "past": "Ya pasaron",
+    "bookingsN_one": "{{count}} reserva",
+    "bookingsN_other": "{{count}} reservas",
+    "collected": "Cobrado",
+    "toCollect": "Por cobrar (próximas)",
+    "owed": "Deben",
+    "booking": "Reserva",
+    "state": "Cobro",
+    "price": "Precio",
+    "paid": "Pagado",
+    "balance": "Saldo",
+    "record": "Registrar pago",
+    "empty": "No hay reservas en este periodo",
+    "mpNote": "Aquí se registra lo que te pagan en persona. Lo que pagan en línea con Mercado Pago se registra solo."
   }
 }

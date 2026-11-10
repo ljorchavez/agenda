@@ -889,6 +889,67 @@ export const paymentCreateSchema = z.object({
 });
 export type PaymentCreateInput = z.infer<typeof paymentCreateSchema>;
 
+/** Methods processed by the platform (Mercado Pago, including SPEI through it); never entered by hand. */
+export const ONLINE_METHODS = ['mercadopago', 'spei'] as const;
+/** Methods the business records itself when money changes hands in person. */
+export const MANUAL_METHODS = ['cash', 'card', 'transfer'] as const;
+
+// ---------- Collections (cobros): every booking with its money state ----------
+
+/**
+ * Where a booking stands money-wise. "Before" = its time hasn't ended yet; "after" = it has.
+ * A no-show counts as after; cancelled or free bookings have nothing to collect.
+ */
+export const COLLECTION_STATES = [
+  'upcoming_unpaid',
+  'upcoming_deposit',
+  'upcoming_paid',
+  'past_unpaid',
+  'past_partial',
+  'past_paid',
+] as const;
+export type CollectionState = (typeof COLLECTION_STATES)[number];
+/** The ones still owing money after their time */
+export const OWED_STATES: readonly CollectionState[] = ['past_unpaid', 'past_partial'];
+
+export function collectionState(
+  a: { priceCents: number; paidCents: number; status: AppointmentStatus; endsAt: string | Date },
+  opts: { noShowOwes: boolean; now?: Date },
+): CollectionState | null {
+  if (a.status === 'cancelled' && a.paidCents <= 0) return null;
+  const past = a.status === 'completed' || a.status === 'no_show' || new Date(a.endsAt) <= (opts.now ?? new Date());
+  // What's due: a no-show that isn't charged only "owes" what it already paid.
+  const due = a.status === 'cancelled' || (a.status === 'no_show' && !opts.noShowOwes) ? a.paidCents : a.priceCents;
+  if (due <= 0 && a.paidCents <= 0) return null;
+  if (a.paidCents >= due) return past ? 'past_paid' : 'upcoming_paid';
+  if (a.paidCents > 0) return past ? 'past_partial' : 'upcoming_deposit';
+  return past ? 'past_unpaid' : 'upcoming_unpaid';
+}
+
+export interface CollectionDto {
+  appointmentId: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string | null;
+  serviceName: string | null;
+  resourceName: string | null;
+  startsAt: string;
+  endsAt: string;
+  status: AppointmentStatus;
+  priceCents: number;
+  paidCents: number;
+  /** What's still to collect (0 when paid or not charged) */
+  balanceCents: number;
+  state: CollectionState;
+  /** Methods of the payments it already has */
+  methods: PaymentMethod[];
+  lastPaidAt: string | null;
+  tenantId: string;
+  businessName: string;
+  locationId: string;
+  locationName: string | null;
+}
+
 export const paymentLinkSchema = z.object({
   appointmentId: z.string().uuid(),
   amountCents: z.number().int().min(100),

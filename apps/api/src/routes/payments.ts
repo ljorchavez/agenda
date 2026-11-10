@@ -1,8 +1,15 @@
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  collectionState,
+  noShowOwes,
+  ONLINE_METHODS,
   paymentCreateSchema,
+  type CollectionDto,
+  type PaymentMethod,
+  type TenantSettings,
   paymentLinkSchema,
   paymentSettingsOf,
   PAYMENT_STATUSES,
@@ -12,7 +19,7 @@ import { appointments, customers, locations, memberships, payments, services, te
 import { AppError, notFound } from '../lib/errors.js';
 import { apiBaseUrl, createOnlinePayment } from '../lib/online-payments.js';
 import { toPaymentDto } from '../lib/mappers.js';
-import { forbiddenScope, getScope, inScope, paymentScopeSql } from '../lib/access.js';
+import { forbiddenScope, getScope, inScope, paymentScopeSql, scopeSql } from '../lib/access.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const paymentRoutes = new Hono<AppEnv>();
@@ -33,14 +40,7 @@ paymentRoutes.get('/payments', async (c) => {
   if (to) filters.push(lt(when, new Date(to)));
   if (customerId) filters.push(eq(payments.customerId, customerId));
 
-  let tenantIds = [tenantId];
-  if (c.req.query('all') === '1') {
-    const managed = await db
-      .select({ t: memberships.tenantId })
-      .from(memberships)
-      .where(and(eq(memberships.userId, c.get('userId')), inArray(memberships.role, ['owner', 'admin']), isNull(memberships.locationId)));
-    if (managed.length) tenantIds = managed.map((m) => m.t);
-  }
+  const tenantIds = await listedTenants(c);
   if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
     filters.push(eq(payments.tenantId, tenantId));
     const scope = await getScope(db, c);
@@ -79,9 +79,119 @@ paymentRoutes.get('/payments', async (c) => {
   );
 });
 
+/** Businesses this login may list together: all it manages whole when `all=1`, else the current one. */
+async function listedTenants(c: Context<AppEnv>): Promise<string[]> {
+  const tenantId = c.get('tenantId');
+  if (c.req.query('all') !== '1') return [tenantId];
+  const managed = await getDb()
+    .select({ t: memberships.tenantId })
+    .from(memberships)
+    .where(and(eq(memberships.userId, c.get('userId')), inArray(memberships.role, ['owner', 'admin']), isNull(memberships.locationId)));
+  return managed.length ? managed.map((m) => m.t) : [tenantId];
+}
+
+type CollectionRow = {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string | null;
+  service_name: string | null;
+  resource_name: string | null;
+  starts_at: Date | string;
+  ends_at: Date | string;
+  status: CollectionDto['status'];
+  price_cents: number | string;
+  paid_cents: number | string | null;
+  methods: PaymentMethod[] | null;
+  last_paid_at: Date | string | null;
+  tenant_id: string;
+  business_name: string;
+  settings: TenantSettings;
+  location_id: string;
+  location_name: string | null;
+};
+
+/**
+ * Cobros: every booking in the period with what it costs, what was paid and its state
+ * (upcoming/past × unpaid/deposit/paid). If there's a booking, it's here, with or without payments.
+ */
+paymentRoutes.get('/collections', async (c) => {
+  const from = new Date(c.req.query('from') ?? '');
+  const to = new Date(c.req.query('to') ?? '');
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
+    throw new AppError(422, 'validation_error', 'from/to required');
+  }
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const tenantIds = await listedTenants(c);
+  const onlyCurrent = tenantIds.length === 1 && tenantIds[0] === tenantId;
+  const scope = await getScope(db, c);
+  const res = await db.execute<CollectionRow>(sql`
+    select a.id, a.customer_id, cu.name as customer_name, cu.phone as customer_phone,
+           s.name as service_name, r.name as resource_name,
+           a.starts_at, a.ends_at, a.status, a.price_cents,
+           p.paid_cents, p.methods, p.last_paid_at,
+           a.tenant_id, t.name as business_name, t.settings,
+           a.location_id, l.name as location_name
+    from appointments a
+    join customers cu on cu.id = a.customer_id
+    join tenants t on t.id = a.tenant_id
+    left join services s on s.id = a.service_id
+    left join resources r on r.id = a.resource_id
+    left join locations l on l.id = a.location_id
+    left join lateral (
+      select sum(pp.amount_cents) as paid_cents,
+             array_agg(distinct pp.method) as methods,
+             max(pp.paid_at) as last_paid_at
+      from payments pp
+      where pp.appointment_id = a.id and pp.tenant_id = a.tenant_id and pp.status = 'paid'
+    ) p on true
+    where a.tenant_id in (${sql.join(tenantIds.map((id) => sql`${id}`), sql`, `)})
+      and a.starts_at >= ${from.toISOString()} and a.starts_at < ${to.toISOString()}
+      ${onlyCurrent ? scopeSql(scope, 'a') : sql``}
+    order by a.starts_at desc
+    limit 5000`);
+  const now = new Date();
+  const out: CollectionDto[] = [];
+  for (const r of res.rows) {
+    const priceCents = Number(r.price_cents);
+    const paidCents = Number(r.paid_cents ?? 0);
+    const owes = noShowOwes(r.settings ?? {});
+    const state = collectionState({ priceCents, paidCents, status: r.status, endsAt: new Date(r.ends_at) }, { noShowOwes: owes, now });
+    if (!state) continue;
+    const due = r.status === 'no_show' && !owes ? paidCents : priceCents;
+    out.push({
+      appointmentId: r.id,
+      customerId: r.customer_id,
+      customerName: r.customer_name,
+      customerPhone: r.customer_phone,
+      serviceName: r.service_name,
+      resourceName: r.resource_name,
+      startsAt: new Date(r.starts_at).toISOString(),
+      endsAt: new Date(r.ends_at).toISOString(),
+      status: r.status,
+      priceCents,
+      paidCents,
+      balanceCents: Math.max(due - paidCents, 0),
+      state,
+      methods: r.methods ?? [],
+      lastPaidAt: r.last_paid_at ? new Date(r.last_paid_at).toISOString() : null,
+      tenantId: r.tenant_id,
+      businessName: r.business_name,
+      locationId: r.location_id,
+      locationName: r.location_name,
+    });
+  }
+  return c.json(out);
+});
+
 /** Registers a payment received outside the platform (cash, terminal, transfer). */
 paymentRoutes.post('/payments', async (c) => {
   const input = paymentCreateSchema.parse(await c.req.json());
+  // Mercado Pago (and SPEI through it) are recorded only by the platform when the money arrives.
+  if ((ONLINE_METHODS as readonly string[]).includes(input.method)) {
+    throw new AppError(422, 'online_method_manual', 'Mercado Pago payments are recorded automatically');
+  }
   const tenantId = c.get('tenantId');
   const db = getDb();
 
