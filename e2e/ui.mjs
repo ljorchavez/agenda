@@ -57,7 +57,7 @@ const me = await api('/auth/me', null, tok);
 await api('/tenant', { settings: { ...me.tenant.settings, payments: { ...me.tenant.settings.payments, noShowOwes: false } } }, tok, 'PATCH');
 const me2 = await api('/auth/me', null, tok);
 ok('no-show setting saved', me2.tenant.settings.payments.noShowOwes === false);
-await page.goto('http://localhost:5173/settings');
+await page.goto('http://localhost:5173/settings?tab=payments');
 await page.waitForTimeout(800);
 ok('no-show option in settings', (await page.getByText('No se le cobra').count()) > 0);
 await api('/tenant', { settings: { ...me.tenant.settings } }, tok, 'PATCH');
@@ -98,16 +98,23 @@ const filterBtn = page.getByRole('button', { name: /^Filtros/ });
 ok('filters collapsed by default', (await page.locator('select[aria-label="Servicio"]').count()) === 0);
 await filterBtn.click();
 ok('filters open on click', (await page.locator('select[aria-label="Servicio"]').count()) === 1);
+// Long lists come in pages: count with the pager ("1–50 de 312") when there is one
+const listTotal = async () => {
+  const txt = await page.locator('nav[aria-label="Páginas"] span').first().textContent({ timeout: 1000 }).catch(() => null);
+  return txt ? Number(txt.match(/de (\d+)/)[1]) : page.locator('tbody tr').count();
+};
 // Cobros: one row per booking with its state; tiles filter the list
 await page.goto('http://localhost:5173/payments');
 await page.waitForSelector('tbody tr');
 ok('Cobros in the menu', (await page.locator('nav a[href="/payments"]').first().textContent())?.includes('Cobros'));
-const allBookings = await page.locator('tbody tr').count();
+const allBookings = await listTotal();
+ok('cobros list is paginated', (await page.locator('tbody tr').count()) <= 50);
 await page.getByRole('button', { name: /Debe\b/ }).first().click();
 await page.waitForTimeout(300);
-const owedRows = await page.locator('tbody tr').count();
+const owedRows = await listTotal();
+const owedShown = await page.locator('tbody tr').count();
 const owedBadges = await page.locator('tbody tr td:nth-child(3), tbody tr td:nth-child(4)').filter({ hasText: /Debe/ }).count();
-ok('owed tile filters bookings', owedRows > 0 && owedRows < allBookings && owedBadges >= owedRows, `${allBookings}->${owedRows} (${owedBadges})`);
+ok('owed tile filters bookings', owedRows > 0 && owedRows < allBookings && owedBadges >= owedShown, `${allBookings}->${owedRows} (${owedBadges})`);
 const recordBtn = page.getByRole('button', { name: 'Registrar pago' }).first();
 await recordBtn.click();
 ok('record payment only offers in-person methods', !(await page.locator('#rp-method option').allTextContents()).some((m) => /Mercado Pago/.test(m)));
@@ -115,13 +122,69 @@ await page.keyboard.press('Escape');
 // Movements tab keeps the payment records
 await page.goto('http://localhost:5173/payments?tab=movements');
 await page.waitForSelector('tbody tr');
-const rowsAll = await page.locator('tbody tr').count();
+const rowsAll = await listTotal();
 await page.getByRole('button', { name: /Filtros/ }).click();
 await page.selectOption('#pf-method', 'cash');
 await page.waitForTimeout(300);
-const rowsCash = await page.locator('tbody tr').count();
+const rowsCash = await listTotal();
 ok('payments filter still works', rowsCash > 0 && rowsCash < rowsAll, `${rowsAll}->${rowsCash}`);
 ok('active filter count shown', (await page.getByRole('button', { name: /Filtros\s*1/ }).count()) === 1);
+// Customers come 50 at a time
+await page.goto('http://localhost:5173/customers');
+await page.waitForSelector('tbody tr');
+const custTotal = await listTotal();
+ok('customers paginated', (await page.locator('tbody tr').count()) === Math.min(50, custTotal) && custTotal > 50, String(custTotal));
+await page.getByRole('button', { name: 'Página siguiente' }).click();
+await page.waitForTimeout(600);
+ok('customers next page', /^51–/.test((await page.locator('nav[aria-label="Páginas"] span').first().textContent()) ?? ''));
+// Settings in tabs
+await page.goto('http://localhost:5173/settings');
+await page.waitForSelector('[role=tab]');
+const tabNames = await page.locator('[role=tab]').allTextContents();
+ok('settings tabs', ['Negocio', 'Reservas', 'Pagos', 'Usuarios', 'Mi cuenta'].every((x) => tabNames.includes(x)), tabNames.join('|'));
+await page.getByRole('tab', { name: 'Usuarios' }).click();
+ok('users tab shows logins', await page.getByText('Usuarios con acceso').isVisible());
+ok('payments not on users tab', (await page.getByText('Métodos de pago').count()) === 0);
+// Booking window: status from its chip, payment methods under the pill, edit in place
+const bk = await api('/appointments', { customerId: cust0.id, serviceId: svcs.find((x) => x.active && x.priceCents > 0).id, startsAt: new Date(Date.now() + 2 * 864e5 + 3 * 3600e3).toISOString(), allowOverlap: true }, tok);
+await api('/payments', { customerId: cust0.id, appointmentId: bk.id, amountCents: 5000, method: 'cash' }, tok);
+await page.addInitScript(() => localStorage.setItem('agenda.view', 'week'));
+await page.goto('http://localhost:5173/agenda');
+await page.waitForSelector('[data-testid=calendar-event]');
+const target = (await page.locator('[data-testid=calendar-event]').all()).length;
+let opened = false;
+for (let week = 0; week < 2 && !opened; week++) {
+  if (week) {
+    await page.getByRole('button', { name: 'Siguiente' }).click();
+    await page.waitForTimeout(800);
+  }
+  for (const e of await page.locator(`[data-testid=calendar-event][aria-label*="${cust0.name}"]`).all()) {
+    await e.click();
+    await page.waitForTimeout(400);
+    if (await page.getByTestId('status-menu').count()) {
+      if (((await page.getByTestId('paid-methods').textContent().catch(() => '')) ?? '').includes('Efectivo') && (await page.getByTestId('edit-time').count())) { opened = true; break; }
+      await page.keyboard.press('Escape');
+    }
+  }
+}
+ok('booking shows payment method under the pill', opened, String(target));
+ok('no status dropdown below', (await page.locator('#am-status').count()) === 0);
+await page.getByTestId('status-menu').click();
+await page.getByRole('menuitemradio', { name: /Confirmada/ }).click();
+await page.waitForTimeout(800);
+ok('status changed from the chip', (await api(`/appointments/${bk.id}`, null, tok)).status === 'confirmed');
+await page.getByTestId('edit-time').click();
+ok('time edits in place', (await page.locator('[role=dialog] input[type=datetime-local]').count()) === 1);
+await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
+await page.getByRole('button', { name: 'Cobrar' }).click();
+await page.selectOption('#am-method', 'card');
+await page.getByRole('button', { name: 'Registrar pago' }).click();
+await page.waitForTimeout(1000);
+const after = await api(`/appointments/${bk.id}`, null, tok);
+ok('charge in place settles it', after.paidCents >= after.priceCents && after.paidMethods.includes('card'), JSON.stringify(after.paidMethods));
+ok('window shows both methods', ((await page.getByTestId('paid-methods').textContent()) ?? '').includes('Tarjeta'));
+await page.keyboard.press('Escape');
+await api(`/appointments/${bk.id}`, null, tok, 'DELETE');
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));

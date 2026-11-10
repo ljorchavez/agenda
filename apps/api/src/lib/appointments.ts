@@ -18,7 +18,10 @@ export async function queryAppointments(
            a.class_session_id, a.location_id,
            coalesce((select sum(p.amount_cents) from payments p
                      where p.appointment_id = a.id and p.tenant_id = a.tenant_id
-                       and p.status = 'paid'), 0) as paid_cents
+                       and p.status = 'paid'), 0) as paid_cents,
+           (select array_agg(distinct p.method::text) from payments p
+             where p.appointment_id = a.id and p.tenant_id = a.tenant_id
+               and p.status = 'paid') as paid_methods
     from appointments a
     join customers c on c.id = a.customer_id
     join services s on s.id = a.service_id

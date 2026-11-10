@@ -144,6 +144,7 @@ export type AppointmentRow = {
   notes: string | null;
   rating: number | string | null;
   paid_cents: number | string | null;
+  paid_methods?: string[] | string | null;
   party_size: number | null;
   resource_id: string | null;
   resource_name: string | null;
@@ -151,6 +152,13 @@ export type AppointmentRow = {
   class_session_id: string | null;
   location_id: string;
 };
+
+/** text[] from node-pg (already an array) or its raw '{a,b}' form. */
+function pgTextArray(v: string[] | string | null | undefined): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v;
+  return v.replace(/^\{|\}$/g, '').split(',').filter(Boolean);
+}
 
 export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
   return {
@@ -169,6 +177,7 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     notes: r.notes,
     rating: r.rating == null ? null : Number(r.rating),
     paidCents: Number(r.paid_cents ?? 0),
+    paidMethods: pgTextArray(r.paid_methods) as AppointmentDto['paidMethods'],
     managePath: `/c/${manageToken(r.id)}`,
     partySize: r.party_size == null ? null : Number(r.party_size),
     resourceId: r.resource_id,

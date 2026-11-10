@@ -195,7 +195,12 @@
     "status": "Status",
     "notesError": "Couldn't save the note; check your connection.",
     "changeCustomer": "Change",
-    "noCustomerFound": "No customer matches. Use \"+ New customer\"."
+    "noCustomerFound": "No customer matches. Use \"+ New customer\".",
+    "changeStatus": "Change status",
+    "reschedule": "Change date and time",
+    "changeResource": "Change {{what}}",
+    "charge": "Take payment",
+    "recordPayment": "Record payment"
   },
   "customers": {
     "title": "Customers",
@@ -347,7 +352,16 @@
     "forbidden": "Your role can't manage that user.",
     "sharedAccount": "This person also uses other businesses: only they can change their name and password.",
     "existingAccountHelp": "If the email already has an account (e.g. they work at another business), they'll sign in with their current password.",
-    "shared_account": "This person also uses other businesses: only they can change their name and password."
+    "shared_account": "This person also uses other businesses: only they can change their name and password.",
+    "tabs": {
+      "business": "Business",
+      "booking": "Bookings",
+      "payments": "Payments",
+      "locations": "Locations",
+      "users": "Users",
+      "plan": "Plan",
+      "account": "My account"
+    }
   },
   "booking": {
     "chooseService": "Choose a service",
@@ -957,5 +971,11 @@
     "record": "Record payment",
     "empty": "No bookings in this period",
     "mpNote": "Record here what you are paid in person. Online Mercado Pago payments are recorded automatically."
+  },
+  "pager": {
+    "label": "Pages",
+    "range": "{{from}}–{{to}} of {{total}}",
+    "prev": "Previous page",
+    "next": "Next page"
   }
 }

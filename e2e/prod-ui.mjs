@@ -109,9 +109,10 @@ async function run(viewport, label) {
   check(`[${label}] reports: 12-month view`, page.url().includes('p=last12Months') && (await page.locator('.recharts-bar-rectangle').count()) > 10);
   await page.screenshot({ path: `${out}/${label}-reports.png`, fullPage: true });
 
-  await page.goto(`${BASE}/settings`);
+  await page.goto(`${BASE}/settings?tab=booking`);
   await page.getByRole('heading', { name: 'Configuración' }).waitFor();
   check(`[${label}] settings page`, await page.getByRole('heading', { name: 'Tu página de reservas' }).isVisible());
+  await page.getByRole('tab', { name: 'Pagos' }).click();
   await page.getByText('Métodos de pago').scrollIntoViewIfNeeded();
   check(`[${label}] settings: payment methods section`, await page.getByText('Métodos de pago').isVisible());
   check(`[${label}] settings: deposit section`, await page.getByText('Anticipo para reservar').isVisible());
@@ -349,7 +350,7 @@ async function newKinds(viewport, label) {
     await page.locator('[data-testid="calendar-column"]').first().click({ position: { x: 20, y: 5 } });
     check(`[${label}] tap on grid opens new booking`, await page.getByRole('heading', { name: 'Nueva cita' }).isVisible().catch(() => false));
     await page.keyboard.press('Escape');
-    await page.goto(`${BASE}/settings`);
+    await page.goto(`${BASE}/settings?tab=locations`);
     await page.getByRole('heading', { name: 'Sucursales' }).waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] settings lists locations and plan`, (await page.getByTestId('plan').innerText().catch(() => '')).includes('1 sucursal extra'));
     await page.screenshot({ path: `${out}/${label}-locations.png`, fullPage: true });
@@ -384,7 +385,7 @@ async function newKinds(viewport, label) {
     await page.goto(`${BASE}/agenda`);
     await page.locator(PERSON_FILTER).waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] admin sees everyone's agenda`, await page.locator(PERSON_FILTER).isVisible().catch(() => false));
-    await page.goto(`${BASE}/settings`);
+    await page.goto(`${BASE}/settings?tab=users`);
     await page.getByText('Usuarios con acceso').waitFor({ timeout: 15000 }).catch(() => {});
     await page.getByText('Memo Hernández').first().waitFor({ timeout: 10000 }).catch(() => {});
     check(`[${label}] admin manages users`, await page.getByText('Memo Hernández').first().isVisible().catch(() => false));

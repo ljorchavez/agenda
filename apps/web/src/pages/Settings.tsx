@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -188,10 +188,47 @@ function BusinessSettings() {
   const setHours = (patch: Partial<TenantSettings['hours']>) =>
     setSettings((s) => ({ ...s, hours: { ...s.hours, ...patch } }));
 
+  const [params, setParams] = useSearchParams();
+  const tabs = [
+    { id: 'business', label: t('settings.tabs.business') },
+    { id: 'booking', label: t('settings.tabs.booking') },
+    { id: 'payments', label: t('settings.tabs.payments') },
+    ...(businessManager ? [{ id: 'locations', label: t('settings.tabs.locations') }] : []),
+    { id: 'users', label: t('settings.tabs.users') },
+    ...(businessManager ? [{ id: 'plan', label: t('settings.tabs.plan') }] : []),
+    { id: 'account', label: t('settings.tabs.account') },
+  ];
+  const tab = tabs.some((x) => x.id === params.get('tab')) ? params.get('tab')! : 'business';
+  // Tabs that share one "Guardar" (business data, booking rules, payments)
+  const saveBar = canEdit && ['business', 'booking', 'payments'].includes(tab) && (
+    <div className="flex items-center gap-3">
+      <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
+      {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
+      <ErrorText error={save.error} ns="paymentSettings" />
+    </div>
+  );
+
   return (
     <>
       <PageHeader title={t('settings.title')} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div role="tablist" aria-label={t('settings.title')} className="-mx-1 mb-6 flex gap-1 overflow-x-auto border-b border-slate-200 px-1">
+        {tabs.map((x) => (
+          <button
+            key={x.id}
+            role="tab"
+            type="button"
+            aria-selected={tab === x.id}
+            onClick={() => setParams(x.id === 'business' ? {} : { tab: x.id }, { replace: true })}
+            className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === x.id ? 'border-brand-600 text-brand-800' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'business' && (
+        <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.business')}</h2>
           <div>
@@ -210,7 +247,6 @@ function BusinessSettings() {
               <input className="input" value={phone} disabled={!canEdit} onChange={(e) => setPhone(e.target.value)} />
             </div>
           </div>
-          <LanguageSelect />
           <div className="text-sm text-slate-500">{t('settings.timezone')}: {tenant?.timezone}</div>
           <Link to="/resources" className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm hover:border-brand-500">
             <span>
@@ -221,6 +257,28 @@ function BusinessSettings() {
           </Link>
         </section>
 
+        <section className="card space-y-4 ">
+          <h2 className="font-semibold">{t('settings.hours')}</h2>
+          <HoursFields idPrefix="biz-hours" disabled={!canEdit} value={settings.hours} onChange={(h) => setHours(h)} />
+          <div className="max-w-[12rem]">
+            <label className="label" htmlFor="biz-slot">{t('settings.slotMinutes')}</label>
+            <select id="biz-slot" disabled={!canEdit} className="input" value={settings.hours.slotMinutes} onChange={(e) => setHours({ slotMinutes: Number(e.target.value) })}>
+              {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </section>
+
+          </div>
+          {saveBar}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <PublicProfileSection disabled={!canEdit} />
+          </div>
+        </div>
+      )}
+
+      {tab === 'booking' && (
+        <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.publicLink')}</h2>
           <div className="flex gap-2">
@@ -311,40 +369,35 @@ function BusinessSettings() {
           </div>
         </section>
 
-        <section className="card space-y-4 lg:col-span-2">
-          <h2 className="font-semibold">{t('settings.hours')}</h2>
-          <HoursFields idPrefix="biz-hours" disabled={!canEdit} value={settings.hours} onChange={(h) => setHours(h)} />
-          <div className="max-w-[12rem]">
-            <label className="label" htmlFor="biz-slot">{t('settings.slotMinutes')}</label>
-            <select id="biz-slot" disabled={!canEdit} className="input" value={settings.hours.slotMinutes} onChange={(e) => setHours({ slotMinutes: Number(e.target.value) })}>
-              {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
           </div>
-        </section>
+          {saveBar}
+        </div>
+      )}
 
-        <PublicProfileSection disabled={!canEdit} />
-
+      {tab === 'payments' && (
+        <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
         <PaymentSettingsSection
           value={payments}
           disabled={!isOwner}
           onChange={(p) => setSettings((s) => ({ ...s, payments: p }))}
         />
-      </div>
-
-      {canEdit && (
-        <div className="mt-6 flex items-center gap-3">
-          <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
-          {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
-          <ErrorText error={save.error} ns="paymentSettings" />
+          </div>
+          {saveBar}
         </div>
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <AccountSection />
-      </div>
-      {businessManager && <PlanSection canChange={isOwner} />}
-      <LocationsSection editable={businessManager} />
-      <UsersSection kind={kind} />
+      {tab === 'locations' && <LocationsSection editable={businessManager} />}
+      {tab === 'users' && <UsersSection kind={kind} />}
+      {tab === 'plan' && <PlanSection canChange={isOwner} />}
+      {tab === 'account' && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <AccountSection />
+          <section className="card space-y-4">
+            <LanguageSelect />
+          </section>
+        </div>
+      )}
     </>
   );
 }

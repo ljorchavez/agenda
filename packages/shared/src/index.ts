@@ -1068,6 +1068,8 @@ export interface AppointmentDto {
   /** Internal 1–5 rating of the visit */
   rating: number | null;
   paidCents: number;
+  /** Methods of the paid payments (e.g. ['mercadopago', 'cash'] for a deposit settled in person) */
+  paidMethods: PaymentMethod[];
   /** Private customer link to reschedule/cancel: /c/<token> */
   managePath: string;
   /** People in the booking (party size, class spots) */

@@ -6,13 +6,14 @@ export const useServices = () =>
   useQuery({ queryKey: ['services'], queryFn: () => api<ServiceDto[]>('/services') });
 
 /** `forBooking` lets a colaborador find any existing customer by name/phone when booking. */
-export const useCustomers = (q = '', sort = 'name', forBooking = false) =>
+export const useCustomers = (q = '', sort = 'name', forBooking = false, page?: { size: number; index: number }) =>
   useQuery({
-    queryKey: ['customers', q, sort, forBooking],
+    queryKey: ['customers', q, sort, forBooking, page?.size, page?.index],
     queryFn: () =>
       api<{ items: CustomerWithStats[]; total: number }>(
-        `/customers?limit=200&sort=${sort}${q ? `&q=${encodeURIComponent(q)}` : ''}${forBooking ? '&for=booking' : ''}`,
+        `/customers?limit=${page?.size ?? 200}&offset=${page ? page.size * page.index : 0}&sort=${sort}${q ? `&q=${encodeURIComponent(q)}` : ''}${forBooking ? '&for=booking' : ''}`,
       ),
+    placeholderData: (prev) => prev,
   });
 
 /** Whatever gets booked: team members, instructors, courts, rooms or tables. */

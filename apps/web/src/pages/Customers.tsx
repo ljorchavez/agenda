@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { CustomerDto } from '@agenda/shared';
-import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
+import { Empty, ErrorText, Loading, Modal, PageHeader, Pager } from '../components/ui';
 import { api } from '../lib/api';
 import { dateOnly, money } from '../lib/format';
 import { useCustomers } from '../lib/queries';
@@ -23,6 +23,8 @@ const FIRST_DIR: Record<SortKey, SortDir> = {
   nextAppointment: 'asc',
 };
 
+const PAGE_SIZE = 50;
+
 export function CustomersPage() {
   const { t } = useTranslation();
   const [q, setQ] = useState('');
@@ -30,13 +32,18 @@ export function CustomersPage() {
   const navigate = useNavigate();
   const { sort, toggle } = useSort<SortKey>({ key: 'name', dir: 'asc' }, FIRST_DIR);
   const [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
-    const id = setTimeout(() => setDebounced(q.trim()), 250);
+    const id = setTimeout(() => {
+      setDebounced(q.trim());
+      setPage(0);
+    }, 250);
     return () => clearTimeout(id);
   }, [q]);
 
-  const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}`);
+  const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}`, false, { size: PAGE_SIZE, index: page });
+  useEffect(() => setPage(0), [sort.key, sort.dir]);
 
   return (
     <>
@@ -100,6 +107,7 @@ export function CustomersPage() {
           </table>
         </div>
       )}
+      {data && <Pager page={page} pageSize={PAGE_SIZE} total={data.total} onPage={(p) => { setPage(p); window.scrollTo({ top: 0 }); }} />}
       {creating && <CustomerFormModal onClose={() => setCreating(false)} />}
     </>
   );

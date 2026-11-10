@@ -21,7 +21,7 @@ import {
   type TimeBlockDto,
 } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
-import { ErrorText, Loading, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
+import { ErrorText, Loading, MenuButton, MethodTags, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
 import { useMyLocations, useResources, useServices } from '../lib/queries';
@@ -803,13 +803,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const online = tenant?.mercadoPago.connected
     ? (['mercadopago', 'spei'] as const).filter((m) => pay.methods[m])
     : [];
-  const [method, setMethod] = useState<'cash' | 'card' | 'transfer'>(offline[0]!);
-  const [reschedule, setReschedule] = useState(toLocalInput(new Date(appt.startsAt)));
-  const [deposit, setDeposit] = useState<{ amount: string; method: 'mercadopago' | 'spei' } | null>(null);
-  const [link, setLink] = useState<PaymentDto | null>(null);
-  const outstanding = Math.max(appt.priceCents - appt.paidCents, 0);
   const selfService = selfServiceOf(tenant!.settings);
-  const [copied, setCopied] = useState(false);
   const kind = tenant?.kind ?? 'appointments';
   const cfg = kindConfig(kind);
   const label = useResourceLabel();
@@ -817,10 +811,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const atLoc = (resourcesQ.data ?? []).filter((r) => r.active && r.locationId === appt.locationId);
   // Party size kinds (restaurants) charge the bill when the visit ends.
   const withParty = cfg.partySize && appt.partySize != null && !appt.classSessionId;
-  const [party, setParty] = useState(String(appt.partySize ?? 2));
-  const [res, setRes] = useState(appt.resourceId ?? '');
-  const eligible = eligibleResources(atLoc, { serviceId: appt.serviceId, partySize: withParty ? Number(party || 1) : null });
-  const [bill, setBill] = useState('');
+  const eligible = (party: number | null) => eligibleResources(atLoc, { serviceId: appt.serviceId, partySize: withParty ? party : null });
   const manageUrl = `${window.location.origin}${appt.managePath}`;
   const manageMsg = t('agenda.manageMessage', {
     name: appt.customerName.split(' ')[0],
@@ -828,33 +819,84 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
     date: dateTime(appt.startsAt),
     url: manageUrl,
   });
+  const [copied, setCopied] = useState(false);
+
+  // The window shows the latest copy of the booking after every change made from it.
+  const [cur, setCur] = useState(appt);
+  const status = cur.status;
+  const outstanding = Math.max(cur.priceCents - cur.paidCents, 0);
+  const open = status === 'scheduled' || status === 'confirmed';
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['appointments'] });
     void qc.invalidateQueries({ queryKey: ['customers'] });
     void qc.invalidateQueries({ queryKey: ['dashboard'] });
     void qc.invalidateQueries({ queryKey: ['payments'] });
+    void qc.invalidateQueries({ queryKey: ['collections'] });
+  };
+  /** Re-reads the booking (payments change paidCents and methods). */
+  const reload = async () => {
+    const fresh = await api<AppointmentDto>(`/appointments/${cur.id}`).catch(() => null);
+    if (fresh) setCur(fresh);
   };
 
+  // Every inline edit goes through here; the window stays open so you can keep going.
+  const [editing, setEditing] = useState<null | 'time' | 'resource' | 'party' | 'pay' | 'deposit'>(null);
   const update = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api<AppointmentDto>(`/appointments/${appt.id}`, { method: 'PATCH', body }),
-    onSuccess: () => {
+    mutationFn: (body: Record<string, unknown>) => api<AppointmentDto>(`/appointments/${cur.id}`, { method: 'PATCH', body }),
+    onSuccess: (a) => {
+      setCur(a);
+      setWhen(toLocalInput(new Date(a.startsAt)));
+      setEditing(null);
       refresh();
-      onClose();
     },
   });
   const remove = useMutation({
-    mutationFn: () => api(`/appointments/${appt.id}`, { method: 'DELETE' }),
+    mutationFn: () => api(`/appointments/${cur.id}`, { method: 'DELETE' }),
     onSuccess: () => {
       refresh();
       onClose();
     },
   });
+
+  // Time
+  const [when, setWhen] = useState(toLocalInput(new Date(appt.startsAt)));
+  // Party size / bill / payment
+  const [party, setParty] = useState(String(appt.partySize ?? 2));
+  const [method, setMethod] = useState<'cash' | 'card' | 'transfer'>(offline[0]!);
+  const [amount, setAmount] = useState('');
+  const recordPay = useMutation({
+    mutationFn: async () => {
+      let price = cur.priceCents;
+      // Restaurants: the amount typed is the bill when no price was set yet.
+      if (withParty && price === 0) {
+        price = toCents(amount);
+        await api(`/appointments/${cur.id}`, { method: 'PATCH', body: { priceCents: price } });
+      }
+      const cents = withParty && cur.priceCents === 0 ? price - cur.paidCents : toCents(amount);
+      if (cents > 0) {
+        await api('/payments', { method: 'POST', body: { customerId: cur.customerId, appointmentId: cur.id, amountCents: cents, method } });
+      }
+    },
+    onSuccess: async () => {
+      setEditing(null);
+      refresh();
+      await reload();
+    },
+  });
+  const startPay = () => {
+    setAmount(outstanding > 0 ? String(outstanding / 100) : '');
+    setEditing('pay');
+  };
+
+  // Mercado Pago deposit link
+  const [deposit, setDeposit] = useState<{ amount: string; method: 'mercadopago' | 'spei' } | null>(null);
+  const [link, setLink] = useState<PaymentDto | null>(null);
   const createLink = useMutation({
     mutationFn: () =>
       api<PaymentDto>('/payments/link', {
         method: 'POST',
-        body: { appointmentId: appt.id, amountCents: toCents(deposit!.amount), method: deposit!.method },
+        body: { appointmentId: cur.id, amountCents: toCents(deposit!.amount), method: deposit!.method },
       }),
     onSuccess: (p) => {
       setLink(p);
@@ -895,7 +937,6 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes]);
-  // Closing the window (or the page) still saves what was typed.
   useEffect(() => () => {
     const v = pendingNotes.current;
     if (v !== null && v !== savedNotes.current) {
@@ -904,76 +945,191 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Status can always be changed (a "No asistió" by mistake goes back to "Confirmada").
-  const [status, setStatus] = useState(appt.status);
-  const changeStatus = useMutation({
-    mutationFn: (next: AppointmentDto['status']) =>
-      api<AppointmentDto>(`/appointments/${appt.id}`, { method: 'PATCH', body: { status: next } }),
-    onSuccess: (a) => {
-      setStatus(a.status);
-      refresh();
-    },
-  });
-
-  const open = status === 'scheduled' || status === 'confirmed';
   const waLink = (url: string) =>
-    appt.customerPhone
-      ? `https://wa.me/${appt.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(url)}`
+    cur.customerPhone
+      ? `https://wa.me/${cur.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(url)}`
       : undefined;
+
+  // Pieces that can be changed right where they're shown
+  const canReschedule = open && !cur.classSessionId;
+  const canReassign = open && !scoped && !cur.classSessionId && atLoc.length > 0;
+  const canParty = open && !scoped && withParty;
+  const canPay = status !== 'cancelled' && (outstanding > 0 || (withParty && cur.priceCents === 0 && status !== 'no_show'));
+  const editable = 'group inline-flex items-center gap-1 rounded px-1 -mx-1 text-left hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
+  const pencil = <span aria-hidden className="text-xs text-slate-400 opacity-60 group-hover:opacity-100">✎</span>;
 
   return (
     <Modal open title={t(`kinds.${kind}.booking`)} onClose={onClose}>
       <div className="space-y-1">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-lg font-semibold leading-tight">{appt.customerName}</div>
-            {appt.customerPhone && (
+            <div className="text-lg font-semibold leading-tight">{cur.customerName}</div>
+            {cur.customerPhone && (
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-sm">
-                <a href={`tel:${appt.customerPhone}`} className="text-slate-600 hover:text-brand-700">{appt.customerPhone}</a>
-                <a href={`https://wa.me/${appt.customerPhone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="font-medium text-emerald-700 hover:underline">WhatsApp</a>
+                <a href={`tel:${cur.customerPhone}`} className="text-slate-600 hover:text-brand-700">{cur.customerPhone}</a>
+                <a href={`https://wa.me/${cur.customerPhone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="font-medium text-emerald-700 hover:underline">WhatsApp</a>
               </div>
             )}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
-            <StatusBadge status={status} />
-            <PaymentBadge appt={{ priceCents: appt.priceCents, paidCents: appt.paidCents, status, endsAt: appt.endsAt }} noShowOwes={noShowOwes(tenant!.settings)} />
+            {/* Status changes from its own chip (a "No asistió" by mistake goes back to "Confirmada"). */}
+            <MenuButton
+              ariaLabel={t('agenda.changeStatus')}
+              testId="status-menu"
+              label={<StatusBadge status={status} />}
+              value={status}
+              disabled={update.isPending}
+              onChange={(st) => update.mutate({ status: st })}
+              options={(['scheduled', 'confirmed', 'completed', 'no_show', 'cancelled'] as const).map((st) => ({
+                value: st,
+                label: <><span aria-hidden className="w-4 text-center">{BOOKING_ICON[st]}</span>{t(`status.${st}`)}</>,
+              }))}
+            />
+            <PaymentBadge appt={{ priceCents: cur.priceCents, paidCents: cur.paidCents, status, endsAt: cur.endsAt }} noShowOwes={noShowOwes(tenant!.settings)} />
+            <MethodTags methods={cur.paidMethods ?? []} />
           </div>
         </div>
-        <div className="pt-1 text-slate-600">{appt.serviceName}</div>
-        <div className="text-sm text-slate-500">{dateTime(appt.startsAt)} – {timeOnly(appt.endsAt)} · {t(`source.${appt.source}`)}</div>
-        {(appt.resourceName || withParty) && (
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-            {appt.resourceColor && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: appt.resourceColor }} />}
-            {[withParty && t('agenda.attendees', { count: appt.partySize ?? 0 }), appt.resourceName ?? (atLoc.length ? t('agenda.unassigned') : '')].filter(Boolean).join(' · ')}
+        <div className="pt-1 text-slate-600">{cur.serviceName}</div>
+
+        {editing === 'time' ? (
+          <div className="flex flex-wrap items-center gap-2 py-1">
+            <input type="datetime-local" className="input !w-auto !py-1.5" value={when} onChange={(e) => setWhen(e.target.value)} autoFocus aria-label={t('agenda.startsAt')} />
+            <button className="btn-primary !py-1.5" disabled={update.isPending} onClick={() => update.mutate({ startsAt: new Date(when).toISOString() })}>{t('common.save')}</button>
+            <button className="btn-secondary !py-1.5" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
+          </div>
+        ) : canReschedule ? (
+          <button type="button" className={`${editable} text-sm text-slate-500`} onClick={() => setEditing('time')} aria-label={t('agenda.reschedule')} data-testid="edit-time">
+            {dateTime(cur.startsAt)} – {timeOnly(cur.endsAt)} {pencil}
+            <span className="text-slate-400">· {t(`source.${cur.source}`)}</span>
+          </button>
+        ) : (
+          <div className="text-sm text-slate-500">{dateTime(cur.startsAt)} – {timeOnly(cur.endsAt)} · {t(`source.${cur.source}`)}</div>
+        )}
+
+        {(cur.resourceName || withParty || canReassign) && (
+          <div className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-slate-700">
+            {withParty && (editing === 'party' ? (
+              <span className="flex items-center gap-2">
+                <input type="number" min={1} max={50} className="input w-20 !py-1" value={party} onChange={(e) => setParty(e.target.value)} autoFocus aria-label={t('agenda.partySize')} />
+                <button className="btn-primary !py-1" disabled={update.isPending} onClick={() => update.mutate({ partySize: Number(party) })}>{t('common.save')}</button>
+                <button className="btn-secondary !py-1" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
+              </span>
+            ) : canParty ? (
+              <button type="button" className={editable} onClick={() => setEditing('party')}>{t('agenda.attendees', { count: cur.partySize ?? 0 })} {pencil}</button>
+            ) : (
+              <span>{t('agenda.attendees', { count: cur.partySize ?? 0 })}</span>
+            ))}
+            {withParty && (cur.resourceName || canReassign) && <span className="text-slate-300">·</span>}
+            {editing === 'resource' ? (
+              <select
+                className="input !w-auto !py-1"
+                autoFocus
+                aria-label={t(`kinds.${kind}.resource`)}
+                defaultValue={cur.resourceId ?? ''}
+                disabled={update.isPending}
+                onChange={(e) => update.mutate({ resourceId: e.target.value || null })}
+                onBlur={() => !update.isPending && setEditing(null)}
+              >
+                <option value="">{t('resources.auto')}</option>
+                {eligible(cur.partySize).map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
+              </select>
+            ) : canReassign ? (
+              <button type="button" className={editable} onClick={() => setEditing('resource')} data-testid="edit-resource" aria-label={t('agenda.changeResource', { what: t(`kinds.${kind}.resource`) })}>
+                {cur.resourceColor && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: cur.resourceColor }} />}
+                {cur.resourceName ?? t('agenda.unassigned')} {pencil}
+              </button>
+            ) : cur.resourceName ? (
+              <span className="inline-flex items-center gap-1">
+                {cur.resourceColor && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: cur.resourceColor }} />}
+                {cur.resourceName}
+              </span>
+            ) : null}
           </div>
         )}
-        {apptLocs.anyMulti && <div className="text-sm text-slate-500">⌂ {apptLocs.byId.get(appt.locationId)?.name}</div>}
-        <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm">
-          <div><div className="text-slate-500">{t('agenda.price')}</div><div className="font-semibold">{money(appt.priceCents)}</div></div>
-          <div><div className="text-slate-500">{t('agenda.paid')}</div><div className="font-semibold text-emerald-700">{money(appt.paidCents)}</div></div>
-          <div><div className="text-slate-500">{t('agenda.outstanding')}</div><div className="font-semibold text-amber-700">{money(outstanding)}</div></div>
+        {apptLocs.anyMulti && <div className="text-sm text-slate-500">⌂ {apptLocs.byId.get(cur.locationId)?.name}</div>}
+
+        <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div><div className="text-slate-500">{t('agenda.price')}</div><div className="font-semibold">{money(cur.priceCents)}</div></div>
+            <div><div className="text-slate-500">{t('agenda.paid')}</div><div className="font-semibold text-emerald-700">{money(cur.paidCents)}</div></div>
+            <div><div className="text-slate-500">{t('agenda.outstanding')}</div><div className="font-semibold text-amber-700">{money(outstanding)}</div></div>
+          </div>
+          {editing === 'pay' ? (
+            <form
+              className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-slate-200 pt-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                recordPay.mutate();
+              }}
+            >
+              <input
+                type="number"
+                min={0.01}
+                step="0.01"
+                required
+                className="input w-28 !py-1.5"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                autoFocus
+                aria-label={withParty && cur.priceCents === 0 ? t('agenda.bill') : t('customers.amount')}
+                placeholder={withParty && cur.priceCents === 0 ? t('agenda.bill') : ''}
+              />
+              <select id="am-method" className="input !w-auto !py-1.5" value={method} onChange={(e) => setMethod(e.target.value as typeof method)} aria-label={t('agenda.paymentMethod')}>
+                {offline.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
+              </select>
+              <button className="btn-primary !py-1.5" disabled={recordPay.isPending}>{t('agenda.recordPayment')}</button>
+              <button type="button" className="btn-secondary !py-1.5" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
+              <ErrorText error={recordPay.error} ns="agenda" />
+            </form>
+          ) : editing === 'deposit' && deposit ? (
+            <div className="mt-3 border-t border-slate-200 pt-3">
+              {link?.checkoutUrl ? (
+                <div className="space-y-2">
+                  <p>{t('agenda.linkReady')}</p>
+                  <input readOnly className="input" value={link.checkoutUrl} onFocus={(e) => e.target.select()} />
+                  {waLink(link.checkoutUrl) && (
+                    <a className="btn-primary" href={waLink(link.checkoutUrl)} target="_blank" rel="noreferrer">{t('agenda.sendWhatsapp')}</a>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-end justify-center gap-2">
+                  <div>
+                    <label className="label">{t('agenda.depositAmount')}</label>
+                    <input type="number" min={1} step="0.01" className="input w-32" value={deposit.amount} onChange={(e) => setDeposit({ ...deposit, amount: e.target.value })} />
+                  </div>
+                  <select className="input w-auto" value={deposit.method} onChange={(e) => setDeposit({ ...deposit, method: e.target.value as 'mercadopago' | 'spei' })} aria-label={t('agenda.paymentMethod')}>
+                    {online.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
+                  </select>
+                  <button className="btn-primary" disabled={createLink.isPending} onClick={() => createLink.mutate()}>{t('agenda.createLink')}</button>
+                  <button type="button" className="btn-secondary" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
+                </div>
+              )}
+              <ErrorText error={createLink.error} ns="agenda" />
+            </div>
+          ) : (canPay || (open && online.length > 0 && outstanding > 0)) && (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-slate-200 pt-3">
+              {canPay && <button type="button" className="btn-primary !py-1.5" onClick={startPay}>{t('agenda.charge')}</button>}
+              {open && online.length > 0 && outstanding > 0 && (
+                <button
+                  type="button"
+                  className="btn-secondary !py-1.5"
+                  onClick={() => {
+                    setDeposit({ amount: String((computeDepositCents(outstanding, pay) || Math.round(outstanding / 2)) / 100 || ''), method: online[0]! });
+                    setLink(null);
+                    setEditing('deposit');
+                  }}
+                >
+                  {t('agenda.requestDeposit')}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
+      <ErrorText error={update.error} ns="agenda" />
 
-      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
-        <label className="label !mb-0 mr-1" htmlFor="am-status">{t('agenda.status')}</label>
-        <select
-          id="am-status"
-          className="input !w-auto !py-1.5"
-          value={status}
-          disabled={changeStatus.isPending}
-          onChange={(e) => changeStatus.mutate(e.target.value as AppointmentDto['status'])}
-        >
-          {(['scheduled', 'confirmed', 'completed', 'no_show', 'cancelled'] as const).map((st) => (
-            <option key={st} value={st}>{BOOKING_ICON[st]} {t(`status.${st}`)}</option>
-          ))}
-        </select>
-        {changeStatus.isPending && <span className="text-xs text-slate-500">{t('common.saving')}</span>}
-        <ErrorText error={changeStatus.error} ns="agenda" />
-      </div>
-
-      {!appt.classSessionId && (
-        <div className="mt-3 space-y-2 rounded-lg border border-slate-200 p-3">
+      {!cur.classSessionId && (
+        <div className="mt-4 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <label className="label !mb-0" htmlFor="am-notes">{t('agenda.notes')}</label>
             <div className="flex items-center gap-2">
@@ -1005,122 +1161,29 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
       )}
 
-      {open && (
-        <div className="mt-5 space-y-4">
+      {open && (selfService.rescheduleEnabled || selfService.cancelEnabled) && (
+        <div className="mt-2 rounded-lg border border-slate-200 p-3 text-sm">
+          <label className="label">{t('agenda.manageLink')}</label>
+          <p className="mb-2 text-xs text-slate-500">{t('agenda.manageLinkHelp', { hours: selfService.minHoursNotice })}</p>
           <div className="flex flex-wrap gap-2">
-            {status === 'scheduled' && (
-              <button className="btn-secondary" onClick={() => update.mutate({ status: 'confirmed' })}>{t('agenda.confirm')}</button>
+            <input readOnly className="input min-w-0 flex-1" value={manageUrl} onFocus={(e) => e.target.select()} />
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                void navigator.clipboard?.writeText(manageUrl);
+                setCopied(true);
+              }}
+            >
+              {copied ? t('common.copied') : t('common.copy')}
+            </button>
+            {waLink(manageMsg) && (
+              <a className="btn-secondary" href={waLink(manageMsg)} target="_blank" rel="noreferrer">WhatsApp</a>
             )}
-            <button className="btn-secondary" onClick={() => update.mutate({ status: 'no_show' })}>{t('agenda.noShow')}</button>
-            <button className="btn-secondary text-rose-700" onClick={() => update.mutate({ status: 'cancelled' })}>{t('agenda.cancelAppt')}</button>
           </div>
-
-          {!scoped && !appt.classSessionId && (atLoc.length > 0 || withParty) && (
-            <div className="rounded-lg border border-slate-200 p-3">
-              <label className="label" htmlFor="am-res">{t(`kinds.${kind}.resource`)}</label>
-              <div className="flex flex-wrap gap-2">
-                {withParty && (
-                  <input type="number" min={1} max={50} className="input w-24" value={party} onChange={(e) => setParty(e.target.value)} aria-label={t('agenda.partySize')} />
-                )}
-                {atLoc.length > 0 && (
-                  <select id="am-res" className="input w-auto" value={res} onChange={(e) => setRes(e.target.value)}>
-                    <option value="">{t('resources.auto')}</option>
-                    {eligible.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
-                  </select>
-                )}
-                <button
-                  className="btn-secondary"
-                  onClick={() => update.mutate({ ...(atLoc.length ? { resourceId: res || null } : {}), ...(withParty ? { partySize: Number(party) } : {}) })}
-                >
-                  {t('common.save')}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="rounded-lg border border-slate-200 p-3">
-            <label className="label">{t('agenda.paymentMethod')}</label>
-            <div className="flex flex-wrap gap-2">
-              <select className="input w-auto" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
-                {offline.map((m) => (
-                  <option key={m} value={m}>{t(`methods.${m}`)}</option>
-                ))}
-              </select>
-              {withParty && (
-                <input type="number" min={0} step="0.01" className="input w-32" placeholder={t('agenda.bill')} value={bill} onChange={(e) => setBill(e.target.value)} aria-label={t('agenda.bill')} />
-              )}
-              <button className="btn-primary" onClick={() => update.mutate({ status: 'completed', paymentMethod: method, ...(withParty && bill !== '' ? { priceCents: toCents(bill) } : {}) })}>
-                {t('agenda.complete')}
-              </button>
-            </div>
-          </div>
-
-          {!appt.classSessionId && <div className="rounded-lg border border-slate-200 p-3">
-            <label className="label">{t('agenda.startsAt')}</label>
-            <div className="flex flex-wrap gap-2">
-              <input type="datetime-local" className="input w-auto" value={reschedule} onChange={(e) => setReschedule(e.target.value)} />
-              <button className="btn-secondary" onClick={() => update.mutate({ startsAt: new Date(reschedule).toISOString() })}>
-                {t('common.save')}
-              </button>
-            </div>
-          </div>}
-
-          {(selfService.rescheduleEnabled || selfService.cancelEnabled) && (
-            <div className="rounded-lg border border-slate-200 p-3 text-sm">
-              <label className="label">{t('agenda.manageLink')}</label>
-              <p className="mb-2 text-xs text-slate-500">{t('agenda.manageLinkHelp', { hours: selfService.minHoursNotice })}</p>
-              <div className="flex flex-wrap gap-2">
-                <input readOnly className="input min-w-0 flex-1" value={manageUrl} onFocus={(e) => e.target.select()} />
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(manageUrl);
-                    setCopied(true);
-                  }}
-                >
-                  {copied ? t('common.copied') : t('common.copy')}
-                </button>
-                {waLink(manageMsg) && (
-                  <a className="btn-secondary" href={waLink(manageMsg)} target="_blank" rel="noreferrer">WhatsApp</a>
-                )}
-              </div>
-            </div>
-          )}
-
-          {online.length > 0 && <div className="rounded-lg border border-slate-200 p-3">
-            {!deposit ? (
-              <button className="text-sm font-medium text-brand-700" onClick={() => setDeposit({ amount: String((computeDepositCents(outstanding, pay) || Math.round(outstanding / 2)) / 100 || ''), method: online[0]! })}>
-                {t('agenda.requestDeposit')} →
-              </button>
-            ) : link?.checkoutUrl ? (
-              <div className="space-y-2 text-sm">
-                <p>{t('agenda.linkReady')}</p>
-                <input readOnly className="input" value={link.checkoutUrl} onFocus={(e) => e.target.select()} />
-                {waLink(link.checkoutUrl) && (
-                  <a className="btn-primary" href={waLink(link.checkoutUrl)} target="_blank" rel="noreferrer">{t('agenda.sendWhatsapp')}</a>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-end gap-2">
-                <div>
-                  <label className="label">{t('agenda.depositAmount')}</label>
-                  <input type="number" min={1} step="0.01" className="input w-32" value={deposit.amount} onChange={(e) => setDeposit({ ...deposit, amount: e.target.value })} />
-                </div>
-                <select className="input w-auto" value={deposit.method} onChange={(e) => setDeposit({ ...deposit, method: e.target.value as 'mercadopago' | 'spei' })}>
-                  {online.map((m) => (
-                    <option key={m} value={m}>{t(`methods.${m}`)}</option>
-                  ))}
-                </select>
-                <button className="btn-primary" disabled={createLink.isPending} onClick={() => createLink.mutate()}>{t('agenda.createLink')}</button>
-              </div>
-            )}
-            <ErrorText error={createLink.error} ns="agenda" />
-          </div>}
         </div>
       )}
 
-      <ErrorText error={update.error} ns="agenda" />
       <div className="mt-6 flex justify-between">
         {manager ? (
           <button

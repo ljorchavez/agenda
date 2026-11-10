@@ -195,7 +195,12 @@
     "status": "Estado",
     "notesError": "No se pudo guardar la nota; revisa tu conexión.",
     "changeCustomer": "Cambiar",
-    "noCustomerFound": "Ningún cliente coincide. Usa \"+ Cliente nuevo\"."
+    "noCustomerFound": "Ningún cliente coincide. Usa \"+ Cliente nuevo\".",
+    "changeStatus": "Cambiar estado",
+    "reschedule": "Cambiar fecha y hora",
+    "changeResource": "Cambiar {{what}}",
+    "charge": "Cobrar",
+    "recordPayment": "Registrar pago"
   },
   "customers": {
     "title": "Clientes",
@@ -347,7 +352,16 @@
     "forbidden": "Tu rol no puede administrar a ese usuario.",
     "sharedAccount": "Esta persona también usa otros negocios: solo ella puede cambiar su nombre y contraseña.",
     "existingAccountHelp": "Si el correo ya tiene cuenta (por ejemplo, trabaja en otro negocio), entrará con su contraseña actual.",
-    "shared_account": "Esta persona también usa otros negocios: solo ella puede cambiar su nombre y contraseña."
+    "shared_account": "Esta persona también usa otros negocios: solo ella puede cambiar su nombre y contraseña.",
+    "tabs": {
+      "business": "Negocio",
+      "booking": "Reservas",
+      "payments": "Pagos",
+      "locations": "Sucursales",
+      "users": "Usuarios",
+      "plan": "Plan",
+      "account": "Mi cuenta"
+    }
   },
   "booking": {
     "chooseService": "Elige un servicio",
@@ -957,5 +971,11 @@
     "record": "Registrar pago",
     "empty": "No hay reservas en este periodo",
     "mpNote": "Aquí se registra lo que te pagan en persona. Lo que pagan en línea con Mercado Pago se registra solo."
+  },
+  "pager": {
+    "label": "Páginas",
+    "range": "{{from}}–{{to}} de {{total}}",
+    "prev": "Página anterior",
+    "next": "Página siguiente"
   }
 }

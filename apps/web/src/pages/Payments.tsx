@@ -13,7 +13,7 @@ import {
   type CollectionState,
   type PaymentDto,
 } from '@agenda/shared';
-import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
+import { Empty, ErrorText, Loading, Modal, PageHeader, usePaged } from '../components/ui';
 import { COLLECTION_PILL, PAYMENT_PILL, PAYMENT_PILL_TEXT } from '../lib/status';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -119,6 +119,7 @@ function MovementsTab() {
     };
     return sortRows(filtered, get[sort.key], sort.dir);
   }, [filtered, sort, t]);
+  const { pageRows, pager } = usePaged(rows);
 
   const totals = useMemo(() => {
     const sum = (st: PaymentDto['status']) => filtered.filter((p) => p.status === st).reduce((s, p) => s + p.amountCents, 0);
@@ -216,7 +217,7 @@ function MovementsTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((p) => (
+              {pageRows.map((p) => (
                 <tr key={p.id}>
                   <td className="whitespace-nowrap px-4 py-3">{dateTime(p.paidAt ?? p.createdAt)}</td>
                   <td className="px-4 py-3">
@@ -243,6 +244,7 @@ function MovementsTab() {
           </table>
         </div>
       )}
+      {pager}
     </>
   );
 }
@@ -366,6 +368,7 @@ function CollectionsTab() {
     };
     return sortRows(filtered, get[sort.key], sort.dir);
   }, [filtered, sort]);
+  const { pageRows, pager } = usePaged(rows);
   const showLocation = locationOptions.length > 1;
 
   const tile = (s: CollectionState) => {
@@ -464,7 +467,7 @@ function CollectionsTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((r) => (
+              {pageRows.map((r) => (
                 <tr key={r.appointmentId}>
                   <td className="whitespace-nowrap px-4 py-3">
                     {dateTime(r.startsAt)}
@@ -502,6 +505,7 @@ function CollectionsTab() {
           </table>
         </div>
       )}
+      {pager}
       {paying && <RecordPaymentModal row={paying} onClose={() => setPaying(null)} />}
     </>
   );
