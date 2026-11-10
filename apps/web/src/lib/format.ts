@@ -1,8 +1,14 @@
+import { useTranslation } from 'react-i18next';
 import { enUS, es } from 'date-fns/locale';
 import i18n from '../i18n';
 
 export const dateLocale = () => (i18n.language.startsWith('en') ? enUS : es);
-const intlLocale = () => (i18n.language.startsWith('en') ? 'en-US' : 'es-MX');
+export const intlLocale = () => (i18n.language.startsWith('en') ? 'en-US' : 'es-MX');
+/** Same as intlLocale, as a hook so components re-render on language change. */
+export function useIntlLocale() {
+  const { i18n: i } = useTranslation();
+  return i.language.startsWith('en') ? 'en-US' : 'es-MX';
+}
 
 export function money(cents: number, currency = 'MXN'): string {
   return new Intl.NumberFormat(intlLocale(), {

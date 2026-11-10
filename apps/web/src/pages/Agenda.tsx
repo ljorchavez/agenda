@@ -6,6 +6,7 @@ import {
   bookingPriceCents,
   computeDepositCents,
   eligibleResources,
+  intervalsOnWeekday,
   kindConfig,
   paymentSettingsOf,
   rentalSettingsOf,
@@ -16,6 +17,7 @@ import {
   type CustomerDto,
   type PaymentDto,
   type ResourceDto,
+  type TimeBlockDto,
 } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
@@ -23,7 +25,9 @@ import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
 import { useCustomers, useMyLocations, useResources, useServices } from '../lib/queries';
 import { LocationSelect } from '../components/Locations';
-import { CalendarGrid, type CalColumn, type CalEvent } from '../components/CalendarGrid';
+import { CalendarGrid, type CalBlock, type CalColumn, type CalEvent } from '../components/CalendarGrid';
+import type { HoursValue } from '../components/Schedule';
+import { StarRating } from '../components/Rating';
 import { NewSessionModal, SessionModal } from '../components/ClassModals';
 
 type View = 'day' | 'week';
@@ -99,7 +103,7 @@ export function AgendaPage() {
   const { tenant } = useAuth();
   const kind = tenant?.kind ?? 'appointments';
   const cfg = kindConfig(kind);
-  const { manager, scoped, locationId: ownLocation } = useAccess();
+  const { manager, scoped, resourceId, locationId: ownLocation } = useAccess();
   const locs = useMyLocations(ownLocation);
   const small = useSmallScreen();
   const [loc, setLoc] = useState('');
@@ -143,6 +147,44 @@ export function AgendaPage() {
     return [Math.min(...rs.map((r) => r[0])), Math.max(...rs.map((r) => r[1]))];
   };
 
+  /** Closed stretches of a day (minutes) for one or more schedules: open if any of them is open. */
+  const closedFor = (date: Date, schedules: HoursValue[]): [number, number][] => {
+    const wd = date.getDay() || 7;
+    const open = schedules
+      .flatMap((h) => intervalsOnWeekday(h, wd))
+      .sort((a, b) => a[0] - b[0])
+      .reduce<[number, number][]>((acc, [s0, e0]) => {
+        const last = acc[acc.length - 1];
+        if (last && s0 <= last[1]) last[1] = Math.max(last[1], e0);
+        else acc.push([s0, e0]);
+        return acc;
+      }, []);
+    const out: [number, number][] = [];
+    let cursor = 0;
+    for (const [s0, e0] of open) {
+      if (s0 > cursor) out.push([cursor, s0]);
+      cursor = Math.max(cursor, e0);
+    }
+    if (cursor < 24 * 60) out.push([cursor, 24 * 60]);
+    return out;
+  };
+  /** Blocks that apply to a column, clipped to that day, in minutes from midnight. */
+  const blocksFor = (date: Date, applies: (b: TimeBlockDto) => boolean): CalBlock[] => {
+    const dayStart = startOfDay(date).getTime();
+    const dayEnd = addDays(startOfDay(date), 1).getTime();
+    return (blocksQ.data ?? [])
+      .filter((b) => applies(b) && new Date(b.startsAt).getTime() < dayEnd && new Date(b.endsAt).getTime() > dayStart)
+      .map((b) => ({
+        id: b.id,
+        startMin: Math.max(0, (new Date(b.startsAt).getTime() - dayStart) / 60000),
+        endMin: Math.min(24 * 60, (new Date(b.endsAt).getTime() - dayStart) / 60000),
+        label: b.reason || t('blocks.blocked'),
+        onClick: canBlock ? () => setBlocking(b) : undefined,
+      }));
+  };
+  /** Business-wide or location-wide blocks for the visible locations (resource blocks show in their column). */
+  const sharedBlock = (b: TimeBlockDto) => !b.resourceId && (!b.locationId || visibleLocIds.includes(b.locationId));
+
   // Phones show 3 days instead of a whole week (like Teams mobile).
   const threeDays = useMemo(() => {
     const out: Date[] = [];
@@ -167,6 +209,12 @@ export function AgendaPage() {
     queryFn: () => api<ClassSessionDto[]>(`/class-sessions?${range$}`),
     enabled: cfg.sessions,
   });
+  const blocksQ = useQuery({
+    queryKey: ['time-blocks', from.toISOString(), to.toISOString()],
+    queryFn: () => api<TimeBlockDto[]>(`/time-blocks?${range$}`),
+  });
+  const [blocking, setBlocking] = useState<TimeBlockDto | 'new' | null>(null);
+  const canBlock = manager || Boolean(resourceId);
   const isLoading = apptsQ.isLoading || (cfg.sessions && sessionsQ.isLoading);
 
   const fmtTime = (d: Date) => format(d, i18n.language.startsWith('en') ? 'h:mm a' : 'HH:mm');
@@ -271,6 +319,8 @@ export function AgendaPage() {
         date: anchor,
         isToday: false,
         open: openFor(anchor, [r.locationId]),
+        closed: closedFor(anchor, [r.hours ?? hoursOf(r.locationId)]),
+        blocks: blocksFor(anchor, (b) => b.resourceId === r.id || (!b.resourceId && (!b.locationId || b.locationId === r.locationId))),
         events,
         onCreate: canCreate ? (at: Date) => newAt(at, r.locationId, r.id) : undefined,
         header: (
@@ -323,6 +373,10 @@ export function AgendaPage() {
       date: d,
       isToday: isSameDay(d, today),
       open: openFor(d, visibleLocIds),
+      closed: filter
+        ? closedFor(d, [columnResources[0]?.hours ?? hoursOf(columnResources[0]?.locationId)])
+        : closedFor(d, visibleLocIds.length ? visibleLocIds.map(hoursOf) : [tenant!.settings.hours]),
+      blocks: blocksFor(d, (b) => sharedBlock(b) || (filter !== '' && b.resourceId === filter) || (scoped && b.resourceId === resourceId)),
       events: onDay(d).map((x) => x.toEvent(showResource)),
       onCreate: canCreate ? (at: Date) => newAt(at) : undefined,
       onMore: () => openDay(d),
@@ -362,7 +416,13 @@ export function AgendaPage() {
       <PageHeader
         title={t(`kinds.${kind}.calendar`)}
         actions={
-          canCreate && (
+          <div className="flex flex-wrap gap-2">
+          {canBlock && (
+            <button className="btn-secondary" onClick={() => setBlocking('new')}>
+              🔒 {t('blocks.add')}
+            </button>
+          )}
+          {canCreate && (
             <button className="btn-primary" onClick={() => {
               const at = isSameDay(anchor, today) ? new Date() : new Date(new Date(anchor).setHours(10, 0, 0, 0));
               at.setMinutes(Math.ceil(at.getMinutes() / 30) * 30, 0, 0);
@@ -370,7 +430,8 @@ export function AgendaPage() {
             }}>
               {t(`kinds.${kind}.newBooking`)}
             </button>
-          )
+          )}
+          </div>
         }
       />
       {scoped && <p className="mb-2 text-sm text-slate-500">{t('roles.onlyYours')}</p>}
@@ -473,7 +534,7 @@ export function AgendaPage() {
           startMin={startMin}
           endMin={endMin}
           maxLanes={view === 'week' ? 2 : 3}
-          minColWidth={view === 'week' ? (small ? 104 : 150) : columns.length > 1 ? (small ? 150 : 170) : 220}
+          minColWidth={view === 'week' ? (small ? 112 : 176) : columns.length > 1 ? (small ? 156 : 184) : 220}
           pxPerHour={ZOOMS[zoom]!}
           compact={small}
           slotMinutes={tenant?.settings.hours.slotMinutes ?? 30}
@@ -493,6 +554,15 @@ export function AgendaPage() {
           <NewAppointmentModal initial={creating.at} defaultLocation={creating.locationId ?? loc} presetResource={creating.resourceId} onClose={() => setCreating(null)} />
         ))}
       {selected && <AppointmentModal appt={selected} onClose={() => setSelected(null)} />}
+      {blocking && (
+        <BlockModal
+          block={blocking === 'new' ? null : blocking}
+          initialDay={anchor}
+          resources={resources}
+          presetResource={scoped ? resourceId : filter || null}
+          onClose={() => setBlocking(null)}
+        />
+      )}
       {session && <SessionModal id={session} onClose={() => setSession(null)} onOpen={setSession} />}
     </>
   );
@@ -790,6 +860,19 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
     },
   });
 
+  // Notes and rating save in place (the modal stays open).
+  const [notes, setNotes] = useState(appt.notes ?? '');
+  const [rating, setRating] = useState<number | null>(appt.rating);
+  const [savedNote, setSavedNote] = useState(false);
+  const saveNotes = useMutation({
+    mutationFn: (body: { notes?: string | null; rating?: number | null }) =>
+      api<AppointmentDto>(`/appointments/${appt.id}`, { method: 'PATCH', body }),
+    onSuccess: () => {
+      setSavedNote(true);
+      refresh();
+    },
+  });
+
   const open = appt.status === 'scheduled' || appt.status === 'confirmed';
   const waLink = (url: string) =>
     appt.customerPhone
@@ -813,13 +896,55 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         )}
         {apptLocs.anyMulti && <div className="text-sm text-slate-500">⌂ {apptLocs.byId.get(appt.locationId)?.name}</div>}
         {appt.customerPhone && <div className="text-sm text-slate-500">{appt.customerPhone}</div>}
-        {appt.notes && <p className="mt-2 rounded-lg bg-slate-50 p-2 text-sm">{appt.notes}</p>}
         <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm">
           <div><div className="text-slate-500">{t('agenda.price')}</div><div className="font-semibold">{money(appt.priceCents)}</div></div>
           <div><div className="text-slate-500">{t('agenda.paid')}</div><div className="font-semibold text-emerald-700">{money(appt.paidCents)}</div></div>
           <div><div className="text-slate-500">{t('agenda.outstanding')}</div><div className="font-semibold text-amber-700">{money(outstanding)}</div></div>
         </div>
       </div>
+
+      {!appt.classSessionId && (
+        <div className="mt-4 space-y-2 rounded-lg border border-slate-200 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <label className="label !mb-0" htmlFor="am-notes">{t('agenda.notes')}</label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{t('rating.visit')}</span>
+              <StarRating
+                value={rating}
+                onChange={(v) => {
+                  setRating(v);
+                  setSavedNote(false);
+                  saveNotes.mutate({ rating: v });
+                }}
+              />
+            </div>
+          </div>
+          <textarea
+            id="am-notes"
+            rows={2}
+            maxLength={2000}
+            className="input"
+            placeholder={t('agenda.notesPlaceholder')}
+            value={notes}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              setSavedNote(false);
+            }}
+          />
+          <div className="flex items-center justify-end gap-3">
+            {savedNote && !saveNotes.isPending && <span className="text-xs text-emerald-700">✓ {t('common.saved')}</span>}
+            <button
+              type="button"
+              className="btn-secondary !py-1.5 text-sm"
+              disabled={saveNotes.isPending || notes === (appt.notes ?? '')}
+              onClick={() => saveNotes.mutate({ notes: notes.trim() || null })}
+            >
+              {t('agenda.saveNotes')}
+            </button>
+          </div>
+          <ErrorText error={saveNotes.error} ns="agenda" />
+        </div>
+      )}
 
       {open && (
         <div className="mt-5 space-y-4">
@@ -948,6 +1073,151 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         ) : <span />}
         <button className="btn-secondary" onClick={onClose}>{t('common.close')}</button>
       </div>
+    </Modal>
+  );
+}
+
+/**
+ * Block time so nobody can book it: the whole business, one location or one person/space
+ * (vacation, holiday, a court under repair). Whole days or a stretch of hours.
+ */
+function BlockModal({
+  block,
+  initialDay,
+  resources,
+  presetResource,
+  onClose,
+}: {
+  block: TimeBlockDto | null;
+  initialDay: Date;
+  resources: ResourceDto[];
+  presetResource: string | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const { tenant } = useAuth();
+  const kind = tenant?.kind ?? 'appointments';
+  const { manager, scoped, resourceId: ownResource, locationId: ownLocation } = useAccess();
+  const locs = useMyLocations(ownLocation);
+  const qc = useQueryClient();
+  const ymd = (d: Date) => format(d, 'yyyy-MM-dd');
+  const hm = (d: Date) => format(d, 'HH:mm');
+  const s0 = block ? new Date(block.startsAt) : startOfDay(initialDay);
+  const e0 = block ? new Date(block.endsAt) : addDays(startOfDay(initialDay), 1);
+  const allDay0 = hm(s0) === '00:00' && hm(e0) === '00:00';
+  const [f, setF] = useState({
+    target: block?.resourceId ? `r:${block.resourceId}` : block?.locationId ? `l:${block.locationId}` : scoped && ownResource ? `r:${ownResource}` : presetResource ? `r:${presetResource}` : ownLocation ? `l:${ownLocation}` : '',
+    allDay: allDay0,
+    fromDay: ymd(s0),
+    toDay: ymd(allDay0 ? addDays(e0, -1) : e0),
+    fromTime: allDay0 ? '14:00' : hm(s0),
+    toTime: allDay0 ? '16:00' : hm(e0),
+    reason: block?.reason ?? '',
+  });
+  const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
+  const at = (day: string, time: string) => {
+    const [y, m, d] = day.split('-').map(Number);
+    const [hh, mm] = time.split(':').map(Number);
+    return new Date(y!, (m ?? 1) - 1, d ?? 1, hh ?? 0, mm ?? 0);
+  };
+  const range = () =>
+    f.allDay
+      ? { startsAt: at(f.fromDay, '00:00'), endsAt: addDays(at(f.toDay < f.fromDay ? f.fromDay : f.toDay, '00:00'), 1) }
+      : { startsAt: at(f.fromDay, f.fromTime), endsAt: at(f.fromDay, f.toTime) };
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['time-blocks'] });
+    onClose();
+  };
+  const save = useMutation({
+    mutationFn: async () => {
+      const r = range();
+      const [kindOf, id] = f.target ? (f.target.split(':') as ['r' | 'l', string]) : [null, null];
+      // Editing = replace (blocks are small and rarely edited).
+      if (block) await api(`/time-blocks/${block.id}`, { method: 'DELETE' });
+      return api<TimeBlockDto>('/time-blocks', {
+        method: 'POST',
+        body: {
+          startsAt: r.startsAt.toISOString(),
+          endsAt: r.endsAt.toISOString(),
+          resourceId: kindOf === 'r' ? id : null,
+          locationId: kindOf === 'l' ? id : null,
+          reason: f.reason.trim() || null,
+        },
+      });
+    },
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/time-blocks/${block!.id}`, { method: 'DELETE' }),
+    onSuccess: refresh,
+  });
+  const invalid = !f.allDay && f.toTime <= f.fromTime;
+
+  return (
+    <Modal open title={block ? t('blocks.edit') : t('blocks.add')} onClose={onClose}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (!invalid) save.mutate(); }}>
+        <p className="text-sm text-slate-500">{t('blocks.help')}</p>
+        <div>
+          <label className="label" htmlFor="bl-target">{t('blocks.who')}</label>
+          <select id="bl-target" className="input" value={f.target} disabled={scoped} onChange={(e) => set({ target: e.target.value })}>
+            {manager && !ownLocation && <option value="">{t('blocks.wholeBusiness')}</option>}
+            {manager && locs.multi && locs.list.map((l) => <option key={l.id} value={`l:${l.id}`}>⌂ {l.name}</option>)}
+            {manager && ownLocation && !locs.multi && locs.list[0] && <option value={`l:${locs.list[0].id}`}>⌂ {locs.list[0].name}</option>}
+            {(scoped ? resources.filter((r) => r.id === ownResource) : resources).map((r) => (
+              <option key={r.id} value={`r:${r.id}`}>{t(`kinds.${kind}.resource`)}: {r.name}</option>
+            ))}
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={f.allDay} onChange={(e) => set({ allDay: e.target.checked })} />
+          {t('blocks.allDay')}
+        </label>
+        {f.allDay ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="bl-from">{t('blocks.fromDay')}</label>
+              <input id="bl-from" type="date" required className="input" value={f.fromDay} onChange={(e) => set({ fromDay: e.target.value, toDay: e.target.value > f.toDay ? e.target.value : f.toDay })} />
+            </div>
+            <div>
+              <label className="label" htmlFor="bl-to">{t('blocks.toDay')}</label>
+              <input id="bl-to" type="date" required min={f.fromDay} className="input" value={f.toDay} onChange={(e) => set({ toDay: e.target.value })} />
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="label" htmlFor="bl-day">{t('blocks.day')}</label>
+              <input id="bl-day" type="date" required className="input" value={f.fromDay} onChange={(e) => set({ fromDay: e.target.value })} />
+            </div>
+            <div>
+              <label className="label" htmlFor="bl-ft">{t('blocks.from')}</label>
+              <input id="bl-ft" type="time" required className="input" value={f.fromTime} onChange={(e) => set({ fromTime: e.target.value })} />
+            </div>
+            <div>
+              <label className="label" htmlFor="bl-tt">{t('blocks.to')}</label>
+              <input id="bl-tt" type="time" required className="input" value={f.toTime} onChange={(e) => set({ toTime: e.target.value })} />
+            </div>
+          </div>
+        )}
+        {invalid && <p className="text-xs text-rose-600">{t('blocks.endAfterStart')}</p>}
+        <div>
+          <label className="label" htmlFor="bl-reason">{t('blocks.reason')}</label>
+          <input id="bl-reason" maxLength={200} className="input" placeholder={t('blocks.reasonPlaceholder')} value={f.reason} onChange={(e) => set({ reason: e.target.value })} />
+        </div>
+        <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">{t('blocks.existingNote')}</p>
+        <ErrorText error={save.error ?? remove.error} ns="blocks" />
+        <div className="flex items-center justify-between">
+          {block ? (
+            <button type="button" className="text-sm text-rose-700 hover:underline" onClick={() => remove.mutate()}>
+              {t('blocks.unblock')}
+            </button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
+            <button className="btn-primary" disabled={save.isPending || invalid}>{t('common.save')}</button>
+          </div>
+        </div>
+      </form>
     </Modal>
   );
 }

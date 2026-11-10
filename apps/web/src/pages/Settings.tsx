@@ -21,6 +21,7 @@ import {
   type UserDto,
 } from '@agenda/shared';
 import { PaymentSettingsSection } from '../components/PaymentSettings';
+import { HoursFields } from '../components/Schedule';
 import { PublicProfileSection } from '../components/PublicProfile';
 import { LocationSelect, LocationsSection } from '../components/Locations';
 import { PlanSection } from '../components/Plans';
@@ -184,8 +185,6 @@ function BusinessSettings() {
   });
 
   const publicUrl = `${window.location.origin}/b/${tenant?.slug}`;
-  const intl = i18n.language.startsWith('en') ? 'en-US' : 'es-MX';
-  const dayName = (n: number) => new Intl.DateTimeFormat(intl, { weekday: 'short' }).format(new Date(2024, 0, n));
   const setHours = (patch: Partial<TenantSettings['hours']>) =>
     setSettings((s) => ({ ...s, hours: { ...s.hours, ...patch } }));
 
@@ -314,40 +313,12 @@ function BusinessSettings() {
 
         <section className="card space-y-4 lg:col-span-2">
           <h2 className="font-semibold">{t('settings.hours')}</h2>
-          <div>
-            <div className="label">{t('settings.openDays')}</div>
-            <div className="flex flex-wrap gap-2">
-              {[1, 2, 3, 4, 5, 6, 7].map((d) => {
-                const on = settings.hours.days.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    disabled={!canEdit}
-                    onClick={() => setHours({ days: on ? settings.hours.days.filter((x) => x !== d) : [...settings.hours.days, d].sort() })}
-                    className={`rounded-lg border px-3 py-1.5 text-sm capitalize ${on ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 text-slate-500'}`}
-                  >
-                    {dayName(d)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div className="grid max-w-xl gap-4 sm:grid-cols-3">
-            <div>
-              <label className="label">{t('settings.open')}</label>
-              <input type="time" disabled={!canEdit} className="input" value={settings.hours.open} onChange={(e) => setHours({ open: e.target.value })} />
-            </div>
-            <div>
-              <label className="label">{t('settings.close')}</label>
-              <input type="time" disabled={!canEdit} className="input" value={settings.hours.close} onChange={(e) => setHours({ close: e.target.value })} />
-            </div>
-            <div>
-              <label className="label">{t('settings.slotMinutes')}</label>
-              <select disabled={!canEdit} className="input" value={settings.hours.slotMinutes} onChange={(e) => setHours({ slotMinutes: Number(e.target.value) })}>
-                {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
+          <HoursFields idPrefix="biz-hours" disabled={!canEdit} value={settings.hours} onChange={(h) => setHours(h)} />
+          <div className="max-w-[12rem]">
+            <label className="label" htmlFor="biz-slot">{t('settings.slotMinutes')}</label>
+            <select id="biz-slot" disabled={!canEdit} className="input" value={settings.hours.slotMinutes} onChange={(e) => setHours({ slotMinutes: Number(e.target.value) })}>
+              {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
         </section>
 

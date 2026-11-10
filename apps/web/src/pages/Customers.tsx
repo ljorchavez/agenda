@@ -7,14 +7,27 @@ import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { dateOnly, money } from '../lib/format';
 import { useCustomers } from '../lib/queries';
+import { SortTh, useSort, type SortDir } from '../components/SortableTable';
+import { StarRating } from '../components/Rating';
 
-const SORTS = ['name', 'recent', 'lastVisit', 'totalSpent', 'visits'] as const;
+/** Columns sorted on the server (the list is paginated); first click direction per column. */
+type SortKey = 'name' | 'visits' | 'totalSpent' | 'rating' | 'lastVisit' | 'frequency' | 'nextAppointment';
+const FIRST_DIR: Record<SortKey, SortDir> = {
+  name: 'asc',
+  visits: 'desc',
+  totalSpent: 'desc',
+  rating: 'desc',
+  lastVisit: 'desc',
+  frequency: 'asc',
+  nextAppointment: 'asc',
+};
 
 export function CustomersPage() {
   const { t } = useTranslation();
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
-  const [sort, setSort] = useState<(typeof SORTS)[number]>('name');
+  const navigate = useNavigate();
+  const { sort, toggle } = useSort<SortKey>({ key: 'name', dir: 'asc' }, FIRST_DIR);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -22,18 +35,13 @@ export function CustomersPage() {
     return () => clearTimeout(id);
   }, [q]);
 
-  const { data, isLoading } = useCustomers(debounced, sort);
+  const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}`);
 
   return (
     <>
       <PageHeader title={t('customers.title')} actions={<button className="btn-primary" onClick={() => setCreating(true)}>{t('customers.new')}</button>} />
       <div className="mb-4 flex flex-wrap gap-2">
         <input className="input max-w-md flex-1" placeholder={t('customers.searchPlaceholder')} value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label={t('customers.sortBy')}>
-          {SORTS.map((s) => (
-            <option key={s} value={s}>{t(`customers.sort.${s}`)}</option>
-          ))}
-        </select>
       </div>
 
       {isLoading ? (
@@ -45,23 +53,41 @@ export function CustomersPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-medium">{t('customers.name')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('customers.visits')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('customers.totalSpent')}</th>
-                <th className="hidden px-4 py-3 font-medium md:table-cell">{t('customers.lastVisit')}</th>
-                <th className="hidden px-4 py-3 font-medium md:table-cell">{t('customers.frequency')}</th>
-                <th className="hidden px-4 py-3 font-medium lg:table-cell">{t('customers.nextAppointment')}</th>
+                <SortTh label={t('customers.name')} k="name" sort={sort} onSort={toggle} />
+                <SortTh label={t('customers.visits')} k="visits" sort={sort} onSort={toggle} align="right" />
+                <SortTh label={t('customers.totalSpent')} k="totalSpent" sort={sort} onSort={toggle} align="right" />
+                <SortTh label={t('rating.average')} k="rating" sort={sort} onSort={toggle} className="hidden sm:table-cell" />
+                <SortTh label={t('customers.lastVisit')} k="lastVisit" sort={sort} onSort={toggle} className="hidden md:table-cell" />
+                <SortTh label={t('customers.frequency')} k="frequency" sort={sort} onSort={toggle} className="hidden md:table-cell" />
+                <SortTh label={t('customers.nextAppointment')} k="nextAppointment" sort={sort} onSort={toggle} className="hidden lg:table-cell" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {data.items.map((c) => (
-                <tr key={c.id} className="hover:bg-slate-50">
+                <tr
+                  key={c.id}
+                  className="cursor-pointer hover:bg-slate-50 focus-within:bg-slate-50"
+                  onClick={() => navigate(`/customers/${c.id}`)}
+                >
                   <td className="px-4 py-3">
-                    <Link to={`/customers/${c.id}`} className="font-medium text-slate-900 hover:text-brand-700">{c.name}</Link>
+                    {/* Real link: keyboard, middle-click and "open in new tab" keep working */}
+                    <Link to={`/customers/${c.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-900 hover:text-brand-700">
+                      {c.name}
+                    </Link>
                     <div className="text-xs text-slate-500">{c.phone ?? c.email ?? ''}</div>
                   </td>
                   <td className="px-4 py-3 text-right">{c.visits}</td>
                   <td className="px-4 py-3 text-right font-medium">{money(c.totalSpentCents)}</td>
+                  <td className="hidden px-4 py-3 sm:table-cell">
+                    {c.avgRating != null ? (
+                      <span className="inline-flex items-center gap-1.5" title={t('rating.basedOn', { count: c.ratingCount })}>
+                        <StarRating value={c.avgRating} size="sm" />
+                        <span className="text-xs text-slate-500">{c.avgRating.toFixed(1)}</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">{t('common.none')}</span>
+                    )}
+                  </td>
                   <td className="hidden px-4 py-3 md:table-cell">{c.lastVisitAt ? dateOnly(c.lastVisitAt) : t('common.none')}</td>
                   <td className="hidden px-4 py-3 md:table-cell">
                     {c.avgDaysBetweenVisits != null ? t('customers.everyNDays', { count: c.avgDaysBetweenVisits }) : t('common.none')}

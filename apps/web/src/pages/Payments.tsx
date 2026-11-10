@@ -7,6 +7,7 @@ import type { PaymentDto } from '@agenda/shared';
 import { Empty, Loading, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money } from '../lib/format';
+import { SortTh, sortRows, useSort } from '../components/SortableTable';
 
 export function PaymentsPage() {
   const { t } = useTranslation();
@@ -24,6 +25,19 @@ export function PaymentsPage() {
     const pending = (data ?? []).filter((p) => p.status === 'pending').reduce((s, p) => s + p.amountCents, 0);
     return { paid, pending };
   }, [data]);
+
+  type Key = 'date' | 'customer' | 'method' | 'status' | 'amount';
+  const { sort, toggle } = useSort<Key>({ key: 'date', dir: 'desc' }, { date: 'desc', amount: 'desc' });
+  const rows = useMemo(() => {
+    const get: Record<Key, (p: PaymentDto) => string | number> = {
+      date: (p) => new Date(p.paidAt ?? p.createdAt).getTime(),
+      customer: (p) => p.customerName,
+      method: (p) => t(`methods.${p.method}`),
+      status: (p) => t(`paymentStatus.${p.status}`),
+      amount: (p) => p.amountCents,
+    };
+    return sortRows(data ?? [], get[sort.key], sort.dir);
+  }, [data, sort, t]);
 
   return (
     <>
@@ -50,15 +64,15 @@ export function PaymentsPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-medium">{t('payments.date')}</th>
-                <th className="px-4 py-3 font-medium">{t('payments.customer')}</th>
-                <th className="px-4 py-3 font-medium">{t('payments.method')}</th>
-                <th className="px-4 py-3 font-medium">{t('payments.status')}</th>
-                <th className="px-4 py-3 text-right font-medium">{t('payments.amount')}</th>
+                <SortTh label={t('payments.date')} k="date" sort={sort} onSort={toggle} />
+                <SortTh label={t('payments.customer')} k="customer" sort={sort} onSort={toggle} />
+                <SortTh label={t('payments.method')} k="method" sort={sort} onSort={toggle} />
+                <SortTh label={t('payments.status')} k="status" sort={sort} onSort={toggle} />
+                <SortTh label={t('payments.amount')} k="amount" sort={sort} onSort={toggle} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data.map((p) => (
+              {rows.map((p) => (
                 <tr key={p.id}>
                   <td className="whitespace-nowrap px-4 py-3">{dateTime(p.paidAt ?? p.createdAt)}</td>
                   <td className="px-4 py-3"><Link className="hover:text-brand-700" to={`/customers/${p.customerId}`}>{p.customerName}</Link></td>

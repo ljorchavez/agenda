@@ -176,6 +176,10 @@ export function normalizeMxPhone(input: string): string {
 
 // ---------- Business settings ----------
 
+/** A pause inside the day (lunch, split shift): 14:00–16:00 */
+export const breakSchema = z.object({ start: timeSchema, end: timeSchema });
+export type HoursBreak = z.infer<typeof breakSchema>;
+
 export const businessHoursSchema = z.object({
   /** ISO weekdays the business is open: 1 = Monday ... 7 = Sunday */
   days: z.array(z.number().int().min(1).max(7)).min(1),
@@ -183,8 +187,53 @@ export const businessHoursSchema = z.object({
   close: timeSchema,
   /** Granularity of online booking slots, in minutes */
   slotMinutes: z.number().int().min(5).max(240),
+  /** Closed stretches inside the day ("8 a 2 y 4 a 6" = open 8–18 with a 14–16 break) */
+  breaks: z.array(breakSchema).max(4).optional(),
 });
 export type BusinessHours = z.infer<typeof businessHoursSchema>;
+
+/** Working hours of one person/space: Mario Mon–Sat 8–17, Ramiro Tue–Sun 10–20. */
+export const workHoursSchema = z.object({
+  days: z.array(z.number().int().min(1).max(7)).min(1),
+  open: timeSchema,
+  close: timeSchema,
+  breaks: z.array(breakSchema).max(4).optional(),
+});
+export type WorkHours = z.infer<typeof workHoursSchema>;
+
+const hhmmToMin = (t: string) => {
+  const [h, m] = t.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+};
+
+/**
+ * Open stretches of a day in minutes from midnight, breaks removed. A close at or before the
+ * opening time means "until midnight". [[480, 840], [960, 1080]] = 8–14 and 16–18.
+ */
+export function openIntervals(h: { open: string; close: string; breaks?: HoursBreak[] }): [number, number][] {
+  const open = hhmmToMin(h.open);
+  const closeRaw = hhmmToMin(h.close);
+  const close = closeRaw <= open ? 24 * 60 : closeRaw;
+  let out: [number, number][] = [[open, close]];
+  const breaks = [...(h.breaks ?? [])]
+    .map((b) => [hhmmToMin(b.start), hhmmToMin(b.end)] as [number, number])
+    .filter(([s, e]) => e > s)
+    .sort((a, b) => a[0] - b[0]);
+  for (const [bs, be] of breaks) {
+    out = out.flatMap(([s, e]): [number, number][] => {
+      if (be <= s || bs >= e) return [[s, e]];
+      const parts: [number, number][] = [];
+      if (bs > s) parts.push([s, bs]);
+      if (be < e) parts.push([be, e]);
+      return parts;
+    });
+  }
+  return out;
+}
+
+/** Open stretches on an ISO weekday (1 = Monday), or [] when closed that day. */
+export const intervalsOnWeekday = (h: { days: number[]; open: string; close: string; breaks?: HoursBreak[] }, weekday: number) =>
+  h.days.includes(weekday) ? openIntervals(h) : [];
 
 export const DEFAULT_BUSINESS_HOURS: BusinessHours = {
   days: [1, 2, 3, 4, 5, 6],
@@ -553,6 +602,9 @@ export interface PlanDto {
   extraLocations: number;
 }
 
+/** Photos are uploaded through /api/uploads and stored in Vercel Blob; only https links are kept. */
+export const photoUrlSchema = z.string().trim().url().max(500).refine((u) => u.startsWith('https://'), 'https_only');
+
 // ---------- Resources ----------
 // Whatever gets booked: a person (barber, doctor, instructor), a space (court, room) or a table.
 // They are one concept; KIND_CONFIG only decides how they are labelled and booked.
@@ -572,6 +624,9 @@ export const resourceInputSchema = z.object({
   description: z.string().trim().max(300).nullable().optional(),
   /** Location (sucursal); defaults to the main one */
   locationId: z.string().uuid().optional(),
+  /** Own working hours; null = the hours of its location */
+  hours: workHoursSchema.nullable().optional(),
+  photoUrl: photoUrlSchema.nullable().optional(),
 });
 export type ResourceInput = z.infer<typeof resourceInputSchema>;
 
@@ -586,6 +641,9 @@ export interface ResourceDto {
   pricePerHourCents: number | null;
   description: string | null;
   locationId: string;
+  /** Own working hours; null = the hours of its location */
+  hours: WorkHours | null;
+  photoUrl: string | null;
 }
 
 // ---------- Group classes ----------
@@ -732,6 +790,7 @@ export const serviceInputSchema = z.object({
   durationMin: z.number().int().min(5).max(600),
   priceCents: z.number().int().min(0).max(100_000_000),
   active: z.boolean().default(true),
+  photoUrl: photoUrlSchema.nullable().optional(),
 });
 export type ServiceInput = z.infer<typeof serviceInputSchema>;
 
@@ -768,6 +827,8 @@ export const appointmentUpdateSchema = z.object({
   status: z.enum(APPOINTMENT_STATUSES).optional(),
   priceCents: z.number().int().min(0).optional(),
   notes: z.string().max(2000).nullable().optional(),
+  /** Internal 1–5 rating of the visit; null clears it */
+  rating: z.number().int().min(1).max(5).nullable().optional(),
   staffUserId: z.string().uuid().nullable().optional(),
   allowOverlap: z.boolean().optional(),
   partySize: z.number().int().min(1).max(50).optional(),
@@ -779,6 +840,31 @@ export const appointmentUpdateSchema = z.object({
   paymentMethod: z.enum(['cash', 'card', 'transfer']).optional(),
 });
 export type AppointmentUpdateInput = z.infer<typeof appointmentUpdateSchema>;
+
+// ---------- Blocked times ----------
+
+/** Nobody can book in [startsAt, endsAt): the whole business, one location or one resource. */
+export const timeBlockInputSchema = z
+  .object({
+    startsAt: z.string().datetime({ offset: true }),
+    endsAt: z.string().datetime({ offset: true }),
+    /** Both empty = the whole business */
+    locationId: z.string().uuid().nullable().optional(),
+    resourceId: z.string().uuid().nullable().optional(),
+    reason: z.string().trim().max(200).nullable().optional(),
+  })
+  .refine((x) => new Date(x.endsAt) > new Date(x.startsAt), { path: ['endsAt'], message: 'ends_before_start' })
+  .refine((x) => new Date(x.endsAt).getTime() - new Date(x.startsAt).getTime() <= 366 * 86_400_000, { path: ['endsAt'], message: 'range_too_long' });
+export type TimeBlockInput = z.infer<typeof timeBlockInputSchema>;
+
+export interface TimeBlockDto {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  locationId: string | null;
+  resourceId: string | null;
+  reason: string | null;
+}
 
 export const appointmentListQuerySchema = z.object({
   from: z.string().datetime({ offset: true }),
@@ -872,6 +958,9 @@ export interface CustomerStats {
   /** Average days between completed visits; null if fewer than 2 visits */
   avgDaysBetweenVisits: number | null;
   noShows: number;
+  /** Average of the internal 1–5 ratings of their bookings (null = never rated) */
+  avgRating: number | null;
+  ratingCount: number;
 }
 
 export interface CustomerDto {
@@ -892,6 +981,7 @@ export interface ServiceDto {
   durationMin: number;
   priceCents: number;
   active: boolean;
+  photoUrl: string | null;
 }
 
 export interface AppointmentDto {
@@ -909,6 +999,8 @@ export interface AppointmentDto {
   priceCents: number;
   source: AppointmentSource;
   notes: string | null;
+  /** Internal 1–5 rating of the visit */
+  rating: number | null;
   paidCents: number;
   /** Private customer link to reschedule/cancel: /c/<token> */
   managePath: string;
@@ -1059,7 +1151,7 @@ export interface PublicBusinessDto {
   locale: Locale;
   phone: string | null;
   hours: BusinessHours;
-  services: Pick<ServiceDto, 'id' | 'name' | 'durationMin' | 'priceCents'>[];
+  services: Pick<ServiceDto, 'id' | 'name' | 'durationMin' | 'priceCents' | 'photoUrl'>[];
   /** Present when the business requires a deposit to book online. */
   deposit: { type: DepositType; value: number } | null;
   kind: BusinessKind;
@@ -1073,7 +1165,7 @@ export interface PublicBusinessDto {
   /** Restaurants: largest party bookable online */
   maxPartySize: number | null;
   /** Active resources (empty when the business works as a single agenda) */
-  resources: Pick<ResourceDto, 'id' | 'name' | 'color' | 'serviceIds' | 'capacity' | 'pricePerHourCents' | 'description' | 'locationId'>[];
+  resources: Pick<ResourceDto, 'id' | 'name' | 'color' | 'serviceIds' | 'capacity' | 'pricePerHourCents' | 'description' | 'locationId' | 'photoUrl'>[];
   /** Kinds that book by duration: the lengths offered */
   rentalDurations: number[] | null;
   /** Active locations; the booking page asks which one when there are several */

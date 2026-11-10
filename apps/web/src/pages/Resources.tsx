@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { kindConfig, RESOURCE_COLORS, type ResourceDto, type SessionUser } from '@agenda/shared';
+import { DEFAULT_BUSINESS_HOURS, kindConfig, RESOURCE_COLORS, type ResourceDto, type SessionUser, type WorkHours } from '@agenda/shared';
 import { Empty, ErrorText, Loading, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
 import { money, toCents } from '../lib/format';
 import { LocationSelect } from '../components/Locations';
 import { useMyLocations, useResources, useServices } from '../lib/queries';
+import { Avatar, PhotoInput } from '../components/Photo';
+import { HoursFields, useHoursSummary } from '../components/Schedule';
 
 /**
  * Whatever gets booked — team members, instructors, courts, rooms, tables — managed the same way
@@ -27,9 +29,11 @@ export function ResourcesPage() {
   const svcName = new Map((services.data ?? []).map((s) => [s.id, s.name]));
   const pickServices = !kindConfig(kind).partySize && !kindConfig(kind).durations;
 
+  const hoursSummary = useHoursSummary();
   const summary = (r: ResourceDto) =>
     [
       !r.active && t('services.inactive'),
+      r.hours && `🕒 ${hoursSummary(r.hours)}`,
       r.capacity != null && t('resources.capacityN', { count: r.capacity }),
       r.pricePerHourCents != null && t('resources.perHour', { price: money(r.pricePerHourCents) }),
       pickServices && (r.serviceIds.length ? r.serviceIds.map((id) => svcName.get(id)).filter(Boolean).join(', ') : t('resources.allServices')),
@@ -60,13 +64,11 @@ export function ResourcesPage() {
               className={`card !p-4 text-left ${r.active ? '' : 'opacity-60'} ${canEdit(r) ? 'hover:border-brand-500' : ''}`}
             >
               <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: r.color }}>
-                  {r.name.slice(0, 2).toUpperCase()}
-                </span>
+                <Avatar name={r.name} color={r.color} photoUrl={r.photoUrl} size={44} />
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{r.name}</div>
                   {locs.anyMulti && <div className="truncate text-xs text-brand-700">⌂ {locs.byId.get(r.locationId)?.name}</div>}
-                  <div className="truncate text-xs text-slate-500">{summary(r)}</div>
+                  <div className="line-clamp-2 text-xs text-slate-500">{summary(r)}</div>
                 </div>
               </div>
             </button>
@@ -87,6 +89,12 @@ function ResourceModal({ resource, pickServices, onClose }: { resource: Resource
   const qc = useQueryClient();
   const services = useServices();
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<SessionUser[]>('/users') });
+  /** Starting point for "own hours": the hours of its location, else the business. */
+  const locationHours = (): WorkHours => {
+    const loc = locs.byId.get(resource?.locationId ?? ownLocation ?? '');
+    const h = loc?.hours ?? tenant?.settings.hours ?? DEFAULT_BUSINESS_HOURS;
+    return { days: h.days, open: h.open, close: h.close, breaks: h.breaks };
+  };
   const [form, setForm] = useState({
     name: resource?.name ?? '',
     color: resource?.color ?? RESOURCE_COLORS[Math.floor(Math.random() * RESOURCE_COLORS.length)]!,
@@ -97,6 +105,9 @@ function ResourceModal({ resource, pickServices, onClose }: { resource: Resource
     capacity: resource?.capacity != null ? String(resource.capacity) : '',
     price: resource?.pricePerHourCents != null ? String(resource.pricePerHourCents / 100) : '',
     description: resource?.description ?? '',
+    photoUrl: resource?.photoUrl ?? null,
+    ownHours: Boolean(resource?.hours),
+    hours: (resource?.hours ?? locationHours()) as WorkHours,
   });
   const [info, setInfo] = useState('');
   const refresh = () => {
@@ -118,6 +129,8 @@ function ResourceModal({ resource, pickServices, onClose }: { resource: Resource
           capacity: form.capacity ? Number(form.capacity) : null,
           pricePerHourCents: form.price === '' ? null : toCents(form.price),
           description: form.description.trim() || null,
+          photoUrl: form.photoUrl,
+          hours: form.ownHours ? form.hours : null,
         },
       }),
     onSuccess: () => {
@@ -144,6 +157,7 @@ function ResourceModal({ resource, pickServices, onClose }: { resource: Resource
           <label className="label" htmlFor="res-name">{t('resources.name')}</label>
           <input id="res-name" required maxLength={80} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
+        <PhotoInput value={form.photoUrl} onChange={(photoUrl) => setForm({ ...form, photoUrl })} name={form.name} color={form.color} />
         {locs.multi && (
           <div>
             <label className="label" htmlFor="res-loc">{t('locations.location')}</label>
@@ -204,6 +218,24 @@ function ResourceModal({ resource, pickServices, onClose }: { resource: Resource
           <label className="label" htmlFor="res-desc">{t('resources.description')}</label>
           <input id="res-desc" maxLength={300} className="input" placeholder={t('common.optional')} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </div>
+        <fieldset className="rounded-xl border border-slate-200 p-4">
+          <legend className="px-1 text-sm font-semibold">{t('schedule.workHours')}</legend>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="radio" name="res-hours" checked={!form.ownHours} onChange={() => setForm({ ...form, ownHours: false })} />
+              {t('schedule.sameAsBusiness')}
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="res-hours" checked={form.ownHours} onChange={() => setForm({ ...form, ownHours: true })} />
+              {t('schedule.ownHours')}
+            </label>
+          </div>
+          {form.ownHours && (
+            <div className="mt-4">
+              <HoursFields idPrefix="res-hours" value={form.hours} onChange={(h) => setForm({ ...form, hours: h as WorkHours })} />
+            </div>
+          )}
+        </fieldset>
         <div>
           <label className="label" htmlFor="res-login">{t('resources.login')}</label>
           <select id="res-login" className="input" value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>

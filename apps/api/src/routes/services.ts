@@ -15,6 +15,8 @@ serviceRoutes.get('/services', async (c) => {
     .from(services)
     .where(eq(services.tenantId, c.get('tenantId')))
     .orderBy(asc(services.name));
+  // Spanish order: "Ácido" next to "Acné", not after "Zumba"
+  rows.sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
   return c.json(rows.map(toServiceDto));
 });
 

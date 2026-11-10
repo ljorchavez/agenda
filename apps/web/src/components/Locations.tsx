@@ -8,6 +8,7 @@ import { useLocations } from '../lib/queries';
 import { MapView, TYPE_COLORS } from './MapView';
 import { MX_STATES } from './PublicProfile';
 import { ErrorText, Modal } from './ui';
+import { HoursFields, useHoursSummary } from './Schedule';
 
 type Form = {
   name: string;
@@ -28,6 +29,7 @@ type Form = {
  * Pricing: the plan includes PLAN_INCLUDED_LOCATIONS; every extra active location is an add-on.
  */
 export function LocationsSection({ editable }: { editable: boolean }) {
+  const hoursSummary = useHoursSummary();
   const { t } = useTranslation();
   const q = useLocations();
   const [editing, setEditing] = useState<LocationDto | 'new' | null>(null);
@@ -55,7 +57,7 @@ export function LocationsSection({ editable }: { editable: boolean }) {
               <span className="block truncate text-slate-500">
                 {l.isPrimary && !l.address ? t('locations.usesProfile') : [l.address, l.neighborhood, l.city].filter(Boolean).join(', ') || '—'}
                 {' · '}
-                {l.hours ? `${l.hours.open}–${l.hours.close}` : t('locations.businessHours')}
+                {l.hours ? hoursSummary(l.hours) : t('locations.businessHours')}
               </span>
             </span>
             {editable && (
@@ -72,7 +74,7 @@ export function LocationsSection({ editable }: { editable: boolean }) {
 }
 
 function LocationModal({ target, onClose }: { target: LocationDto | null; onClose: () => void }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { tenant } = useAuth();
   const qc = useQueryClient();
   const [f, setF] = useState<Form>({
@@ -126,8 +128,6 @@ function LocationModal({ target, onClose }: { target: LocationDto | null; onClos
     () => (f.lat != null && f.lng != null ? [{ id: 'loc', lat: f.lat, lng: f.lng, color: TYPE_COLORS[tenant!.businessType] ?? '#0f766e', title: f.name }] : []),
     [f.lat, f.lng, f.name, tenant],
   );
-  const intl = i18n.language.startsWith('en') ? 'en-US' : 'es-MX';
-  const dayName = (n: number) => new Intl.DateTimeFormat(intl, { weekday: 'short' }).format(new Date(2024, 0, n));
   const h = f.hours;
   const willBeExtra = !target;
   return (
@@ -175,30 +175,11 @@ function LocationModal({ target, onClose }: { target: LocationDto | null; onClos
           {t('locations.ownHours')}
         </label>
         {f.ownHours && (
-          <div className="space-y-2 rounded-lg border border-slate-200 p-3">
-            <div className="flex flex-wrap gap-1.5">
-              {[1, 2, 3, 4, 5, 6, 7].map((d) => {
-                const on = h.days.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => {
-                      const days = on ? h.days.filter((x) => x !== d) : [...h.days, d].sort();
-                      if (days.length) set({ hours: { ...h, days } });
-                    }}
-                    className={`rounded-lg border px-2.5 py-1 text-sm capitalize ${on ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 text-slate-500'}`}
-                  >
-                    {dayName(d)}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <input type="time" className="input" aria-label={t('settings.open')} value={h.open} onChange={(e) => set({ hours: { ...h, open: e.target.value } })} />
-              <input type="time" className="input" aria-label={t('settings.close')} value={h.close} onChange={(e) => set({ hours: { ...h, close: e.target.value } })} />
-              <select className="input" aria-label={t('settings.slotMinutes')} value={h.slotMinutes} onChange={(e) => set({ hours: { ...h, slotMinutes: Number(e.target.value) } })}>
+          <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+            <HoursFields idPrefix="loc-hours" value={h} onChange={(v) => set({ hours: { ...h, ...v } })} />
+            <div className="max-w-[12rem]">
+              <label className="label" htmlFor="loc-slot">{t('settings.slotMinutes')}</label>
+              <select id="loc-slot" className="input" value={h.slotMinutes} onChange={(e) => set({ hours: { ...h, slotMinutes: Number(e.target.value) } })}>
                 {[15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
               </select>
             </div>

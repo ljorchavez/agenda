@@ -36,9 +36,21 @@ export interface CalColumn {
   isToday: boolean;
   /** Opening hours in minutes from midnight; null = closed that day */
   open: [number, number] | null;
+  /** Closed stretches (before opening, breaks, after closing). When set, used instead of `open` for shading. */
+  closed?: [number, number][];
+  /** Blocked times (vacations, holidays) drawn hatched; minutes from midnight of this column's day */
+  blocks?: CalBlock[];
   events: CalEvent[];
   onCreate?: (at: Date) => void;
   onMore?: () => void;
+}
+
+export interface CalBlock {
+  id: string;
+  startMin: number;
+  endMin: number;
+  label: string;
+  onClick?: () => void;
 }
 
 interface Props {
@@ -60,7 +72,7 @@ interface Props {
   moreLabel: (count: number) => string;
 }
 
-const MIN_EVENT_PX = 26;
+const MIN_EVENT_PX = 30;
 const CHIP_LANE_PX = 36;
 
 const minutesOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
@@ -227,7 +239,17 @@ export function CalendarGrid(props: Props) {
               title={col.onCreate ? props.createLabel : undefined}
             >
               {/* Closed hours shaded, like non-working hours in Teams */}
-              {col.open ? (
+              {col.closed ? (
+                col.closed
+                  .filter(([s0, e0]) => e0 > startMin && s0 < endMin)
+                  .map(([s0, e0]) => (
+                    <div
+                      key={`closed-${s0}`}
+                      className="pointer-events-none absolute inset-x-0 bg-slate-100/80"
+                      style={{ top: y(Math.max(s0, startMin)), height: y(Math.min(e0, endMin)) - y(Math.max(s0, startMin)) }}
+                    />
+                  ))
+              ) : col.open ? (
                 <>
                   {col.open[0] > startMin && (
                     <div className="pointer-events-none absolute inset-x-0 top-0 bg-slate-100/80" style={{ height: y(col.open[0]) }} />
@@ -239,6 +261,35 @@ export function CalendarGrid(props: Props) {
               ) : (
                 <div className="pointer-events-none absolute inset-0 bg-slate-100/80" />
               )}
+
+              {(col.blocks ?? [])
+                .filter((b) => b.endMin > startMin && b.startMin < endMin)
+                .map((b) => {
+                  const top = y(Math.max(b.startMin, startMin));
+                  const bottom = y(Math.min(b.endMin, endMin));
+                  return (
+                    <button
+                      key={`block-${b.id}`}
+                      type="button"
+                      data-testid="calendar-block"
+                      disabled={!b.onClick}
+                      title={b.label}
+                      aria-label={b.label}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        b.onClick?.();
+                      }}
+                      className="absolute inset-x-0 z-[4] overflow-hidden border-y border-slate-300 px-2 py-1 text-left text-xs font-medium text-slate-600 enabled:hover:bg-slate-200/40"
+                      style={{
+                        top,
+                        height: Math.max(18, bottom - top),
+                        backgroundImage: 'repeating-linear-gradient(135deg, rgb(148 163 184 / 0.22) 0 6px, transparent 6px 12px)',
+                      }}
+                    >
+                      <span className="rounded bg-white/90 px-1">🔒 {b.label}</span>
+                    </button>
+                  );
+                })}
 
               {placed.map((p) => {
                 if (p.kind === 'more') {
@@ -263,14 +314,15 @@ export function CalendarGrid(props: Props) {
                 const ev = p.ev;
                 // With a "+N" lane, events share the width left of it.
                 const avail = p.chips ? `(100% - ${CHIP_LANE_PX}px)` : '100%';
-                const left = `calc(${avail} * ${p.lane / p.lanes} + 2px)`;
-                const width = `calc(${avail} / ${p.lanes} - 4px)`;
+                const left = `calc(${avail} * ${p.lane / p.lanes} + 3px)`;
+                const width = `calc(${avail} / ${p.lanes} - 6px)`;
                 const narrow = p.lanes > 1;
                 const startM = minutesOfDay(ev.start);
                 const dur = Math.max(1, (ev.end.getTime() - ev.start.getTime()) / 60000);
-                const h = Math.max(MIN_EVENT_PX, dur * pxPerMin - 3);
-                const oneLine = h < 40;
+                const h = Math.max(MIN_EVENT_PX, dur * pxPerMin - 4);
+                const oneLine = h < 44;
                 const title = narrow && ev.shortTitle ? ev.shortTitle : ev.title;
+                const accent = ev.tone === 'alert' ? '#e11d48' : ev.color;
                 return (
                   <button
                     key={ev.id}
@@ -282,27 +334,32 @@ export function CalendarGrid(props: Props) {
                       e.stopPropagation();
                       ev.onClick();
                     }}
-                    className={`absolute z-[5] overflow-hidden rounded-md border border-white px-2 text-left leading-snug shadow-sm transition hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-brand-500 ${oneLine ? 'flex items-center' : 'py-1'} ${TONE[ev.tone ?? 'normal']}`}
+                    className={`absolute z-[5] overflow-hidden rounded-lg pl-2.5 pr-1.5 text-left leading-tight shadow-sm ring-1 ring-black/5 transition hover:z-10 hover:shadow-md hover:ring-black/15 focus:z-10 focus:outline-none focus:ring-2 focus:ring-brand-500 ${oneLine ? 'flex items-center' : 'py-1.5'} ${TONE[ev.tone ?? 'normal']}`}
                     style={{
-                      top: y(startM) + 1,
+                      top: y(startM) + 2,
                       height: h,
                       left,
                       width,
-                      background: ev.tone === 'alert' ? '#ffe4e6' : `color-mix(in srgb, ${ev.color} 14%, white)`,
-                      borderLeft: `4px solid ${ev.tone === 'alert' ? '#e11d48' : ev.color}`,
+                      background: ev.tone === 'alert' ? '#fff1f2' : `color-mix(in srgb, ${ev.color} 9%, white)`,
+                      boxShadow: `inset 3px 0 0 ${accent}`,
                     }}
                   >
                     {oneLine ? (
-                      <span className="truncate text-[13px]">
-                        <span className="font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</span>
-                        <span className="text-xs text-slate-600"> {props.formatTime(ev.start)}</span>
+                      <span className="flex min-w-0 items-baseline gap-1.5 text-[13px]">
+                        <span className="shrink-0 text-[11px] tabular-nums text-slate-500">{props.formatTime(ev.start)}</span>
+                        <span className="truncate font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</span>
                       </span>
                     ) : (
                       <>
+                        <div className="text-[11px] font-medium tabular-nums text-slate-500">{narrow ? props.formatTime(ev.start) : props.formatRange(ev.start, ev.end)}</div>
                         <div className="truncate text-[13px] font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</div>
-                        <div className="truncate text-xs text-slate-600">{narrow ? props.formatTime(ev.start) : props.formatRange(ev.start, ev.end)}</div>
-                        {h >= 58 && ev.subtitle && <div className="truncate text-xs text-slate-600">{ev.subtitle}</div>}
-                        {h >= 76 && ev.detail && <div className="truncate text-xs font-medium text-slate-500">{ev.detail}</div>}
+                        {h >= 62 && ev.subtitle && <div className="mt-0.5 truncate text-xs text-slate-600">{ev.subtitle}</div>}
+                        {h >= 80 && ev.detail && (
+                          <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500">
+                            <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: ev.color }} />
+                            <span className="truncate">{ev.detail}</span>
+                          </div>
+                        )}
                       </>
                     )}
                   </button>

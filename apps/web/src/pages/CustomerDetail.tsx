@@ -8,6 +8,7 @@ import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../component
 import { api } from '../lib/api';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
 import { CustomerFormModal } from './Customers';
+import { StarRating } from '../components/Rating';
 
 interface Detail extends CustomerWithStats {
   appointments: {
@@ -18,6 +19,7 @@ interface Detail extends CustomerWithStats {
     paidCents: number;
     serviceName: string;
     notes: string | null;
+    rating: number | null;
   }[];
   payments: {
     id: string;
@@ -82,7 +84,7 @@ export function CustomerDetailPage() {
         {t('customers.since', { date: dateOnly(data.createdAt) })}
       </p>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
         <Stat label={t('customers.visits')} value={String(data.visits)} />
         <Stat label={t('customers.totalSpent')} value={money(data.totalSpentCents)} />
         <Stat label={t('customers.lastVisit')} value={data.lastVisitAt ? dateOnly(data.lastVisitAt) : t('common.none')} />
@@ -91,6 +93,17 @@ export function CustomerDetailPage() {
           value={data.avgDaysBetweenVisits != null ? t('customers.everyNDays', { count: data.avgDaysBetweenVisits }) : t('common.none')}
         />
         <Stat label={t('customers.noShows')} value={String(data.noShows)} />
+        <div className="card">
+          <div className="text-xs text-slate-500">{t('rating.average')}</div>
+          {data.avgRating != null ? (
+            <div className="mt-1 flex items-center gap-2" title={t('rating.basedOn', { count: data.ratingCount })}>
+              <span className="text-lg font-semibold">{data.avgRating.toFixed(1)}</span>
+              <StarRating value={data.avgRating} size="sm" />
+            </div>
+          ) : (
+            <div className="mt-1 text-lg font-semibold text-slate-400">{t('common.none')}</div>
+          )}
+        </div>
       </div>
 
       {data.notes && <div className="card mt-6 whitespace-pre-wrap text-sm">{data.notes}</div>}
@@ -101,11 +114,13 @@ export function CustomerDetailPage() {
           <ul className="divide-y divide-slate-100">
             {data.appointments.map((a) => (
               <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                <div>
+                <div className="min-w-0">
                   <div className="font-medium">{a.serviceName}</div>
                   <div className="text-slate-500">{dateTime(a.startsAt)}</div>
+                  {a.notes && <div className="mt-1 whitespace-pre-wrap rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">{a.notes}</div>}
                 </div>
                 <div className="flex items-center gap-3">
+                  {a.rating != null && <StarRating value={a.rating} size="sm" />}
                   <span>{money(a.priceCents)}</span>
                   <StatusBadge status={a.status} />
                 </div>

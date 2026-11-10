@@ -15,7 +15,7 @@ import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { verifyManageToken } from '../lib/crypto.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { activeResources, assignResource } from '../lib/resources.js';
+import { activeResources, assignResource, locationBlocks } from '../lib/resources.js';
 import { computeClassSlots, computeSlots } from './public.js';
 
 /**
@@ -193,7 +193,10 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
-    } else if (await hasOverlap(tx, l.tenant.id, startsAt, endsAt, { excludeId: l.appt.id, locationId: l.appt.locationId })) {
+    } else if (
+      (await hasOverlap(tx, l.tenant.id, startsAt, endsAt, { excludeId: l.appt.id, locationId: l.appt.locationId })) ||
+      (await locationBlocks(tx, l.tenant.id, startsAt, endsAt, l.appt.locationId)).length
+    ) {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
     // Status is re-read under the lock so a concurrent cancel can't be undone.

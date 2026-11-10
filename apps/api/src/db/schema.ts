@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -22,6 +23,7 @@ import {
   ROLES,
   type BusinessHours,
   type PlanId,
+  type WorkHours,
   type TenantSettings,
 } from '@agenda/shared';
 
@@ -197,6 +199,7 @@ export const services = pgTable(
     durationMin: integer('duration_min').notNull(),
     priceCents: integer('price_cents').notNull().default(0),
     active: boolean('active').notNull().default(true),
+    photoUrl: text('photo_url'),
     ...timestamps,
   },
   (t) => [index('services_tenant_idx').on(t.tenantId)],
@@ -227,6 +230,9 @@ export const resources = pgTable(
     /** When set, bookings are priced by the hour */
     pricePerHourCents: integer('price_per_hour_cents'),
     description: text('description'),
+    /** Own working hours; null = the hours of its location */
+    hours: jsonb('hours').$type<WorkHours>(),
+    photoUrl: text('photo_url'),
     ...timestamps,
   },
   (t) => [
@@ -281,6 +287,8 @@ export const appointments = pgTable(
     priceCents: integer('price_cents').notNull().default(0),
     source: appointmentSourceEnum('source').notNull().default('staff'),
     notes: text('notes'),
+    /** Internal 1–5 rating of how the visit went (only the business sees it) */
+    rating: smallint('rating'),
     /** Restaurants: number of people and assigned table */
     partySize: integer('party_size'),
     resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'set null' }),
@@ -368,3 +376,23 @@ export type Appointment = typeof appointments.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type Resource = typeof resources.$inferSelect;
 export type ClassSession = typeof classSessions.$inferSelect;
+
+/** Times nobody can book: the whole business, one location or one resource (vacation, holiday…). */
+export const timeBlocks = pgTable(
+  'time_blocks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** Both null = the whole business */
+    locationId: uuid('location_id').references(() => locations.id, { onDelete: 'cascade' }),
+    resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'cascade' }),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    reason: text('reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('time_blocks_tenant_idx').on(t.tenantId, t.startsAt)],
+);
+export type TimeBlock = typeof timeBlocks.$inferSelect;

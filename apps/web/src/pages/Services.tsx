@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { money, toCents } from '../lib/format';
 import { useServices } from '../lib/queries';
 import { useAccess, useAuth } from '../lib/auth';
+import { PhotoInput } from '../components/Photo';
 
 export function ServicesPage() {
   const { t } = useTranslation();
@@ -25,7 +26,8 @@ export function ServicesPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((s) => (
-            <button key={s.id} disabled={!manager} onClick={() => setEditing(s)} className={`card text-left ${manager ? 'hover:border-brand-500' : ''} ${s.active ? '' : 'opacity-60'}`}>
+            <button key={s.id} disabled={!manager} onClick={() => setEditing(s)} className={`card overflow-hidden text-left ${s.photoUrl ? '!pt-0' : ''} ${manager ? 'hover:border-brand-500' : ''} ${s.active ? '' : 'opacity-60'}`}>
+              {s.photoUrl && <img src={s.photoUrl} alt="" loading="lazy" className="-mx-5 mb-3 h-32 w-[calc(100%+2.5rem)] max-w-none object-cover" />}
               <div className="flex items-start justify-between gap-2">
                 <div className="font-semibold">{s.name}</div>
                 {!s.active && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{t('services.inactive')}</span>}
@@ -49,6 +51,7 @@ function ServiceModal({ service, onClose }: { service?: ServiceDto; onClose: () 
   const [duration, setDuration] = useState(String(service?.durationMin ?? 30));
   const [price, setPrice] = useState(service ? String(service.priceCents / 100) : '');
   const [active, setActive] = useState(service?.active ?? true);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(service?.photoUrl ?? null);
 
   const done = () => {
     void qc.invalidateQueries({ queryKey: ['services'] });
@@ -58,7 +61,7 @@ function ServiceModal({ service, onClose }: { service?: ServiceDto; onClose: () 
     mutationFn: () =>
       api(service ? `/services/${service.id}` : '/services', {
         method: service ? 'PUT' : 'POST',
-        body: { name, durationMin: Number(duration), priceCents: toCents(price || 0), active },
+        body: { name, durationMin: Number(duration), priceCents: toCents(price || 0), active, photoUrl },
       }),
     onSuccess: done,
   });
@@ -87,6 +90,7 @@ function ServiceModal({ service, onClose }: { service?: ServiceDto; onClose: () 
             <input type="number" min={0} step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} />
           </div>
         </div>
+        <PhotoInput value={photoUrl} onChange={setPhotoUrl} name={name} shape="wide" />
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
           {t('services.active')}

@@ -23,6 +23,8 @@ export function toResourceDto(r: Resource): ResourceDto {
     pricePerHourCents: r.pricePerHourCents,
     description: r.description,
     locationId: r.locationId,
+    hours: r.hours ?? null,
+    photoUrl: r.photoUrl ?? null,
   };
 }
 
@@ -103,6 +105,7 @@ export function toServiceDto(s: Service): ServiceDto {
     durationMin: s.durationMin,
     priceCents: s.priceCents,
     active: s.active,
+    photoUrl: s.photoUrl ?? null,
   };
 }
 
@@ -139,6 +142,7 @@ export type AppointmentRow = {
   price_cents: number;
   source: AppointmentDto['source'];
   notes: string | null;
+  rating: number | string | null;
   paid_cents: number | string | null;
   party_size: number | null;
   resource_id: string | null;
@@ -163,6 +167,7 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     priceCents: Number(r.price_cents),
     source: r.source,
     notes: r.notes,
+    rating: r.rating == null ? null : Number(r.rating),
     paidCents: Number(r.paid_cents ?? 0),
     managePath: `/c/${manageToken(r.id)}`,
     partySize: r.party_size == null ? null : Number(r.party_size),

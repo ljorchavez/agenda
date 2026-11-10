@@ -15,13 +15,30 @@ import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const customerRoutes = new Hono<AppEnv>();
 
+/** Spanish alphabetical order: accented names sort with their letter (Ángel next to Andrea). */
+const BY_NAME = sql`c.name collate "und-x-icu"`;
+
+/** Sortable columns and their natural first direction (clicking the header again flips it). */
 const SORTS = {
-  name: sql`c.name asc`,
-  recent: sql`c.created_at desc`,
-  lastVisit: sql`v.last_visit desc nulls last`,
-  totalSpent: sql`coalesce(p.total, 0) desc`,
-  visits: sql`coalesce(v.visits, 0) desc`,
+  name: { expr: BY_NAME, dir: 'asc' },
+  recent: { expr: sql`c.created_at`, dir: 'desc' },
+  lastVisit: { expr: sql`v.last_visit`, dir: 'desc' },
+  totalSpent: { expr: sql`coalesce(p.total, 0)`, dir: 'desc' },
+  visits: { expr: sql`coalesce(v.visits, 0)`, dir: 'desc' },
+  rating: { expr: sql`v.avg_rating`, dir: 'desc' },
+  nextAppointment: { expr: sql`n.next_at`, dir: 'asc' },
+  frequency: {
+    expr: sql`case when v.visits >= 2 then extract(epoch from (v.last_visit - v.first_visit)) / (v.visits - 1) end`,
+    dir: 'asc',
+  },
 } as const;
+type SortKey = keyof typeof SORTS;
+
+function orderBy(sortParam: string | undefined, dirParam: string | undefined) {
+  const key: SortKey = sortParam && sortParam in SORTS ? (sortParam as SortKey) : 'name';
+  const dir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : SORTS[key].dir;
+  return sql`${SORTS[key].expr} ${sql.raw(dir)} nulls last, ${BY_NAME} asc, c.id`;
+}
 
 type StatsRow = {
   id: string;
@@ -37,6 +54,8 @@ type StatsRow = {
   no_shows: number | string;
   total_spent: number | string;
   next_at: Date | null;
+  avg_rating: number | string | null;
+  rating_count: number | string | null;
   total_count?: number | string;
 };
 
@@ -64,6 +83,8 @@ function toStats(r: StatsRow): CustomerWithStats {
     nextAppointmentAt: r.next_at ? new Date(r.next_at).toISOString() : null,
     avgDaysBetweenVisits: avg,
     noShows: Number(r.no_shows),
+    avgRating: r.avg_rating == null ? null : Math.round(Number(r.avg_rating) * 10) / 10,
+    ratingCount: Number(r.rating_count ?? 0),
   };
 }
 
@@ -87,6 +108,7 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
     select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at,
       coalesce(v.visits, 0) as visits, v.last_visit, v.first_visit,
       coalesce(v.no_shows, 0) as no_shows,
+      v.avg_rating, coalesce(v.rating_count, 0) as rating_count,
       coalesce(p.total, 0) as total_spent,
       n.next_at,
       count(*) over () as total_count
@@ -95,7 +117,9 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
       select count(*) filter (where a.status = 'completed') as visits,
              max(a.starts_at) filter (where a.status = 'completed') as last_visit,
              min(a.starts_at) filter (where a.status = 'completed') as first_visit,
-             count(*) filter (where a.status = 'no_show') as no_shows
+             count(*) filter (where a.status = 'no_show') as no_shows,
+             avg(a.rating) as avg_rating,
+             count(a.rating) as rating_count
       from appointments a where a.customer_id = c.id and a.tenant_id = c.tenant_id ${sc}
     ) v on true
     left join lateral (
@@ -113,8 +137,7 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
 customerRoutes.get('/customers', async (c) => {
   const tenantId = c.get('tenantId');
   const q = c.req.query('q')?.trim() || undefined;
-  const sortKey = (c.req.query('sort') ?? 'name') as keyof typeof SORTS;
-  const sort = SORTS[sortKey] ?? SORTS.name;
+  const sort = orderBy(c.req.query('sort'), c.req.query('dir'));
   const limit = Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset')) || 0, 0);
   const db = getDb();
@@ -141,7 +164,7 @@ customerRoutes.get('/customers/:id', async (c) => {
   if (!row) throw notFound('customer');
 
   const history = await db.execute(sql`
-    select a.id, a.starts_at, a.ends_at, a.status, a.price_cents, a.notes, a.source,
+    select a.id, a.starts_at, a.ends_at, a.status, a.price_cents, a.notes, a.rating, a.source,
            s.name as service_name,
            coalesce((select sum(p.amount_cents) from payments p
                      where p.appointment_id = a.id and p.tenant_id = a.tenant_id
@@ -166,6 +189,7 @@ customerRoutes.get('/customers/:id', async (c) => {
       paidCents: Number(r.paid_cents),
       serviceName: r.service_name,
       notes: r.notes,
+      rating: r.rating == null ? null : Number(r.rating),
       source: r.source,
     })),
     payments: payments.rows.map((r: Record<string, unknown>) => ({

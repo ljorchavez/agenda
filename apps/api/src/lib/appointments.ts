@@ -13,7 +13,7 @@ export async function queryAppointments(
   const res = await db.execute<AppointmentRow>(sql`
     select a.id, a.customer_id, c.name as customer_name, c.phone as customer_phone,
            a.service_id, s.name as service_name, a.staff_user_id,
-           a.starts_at, a.ends_at, a.status, a.price_cents, a.source, a.notes,
+           a.starts_at, a.ends_at, a.status, a.price_cents, a.source, a.notes, a.rating,
            a.party_size, a.resource_id, r.name as resource_name, r.color as resource_color,
            a.class_session_id, a.location_id,
            coalesce((select sum(p.amount_cents) from payments p

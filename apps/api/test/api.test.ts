@@ -890,4 +890,128 @@ d('API (integration)', () => {
     // Other people keep signing in normally
     expect((await call('POST', '/auth/login', { email: 'equipo@test.mx', password: 'password123' })).status).toBe(200);
   });
+
+  it('schedules: own hours per person, split hours, blocked times, notes, rating and Spanish order', async () => {
+    const reg = await call('POST', '/auth/register', {
+      businessName: 'Horarios Prueba', businessType: 'barbershop', name: 'Dueña', email: 'horarios@test.mx', password: 'password123',
+    });
+    const tok = reg.body.token;
+    const slug = 'horarios-prueba';
+    const corte = (await call('POST', '/services', { name: 'Corte', durationMin: 60, priceCents: 20000 }, tok)).body;
+    // Next Monday, so Mario (Mon–Sat) works and Ramiro (Tue–Sun) doesn't
+    let monday = DateTime.now().setZone('America/Mexico_City').plus({ days: 7 }).startOf('day');
+    while (monday.weekday !== 1) monday = monday.plus({ days: 1 });
+    const tuesday = monday.plus({ days: 1 });
+    const at = (d: DateTime, h: number, m = 0) => d.set({ hour: h, minute: m }).toISO()!;
+    const slots = async (d: DateTime, pro?: string) =>
+      (await call('GET', `/public/${slug}/availability?serviceId=${corte.id}&date=${d.toISODate()}${pro ? `&resourceId=${pro}` : ''}`)).body.slots as string[];
+
+    const mario = (await call('POST', '/resources', { name: 'Mario', hours: { days: [1, 2, 3, 4, 5, 6], open: '08:00', close: '17:00' } }, tok)).body;
+    expect(mario.hours).toEqual({ days: [1, 2, 3, 4, 5, 6], open: '08:00', close: '17:00' });
+    const ramiro = (await call('POST', '/resources', { name: 'Ramiro', hours: { days: [2, 3, 4, 5, 6, 7], open: '10:00', close: '20:00' } }, tok)).body;
+    // Saving other fields keeps the hours
+    expect((await call('PUT', `/resources/${mario.id}`, { name: 'Mario' }, tok)).body.hours.open).toBe('08:00');
+
+    // Monday: only Mario, 8:00–17:00 (outside the business 9–19 is fine: the person's hours rule)
+    const mon = await slots(monday);
+    expect(mon[0]).toBe(at(monday, 8));
+    expect(mon).toContain(at(monday, 16));
+    expect(mon).not.toContain(at(monday, 16, 30)); // a 60-min cut wouldn't end by 17:00
+    expect(await slots(monday, ramiro.id)).toEqual([]);
+    // Tuesday: Mario 8–17 plus Ramiro 10–20
+    const tue = await slots(tuesday);
+    expect(tue).toContain(at(tuesday, 8));
+    expect(tue).toContain(at(tuesday, 19));
+    expect(await slots(tuesday, mario.id)).not.toContain(at(tuesday, 19));
+    // Staff can't put Ramiro on his day off
+    const cust = (await call('POST', '/customers', { name: 'Ángel Ruiz', phone: '5544440001' }, tok)).body;
+    const off = await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, resourceId: ramiro.id, startsAt: at(monday, 11) }, tok);
+    expect(off.status).toBe(409);
+
+    // Split hours on Mario: 8–14 and 16–17
+    await call('PUT', `/resources/${mario.id}`, { name: 'Mario', hours: { days: [1, 2, 3, 4, 5, 6], open: '08:00', close: '17:00', breaks: [{ start: '14:00', end: '16:00' }] } }, tok);
+    const split = await slots(monday);
+    expect(split).toContain(at(monday, 13));
+    expect(split).not.toContain(at(monday, 13, 30));
+    expect(split).not.toContain(at(monday, 14));
+    expect(split).toContain(at(monday, 16));
+
+    // Business with a break and no resources: a second business keeps it simple
+    const solo = await call('POST', '/auth/register', {
+      businessName: 'Consultorio Quebrado', businessType: 'nutrition', name: 'Dra', email: 'quebrado@test.mx', password: 'password123',
+    });
+    const me = (await call('GET', '/auth/me', undefined, solo.body.token)).body;
+    const consulta = (await call('POST', '/services', { name: 'Consulta', durationMin: 60, priceCents: 50000 }, solo.body.token)).body;
+    const hours = { days: [1, 2, 3, 4, 5], open: '08:00', close: '18:00', slotMinutes: 60, breaks: [{ start: '14:00', end: '16:00' }] };
+    expect((await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, hours } }, solo.body.token)).status).toBe(200);
+    const soloSlots = (await call('GET', `/public/consultorio-quebrado/availability?serviceId=${consulta.id}&date=${monday.toISODate()}`)).body.slots as string[];
+    expect(soloSlots.map((x) => DateTime.fromISO(x).setZone('America/Mexico_City').hour)).toEqual([8, 9, 10, 11, 12, 13, 16, 17]);
+
+    // Blocked times: Mario's vacation Tuesday, then the whole business Wednesday morning
+    const vac = await call('POST', '/time-blocks', { resourceId: mario.id, startsAt: tuesday.toISO(), endsAt: tuesday.plus({ days: 1 }).toISO(), reason: 'Vacaciones' }, tok);
+    expect(vac.status).toBe(201);
+    expect(await slots(tuesday, mario.id)).toEqual([]);
+    expect(await slots(tuesday)).toContain(at(tuesday, 10)); // Ramiro still works
+    const wed = tuesday.plus({ days: 1 });
+    const closed = await call('POST', '/time-blocks', { startsAt: at(wed, 0), endsAt: at(wed, 13), reason: 'Junta' }, tok);
+    expect(closed.status).toBe(201);
+    const wedSlots = await slots(wed);
+    expect(wedSlots.every((x) => DateTime.fromISO(x).setZone('America/Mexico_City').hour >= 13)).toBe(true);
+    const blockedStaff = await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, startsAt: at(wed, 10) }, tok);
+    expect(blockedStaff.status).toBe(409);
+    expect((await call('POST', `/public/${slug}/bookings`, { serviceId: corte.id, startsAt: at(wed, 10), name: 'Bloqueo', phone: '5544440009' })).status).toBe(409);
+    const listed = await call('GET', `/time-blocks?from=${encodeURIComponent(monday.toISO()!)}&to=${encodeURIComponent(monday.plus({ days: 7 }).toISO()!)}`, undefined, tok);
+    expect(listed.body.map((b: { reason: string }) => b.reason)).toEqual(['Vacaciones', 'Junta']);
+    expect((await call('POST', '/time-blocks', { startsAt: at(wed, 13), endsAt: at(wed, 12) }, tok)).status).toBe(422);
+    // Another business can't touch it; unblocking frees the time
+    expect((await call('DELETE', `/time-blocks/${closed.body.id}`, undefined, solo.body.token)).status).toBe(404);
+    expect((await call('DELETE', `/time-blocks/${closed.body.id}`, undefined, tok)).status).toBe(204);
+    expect(await slots(wed)).toContain(at(wed, 10));
+
+    // Notes and rating per booking; average on the customer
+    const a1 = (await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, startsAt: at(wed, 10) }, tok)).body;
+    const a2 = (await call('POST', '/appointments', { customerId: cust.id, serviceId: corte.id, startsAt: at(wed, 12) }, tok)).body;
+    const rated = await call('PATCH', `/appointments/${a1.id}`, { notes: 'Prefiere tijera', rating: 5 }, tok);
+    expect(rated.body.notes).toBe('Prefiere tijera');
+    expect(rated.body.rating).toBe(5);
+    await call('PATCH', `/appointments/${a2.id}`, { rating: 4 }, tok);
+    expect((await call('PATCH', `/appointments/${a2.id}`, { rating: 6 }, tok)).status).toBe(422);
+    const detail = (await call('GET', `/customers/${cust.id}`, undefined, tok)).body;
+    expect(detail.avgRating).toBe(4.5);
+    expect(detail.ratingCount).toBe(2);
+    expect(detail.appointments.find((x: { id: string }) => x.id === a1.id).rating).toBe(5);
+    // Clearing a rating
+    await call('PATCH', `/appointments/${a2.id}`, { rating: null }, tok);
+    expect((await call('GET', `/customers/${cust.id}`, undefined, tok)).body.avgRating).toBe(5);
+
+    // Accented names sort with their letter; headers flip the order
+    for (const [name, phone] of [['Beto Díaz', '5544440002'], ['Ana López', '5544440003'], ['Óscar Peña', '5544440004'], ['Zoe Ortiz', '5544440005']]) {
+      await call('POST', '/customers', { name, phone }, tok);
+    }
+    const names = async (q: string) => (await call('GET', `/customers?${q}`, undefined, tok)).body.items.map((c: { name: string }) => c.name);
+    expect(await names('sort=name')).toEqual(['Ana López', 'Ángel Ruiz', 'Beto Díaz', 'Óscar Peña', 'Zoe Ortiz']);
+    expect(await names('sort=name&dir=desc')).toEqual(['Zoe Ortiz', 'Óscar Peña', 'Beto Díaz', 'Ángel Ruiz', 'Ana López']);
+    expect((await names('sort=rating'))[0]).toBe('Ángel Ruiz');
+    expect((await call('GET', '/customers?sort=nope', undefined, tok)).status).toBe(200);
+
+    // Photo uploads: only managers, only pictures, and a clear error until storage is connected
+    const upload = async (file: File | null, token: string) => {
+      const form = new FormData();
+      if (file) form.append('file', file);
+      const res = await app.request('/api/uploads/photo', { method: 'POST', body: form, headers: { authorization: `Bearer ${token}` } });
+      return { status: res.status, body: (await res.json()) as { error?: string } };
+    };
+    expect((await upload(null, tok)).status).toBe(422);
+    expect((await upload(new File(['hola'], 'a.txt', { type: 'text/plain' }), tok)).body.error).toBe('unsupported_image');
+    const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    expect((await upload(new File([new Uint8Array([0xff, 0xd8, 0xff])], 'a.jpg', { type: 'image/jpeg' }), tok)).body.error).toBe('uploads_not_configured');
+    if (prevBlob) process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+
+    // Photos: validated before touching storage
+    expect((await call('POST', '/resources', { name: 'Foto mala', photoUrl: 'http://inseguro.mx/a.jpg' }, tok)).status).toBe(422);
+    const ok = await call('PUT', `/services/${corte.id}`, { name: 'Corte', durationMin: 60, priceCents: 20000, photoUrl: 'https://example.com/corte.jpg' }, tok);
+    expect(ok.body.photoUrl).toBe('https://example.com/corte.jpg');
+    expect((await call('GET', `/public/${slug}`)).body.services[0].photoUrl).toBe('https://example.com/corte.jpg');
+  });
 });

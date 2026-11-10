@@ -188,7 +188,9 @@
     "zoomIn": "Agrandar",
     "zoomOut": "Achicar",
     "partySize": "Personas",
-    "bill": "Cuenta (MXN)"
+    "bill": "Cuenta (MXN)",
+    "notesPlaceholder": "Algo a recordar de esta cita (preferencias, observaciones…)",
+    "saveNotes": "Guardar nota"
   },
   "customers": {
     "title": "Clientes",
@@ -637,7 +639,11 @@
     "plan_limit_businesses": "El plan Gratis incluye un solo negocio. Cambia tu negocio al plan Estándar para abrir otro.",
     "plan_unavailable": "Ese plan todavía no está disponible.",
     "too_many_attempts": "Demasiados intentos. Espera unos minutos y vuelve a intentar.",
-    "invalid_reset_token": "Este enlace no es válido o ya venció. Pide uno nuevo desde \"¿Olvidaste tu contraseña?\"."
+    "invalid_reset_token": "Este enlace no es válido o ya venció. Pide uno nuevo desde \"¿Olvidaste tu contraseña?\".",
+    "blocked": "Ese horario está bloqueado.",
+    "unsupported_image": "Usa una foto JPG, PNG o WebP.",
+    "image_too_large": "La foto pesa más de 2 MB.",
+    "uploads_not_configured": "La subida de fotos aún no está configurada."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -823,5 +829,51 @@
     "spaces": "Canchas y espacios",
     "pets": "Mascotas",
     "other": "Otros"
+  },
+  "schedule": {
+    "workHours": "Horario de trabajo",
+    "sameAsBusiness": "Igual que el negocio",
+    "ownHours": "Horario propio",
+    "breaks": "Descansos",
+    "breaksHelp": "Para horario quebrado: abre 8:00, cierra 18:00 y descansa de 14:00 a 16:00.",
+    "addBreak": "Agregar descanso",
+    "breakFrom": "Descanso desde",
+    "breakTo": "Descanso hasta"
+  },
+  "photos": {
+    "photo": "Foto",
+    "none": "Sin foto",
+    "add": "Subir foto",
+    "change": "Cambiar foto",
+    "remove": "Quitar"
+  },
+  "blocks": {
+    "add": "Bloquear horario",
+    "edit": "Horario bloqueado",
+    "blocked": "Bloqueado",
+    "help": "Nadie podrá reservar en ese tiempo, ni en línea ni desde la agenda.",
+    "who": "¿Qué se bloquea?",
+    "wholeBusiness": "Todo el negocio",
+    "allDay": "Días completos",
+    "fromDay": "Desde el día",
+    "toDay": "Hasta el día",
+    "day": "Día",
+    "from": "Desde",
+    "to": "Hasta",
+    "reason": "Motivo",
+    "reasonPlaceholder": "Vacaciones, día festivo, mantenimiento…",
+    "endAfterStart": "La hora final debe ser después de la inicial.",
+    "existingNote": "Las citas que ya estaban en ese horario no se cancelan; revísalas en la agenda.",
+    "unblock": "Desbloquear",
+    "forbidden": "No puedes bloquear eso con tu usuario."
+  },
+  "rating": {
+    "visit": "Calificación",
+    "average": "Calificación",
+    "label": "{{value}} de 5 estrellas",
+    "stars_one": "{{count}} estrella",
+    "stars_other": "{{count}} estrellas",
+    "basedOn_one": "Promedio de {{count}} cita calificada",
+    "basedOn_other": "Promedio de {{count}} citas calificadas"
   }
 }

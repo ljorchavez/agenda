@@ -135,6 +135,10 @@ export async function resourceBusyAt(
     where tenant_id = ${tenantId} and resource_id = ${resourceId}
       and status in ('scheduled', 'confirmed') and class_session_id is null
       and starts_at < ${end.toISOString()} and ends_at > ${start.toISOString()}
+    union all
+    select 1 from time_blocks b join resources r on r.id = ${resourceId} and r.tenant_id = b.tenant_id
+    where b.tenant_id = ${tenantId} and b.starts_at < ${end.toISOString()} and b.ends_at > ${start.toISOString()}
+      and (b.resource_id = r.id or (b.resource_id is null and (b.location_id is null or b.location_id = r.location_id)))
     limit 1`);
   return res.rows.length > 0;
 }

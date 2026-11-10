@@ -64,6 +64,13 @@
       "when": 1794500000000,
       "tag": "0008_auth_security",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0009_schedules_blocks_photos",
+      "breakpoints": true
     }
   ]
 }

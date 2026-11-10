@@ -40,6 +40,9 @@ const values = (input: ResourceInput) => ({
   capacity: input.capacity ?? null,
   pricePerHourCents: input.pricePerHourCents ?? null,
   description: input.description ?? null,
+  // Left out of the request = keep what's saved
+  ...(input.hours !== undefined ? { hours: input.hours } : {}),
+  ...(input.photoUrl !== undefined ? { photoUrl: input.photoUrl } : {}),
 });
 
 resourceRoutes.get('/resources', async (c) => {

@@ -188,7 +188,9 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "partySize": "People",
-    "bill": "Bill (MXN)"
+    "bill": "Bill (MXN)",
+    "notesPlaceholder": "Anything to remember about this booking (preferences, remarks…)",
+    "saveNotes": "Save note"
   },
   "customers": {
     "title": "Customers",
@@ -637,7 +639,11 @@
     "plan_limit_businesses": "The Free plan includes one business. Move your business to Standard to open another.",
     "plan_unavailable": "That plan is not available yet.",
     "too_many_attempts": "Too many attempts. Wait a few minutes and try again.",
-    "invalid_reset_token": "This link is invalid or has expired. Request a new one from \"Forgot your password?\"."
+    "invalid_reset_token": "This link is invalid or has expired. Request a new one from \"Forgot your password?\".",
+    "blocked": "That time is blocked.",
+    "unsupported_image": "Use a JPG, PNG or WebP picture.",
+    "image_too_large": "The picture is larger than 2 MB.",
+    "uploads_not_configured": "Photo uploads aren't set up yet."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -823,5 +829,51 @@
     "spaces": "Courts & spaces",
     "pets": "Pets",
     "other": "Other"
+  },
+  "schedule": {
+    "workHours": "Working hours",
+    "sameAsBusiness": "Same as the business",
+    "ownHours": "Own hours",
+    "breaks": "Breaks",
+    "breaksHelp": "For a split shift: open 8:00, close 18:00 and take a break from 14:00 to 16:00.",
+    "addBreak": "Add break",
+    "breakFrom": "Break from",
+    "breakTo": "Break until"
+  },
+  "photos": {
+    "photo": "Photo",
+    "none": "No photo",
+    "add": "Upload photo",
+    "change": "Change photo",
+    "remove": "Remove"
+  },
+  "blocks": {
+    "add": "Block time",
+    "edit": "Blocked time",
+    "blocked": "Blocked",
+    "help": "Nobody can book that time, online or from the calendar.",
+    "who": "What do you block?",
+    "wholeBusiness": "The whole business",
+    "allDay": "Whole days",
+    "fromDay": "From",
+    "toDay": "Until",
+    "day": "Day",
+    "from": "From",
+    "to": "Until",
+    "reason": "Reason",
+    "reasonPlaceholder": "Vacation, holiday, maintenance…",
+    "endAfterStart": "The end time must be after the start.",
+    "existingNote": "Bookings already in that time aren't cancelled; review them in the calendar.",
+    "unblock": "Unblock",
+    "forbidden": "Your login can't block that."
+  },
+  "rating": {
+    "visit": "Rating",
+    "average": "Rating",
+    "label": "{{value}} out of 5 stars",
+    "stars_one": "{{count}} star",
+    "stars_other": "{{count}} stars",
+    "basedOn_one": "Average of {{count}} rated booking",
+    "basedOn_other": "Average of {{count}} rated bookings"
   }
 }

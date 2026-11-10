@@ -15,7 +15,7 @@ import { appointments, customers, memberships, payments, services, tenants, type
 import type { Db } from '../db/client.js';
 import { hasOverlap, queryAppointments } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
-import { activeResources, assignResource, defaultService, findResource } from '../lib/resources.js';
+import { activeResources, assertNotBlocked, assignResource, defaultService, findResource } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { assertLocation, forbiddenScope, getScope, inScope, scopeSql } from '../lib/access.js';
 import { locationForWrite } from '../lib/locations.js';
@@ -69,6 +69,7 @@ async function resolveResource(
       locationId: o.locationId,
     });
   }
+  await assertNotBlocked(tx, tenantId, start, end, o.locationId);
   if (await hasOverlap(tx, tenantId, start, end, { staffUserId: o.staffUserId, excludeId: o.excludeId, locationId: o.locationId })) {
     throw conflict('overlap', 'The time slot overlaps another appointment');
   }
@@ -296,6 +297,7 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
         status: nextStatus,
         priceCents: price,
         notes: input.notes === undefined ? current.notes : input.notes,
+        rating: input.rating === undefined ? current.rating : input.rating,
         partySize,
         resourceId,
         // Rescheduling re-arms the reminder.

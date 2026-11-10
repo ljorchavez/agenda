@@ -22,13 +22,15 @@ export class ApiError extends Error {
 /** Fetch wrapper: JSON in/out, bearer token, typed errors. Base URL is same-origin /api. */
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const token = tokenStore.get();
+  // FormData (file uploads) goes as-is so the browser sets the multipart boundary.
+  const form = init.body instanceof FormData;
   const res = await fetch(`/api${path}`, {
     method: init.method ?? 'GET',
     headers: {
-      ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.body !== undefined && !form ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    body: init.body === undefined ? undefined : form ? (init.body as FormData) : JSON.stringify(init.body),
   });
   if (res.status === 204) return undefined as T;
   const data = (await res.json().catch(() => ({}))) as T & ApiErrorBody;

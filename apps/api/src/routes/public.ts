@@ -13,7 +13,7 @@ import {
   publicClassBookingSchema,
   rentalSettingsOf,
   reservationSettingsOf,
-  type BusinessHours,
+  intervalsOnWeekday,
   type Locale,
   type PublicBookingResult,
   type PublicBusinessDto,
@@ -23,7 +23,7 @@ import { appointments, customers, services, tenants, type Appointment, type Cust
 import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
 import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
-import { activeResources, assignResource, defaultService, pickResource, resourceBusy, type Need } from '../lib/resources.js';
+import { activeResources, assignResource, closedRanges, defaultService, locationBlocks, pickResource, resourceBusy, type Need } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { hoursFor, listLocations, resolveLocation, toPublicLocation } from '../lib/locations.js';
 import { manageToken } from '../lib/crypto.js';
@@ -40,19 +40,6 @@ async function getTenantBySlug(slug: string): Promise<Tenant> {
   const tenant = await getDb().query.tenants.findFirst({ where: eq(tenants.slug, slug) });
   if (!tenant || !tenant.settings.onlineBookingEnabled) throw notFound('business');
   return tenant;
-}
-
-/** Opening and closing instants for a local date, or null when closed. */
-function dayWindow(tenant: Tenant, date: string, hours: BusinessHours = tenant.settings.hours) {
-  const day = DateTime.fromISO(date, { zone: tenant.timezone });
-  if (!day.isValid || !hours.days.includes(day.weekday)) return null;
-  const [oh, om] = hours.open.split(':').map(Number) as [number, number];
-  const [ch, cm] = hours.close.split(':').map(Number) as [number, number];
-  return {
-    open: day.set({ hour: oh, minute: om, second: 0, millisecond: 0 }),
-    close: day.set({ hour: ch, minute: cm, second: 0, millisecond: 0 }),
-    step: hours.slotMinutes,
-  };
 }
 
 publicRoutes.get('/public/:slug', async (c) => {
@@ -79,7 +66,7 @@ publicRoutes.get('/public/:slug', async (c) => {
     locale: tenant.locale as Locale,
     phone: tenant.phone,
     hours: tenant.settings.hours,
-    services: cfg.durations ? [] : list.map((s) => ({ id: s.id, name: s.name, durationMin: s.durationMin, priceCents: s.priceCents })),
+    services: cfg.durations ? [] : list.map((s) => ({ id: s.id, name: s.name, durationMin: s.durationMin, priceCents: s.priceCents, photoUrl: s.photoUrl ?? null })),
     deposit: (() => {
       const d = paymentSettingsOf(tenant.settings).deposit;
       return d.enabled ? { type: d.type, value: d.value } : null;
@@ -104,6 +91,7 @@ publicRoutes.get('/public/:slug', async (c) => {
         pricePerHourCents: r.pricePerHourCents,
         description: r.description,
         locationId: r.locationId,
+        photoUrl: r.photoUrl ?? null,
       })),
     rentalDurations: cfg.durations ? rentalSettingsOf(tenant.settings).durations : null,
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
@@ -114,7 +102,9 @@ publicRoutes.get('/public/:slug', async (c) => {
 /**
  * Free start times on a local date (YYYY-MM-DD) for a booking of `durationMin`.
  * With resources, a time is free when some resource that takes the service and fits the party
- * (or the requested one) is free; without resources the location works as a single agenda.
+ * (or the requested one) is working, not blocked and free. A resource with its own hours follows
+ * them (Mario 8–17, Ramiro 10–20); the rest follow the location's hours, breaks included.
+ * Without resources the location works as a single agenda.
  */
 export async function computeSlots(
   tenant: Tenant,
@@ -125,42 +115,63 @@ export async function computeSlots(
 ): Promise<string[]> {
   const db = getDb();
   const loc = await resolveLocation(db, tenant.id, opts.locationId);
-  const w = dayWindow(tenant, date, hoursFor(tenant, loc));
-  if (!w) return [];
-  const starts: DateTime[] = [];
-  for (let t = w.open; t.plus({ minutes: durationMin }) <= w.close; t = t.plus({ minutes: w.step })) if (t > now) starts.push(t);
-  const list = await activeResources(db, tenant.id, loc.id);
+  const hours = hoursFor(tenant, loc);
+  const day = DateTime.fromISO(date, { zone: tenant.timezone });
+  if (!day.isValid) return [];
+  const dayStart = day.startOf('day');
+  const dayEnd = dayStart.plus({ days: 1 });
+  const step = hours.slotMinutes;
 
+  /** Start times inside each open stretch, every `step` minutes from its opening. */
+  const startsIn = (stretches: [number, number][]) => {
+    const out = new Set<number>();
+    for (const [o, c] of stretches) for (let m = o; m + durationMin <= c; m += step) out.add(m);
+    return out;
+  };
+  const toTimes = (mins: Set<number>) =>
+    [...mins].sort((a, b) => a - b).map((m) => dayStart.plus({ minutes: m })).filter((t) => t > now);
+
+  const list = await activeResources(db, tenant.id, loc.id);
   if (list.length) {
     let eligible = eligibleResources(list, opts);
     if (opts.resourceId) eligible = eligible.filter((r) => r.id === opts.resourceId);
     if (!eligible.length) return [];
-    const busy = await resourceBusy(db, tenant.id, w.open.toJSDate(), w.close.toJSDate(), { excludeId: opts.excludeId, locationId: loc.id });
-    return starts
+    const mins = new Set<number>();
+    for (const r of eligible) for (const m of startsIn(intervalsOnWeekday(r.hours ?? hours, day.weekday))) mins.add(m);
+    const from = dayStart.toJSDate();
+    const to = dayEnd.toJSDate();
+    const busy = await resourceBusy(db, tenant.id, from, to, { excludeId: opts.excludeId, locationId: loc.id });
+    // Hours off: own schedule, or the location's when it has none (closed days, breaks).
+    busy.push(...eligible.flatMap((r) => closedRanges(r.hours ?? hours, from, to, tenant.timezone).map((x) => ({ ...x, rid: r.id, soft: true }))));
+    return toTimes(mins)
       .filter((t) => pickResource(eligible, busy, t.toJSDate(), t.plus({ minutes: durationMin }).toJSDate()))
       .map((t) => t.toISO()!);
   }
 
-  // Single agenda: load the day's busy intervals once instead of one query per slot.
-  const active = await db
-    .select({ s: appointments.startsAt, e: appointments.endsAt })
-    .from(appointments)
-    .where(
-      and(
-        eq(appointments.tenantId, tenant.id),
-        eq(appointments.locationId, loc.id),
-        inArray(appointments.status, ['scheduled', 'confirmed']),
-        lt(appointments.startsAt, w.close.toJSDate()),
-        gt(appointments.endsAt, w.open.toJSDate()),
-        sql`${appointments.classSessionId} is null and ${appointments.resourceId} is null`,
-        opts.excludeId ? ne(appointments.id, opts.excludeId) : undefined,
+  // Single agenda: load the day's bookings and blocked times once instead of one query per slot.
+  const [active, blocked] = await Promise.all([
+    db
+      .select({ s: appointments.startsAt, e: appointments.endsAt })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.tenantId, tenant.id),
+          eq(appointments.locationId, loc.id),
+          inArray(appointments.status, ['scheduled', 'confirmed']),
+          lt(appointments.startsAt, dayEnd.toJSDate()),
+          gt(appointments.endsAt, dayStart.toJSDate()),
+          sql`${appointments.classSessionId} is null and ${appointments.resourceId} is null`,
+          opts.excludeId ? ne(appointments.id, opts.excludeId) : undefined,
+        ),
       ),
-    );
-  return starts
+    locationBlocks(db, tenant.id, dayStart.toJSDate(), dayEnd.toJSDate(), loc.id),
+  ]);
+  const taken = [...active, ...blocked];
+  return toTimes(startsIn(intervalsOnWeekday(hours, day.weekday)))
     .filter((t) => {
       const s = t.toJSDate();
       const e = t.plus({ minutes: durationMin }).toJSDate();
-      return !active.some((b) => b.s < e && b.e > s);
+      return !taken.some((b) => b.s < e && b.e > s);
     })
     .map((t) => t.toISO()!);
 }
@@ -425,7 +436,10 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
       } catch {
         throw conflict('slot_unavailable', 'This time is no longer available');
       }
-    } else if (await hasOverlap(tx, tenant.id, startsAt, endsAt, { locationId: loc.id })) {
+    } else if (
+      (await hasOverlap(tx, tenant.id, startsAt, endsAt, { locationId: loc.id })) ||
+      (await locationBlocks(tx, tenant.id, startsAt, endsAt, loc.id)).length
+    ) {
       throw conflict('slot_unavailable', 'This time is no longer available');
     }
     await assertCanAddBooking(tx, tenant.id);

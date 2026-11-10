@@ -15,6 +15,7 @@ import { LanguageSwitch } from '../components/Layout';
 import { ErrorText, Loading } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money } from '../lib/format';
+import { Avatar } from '../components/Photo';
 
 type Book = (body: Record<string, unknown>) => void;
 /** `loc` is the chosen location (sucursal); `business` already shows only its resources and hours. */
@@ -323,9 +324,12 @@ function BookingFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
                   reset();
                   if (resourceId && !eligibleResources(business.resources, { serviceId: s.id }).some((r) => r.id === resourceId)) setResourceId('');
                 }}
-                className={`flex justify-between rounded-lg border p-3 text-left text-sm ${serviceId === s.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-400'}`}
+                className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm ${serviceId === s.id ? 'border-brand-600 bg-brand-50' : 'border-slate-200 hover:border-slate-400'}`}
               >
-                <span className="font-medium">{s.name}</span>
+                <span className="flex min-w-0 items-center gap-3">
+                  {s.photoUrl && <img src={s.photoUrl} alt="" loading="lazy" className="h-12 w-12 shrink-0 rounded-lg object-cover" />}
+                  <span className="font-medium">{s.name}</span>
+                </span>
                 <span className="text-right text-slate-600">
                   {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}
                   {business.deposit && s.priceCents > 0 && (
@@ -354,7 +358,11 @@ function BookingFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
             {eligible.map((r) => (
               <Chip key={r.id} on={resourceId === r.id} onClick={() => { setResourceId(r.id); reset(); }}>
                 <span className="flex items-center gap-2 font-medium">
-                  <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
+                  {r.photoUrl ? (
+                    <Avatar name={r.name} color={r.color} photoUrl={r.photoUrl} size={32} />
+                  ) : (
+                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
+                  )}
                   {r.name}
                 </span>
                 {(r.pricePerHourCents != null || r.description) && (
