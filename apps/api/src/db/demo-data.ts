@@ -318,7 +318,8 @@ async function seedRestaurant() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  await seedPayments(tenantId, inserted, { manual: ['card', 'card', 'cash', 'transfer'] });
+  // Only groups of 6+ leave a deposit
+  await seedPayments(tenantId, inserted, { manual: ['card', 'card', 'cash', 'transfer'], depositIf: (a) => (a.partySize ?? 0) >= 6 });
   console.log(`Seeded restaurant with ${tables.length} tables, ${inserted.length} reservations`);
 }
 
@@ -352,7 +353,7 @@ type Method = 'cash' | 'card' | 'transfer';
 async function seedPayments(
   tenantId: string,
   rows: (typeof appointments.$inferSelect)[],
-  opts: { manual: readonly Method[]; depositPct?: number; online?: number },
+  opts: { manual: readonly Method[]; depositPct?: number; online?: number; depositIf?: (a: typeof appointments.$inferSelect) => boolean },
 ) {
   const now = Date.now();
   const pct = opts.depositPct ?? 30;
@@ -375,6 +376,10 @@ async function seedPayments(
     const depositAt = new Date(a.startsAt.getTime() - (1 + Math.floor(rand() * 5)) * 86400e3);
     const depositMethod = () => (rand() < 0.75 ? 'mercadopago' : 'transfer');
     const r = rand();
+    if (opts.depositIf && !opts.depositIf(a)) {
+      if (a.status === 'completed' && r >= 0.04) add(a, a.priceCents, pick(opts.manual), a.endsAt);
+      continue;
+    }
     if (a.endsAt.getTime() > now && a.status !== 'completed') {
       // Upcoming
       if (a.status === 'cancelled' || a.status === 'no_show') continue;
