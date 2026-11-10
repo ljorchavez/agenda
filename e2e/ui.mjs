@@ -23,7 +23,10 @@ ok('Inicio gone from menu', (await page.locator('nav a[href="/inicio"]').count()
 // 1. New booking: search and pick a customer, then save
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
 const search = page.getByRole('searchbox', { name: /Cliente/ });
-await search.fill('Andrea');
+// Typing part of a name filters the list; take the first match of whatever business opened
+await page.locator('[role=listbox] button').first().waitFor();
+const firstName = ((await page.locator('[role=listbox] button .font-medium').first().textContent()) ?? '').split(' ')[0];
+await search.fill(firstName);
 await page.waitForTimeout(600);
 await page.locator('[role=listbox] button').first().click();
 ok('customer picked shows card', (await page.locator('[data-testid=picked-customer]').count()) === 1);
