@@ -31,7 +31,7 @@ export function PaymentsPage() {
   const rows = useMemo(() => {
     const get: Record<Key, (p: PaymentDto) => string | number> = {
       date: (p) => new Date(p.paidAt ?? p.createdAt).getTime(),
-      customer: (p) => p.customerName,
+      customer: (p) => p.customerName ?? '',
       method: (p) => t(`methods.${p.method}`),
       status: (p) => t(`paymentStatus.${p.status}`),
       amount: (p) => p.amountCents,
