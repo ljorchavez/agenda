@@ -247,7 +247,7 @@ await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().cli
 await page.locator('[role=listbox] button').first().click();
 if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
 await page.fill('#na-coupon', 'bienvenida');
-await page.getByTestId('discount-preview').waitFor({ timeout: 6000 }).catch(() => {});
+await page.getByTestId('discount-preview').filter({ hasText: 'BIENVENIDA' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('BIENVENIDA'));
 await page.keyboard.press('Escape');
 ok('no page errors', errors.length === 0, errors.join(' / '));

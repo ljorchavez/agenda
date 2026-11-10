@@ -1151,7 +1151,7 @@ d('API (integration)', () => {
     const withCoupon = (await book(now.plus({ days: 4 }).set({ hour: 10, minute: 0 }), { couponCode: 'Verano50' })).body;
     expect(withCoupon).toMatchObject({ priceCents: 15000, discountCents: 5000, discountReason: 'coupon', couponCode: 'VERANO50' });
     expect((await book(now.plus({ days: 5 }).set({ hour: 10, minute: 0 }), { couponCode: 'VERANO50' })).status).toBe(422); // used up
-    expect((await book(now.plus({ days: 5 }).set({ hour: 10, minute: 0 }), { couponCode: 'NOEXISTE' })).body.code).toBe('coupon_invalid');
+    expect((await book(now.plus({ days: 5 }).set({ hour: 10, minute: 0 }), { couponCode: 'NOEXISTE' })).body.error).toBe('coupon_invalid');
     const list = (await call('GET', '/coupons', undefined, tok)).body;
     expect(list[0].uses).toBe(1);
     const soft = (await call('POST', '/appointments/discount', { couponCode: 'NOEXISTE', priceCents: 20000 }, tok)).body;
