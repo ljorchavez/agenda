@@ -35,15 +35,13 @@ export function CustomersPage() {
   const [page, setPage] = useState(0);
 
   useEffect(() => {
-    const id = setTimeout(() => {
-      setDebounced(q.trim());
-      setPage(0);
-    }, 250);
+    const id = setTimeout(() => setDebounced(q.trim()), 250);
     return () => clearTimeout(id);
   }, [q]);
 
   const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}`, false, { size: PAGE_SIZE, index: page });
-  useEffect(() => setPage(0), [sort.key, sort.dir]);
+  // A new search or order starts again on page 1
+  useEffect(() => setPage(0), [debounced, sort.key, sort.dir]);
 
   return (
     <>
