@@ -53,7 +53,9 @@ let warned = false;
 if (resIds.length) {
   const svcId = await page.locator('#na-svc').inputValue().catch(() => undefined);
   const busyCust = (await api('/customers?limit=1', null, tok)).items[0];
-  const blocker = await api('/appointments', { customerId: busyCust.id, ...(svcId ? { serviceId: svcId } : {}), resourceId: resIds[0], startsAt: '2026-12-02T10:00:00-06:00', allowOverlap: true }, tok);
+  // 10:00 in the browser's own time zone, the same way the form reads it
+  const at10 = await page.evaluate(() => new Date('2026-12-02T10:00').toISOString());
+  const blocker = await api('/appointments', { customerId: busyCust.id, ...(svcId ? { serviceId: svcId } : {}), resourceId: resIds[0], startsAt: at10, allowOverlap: true }, tok);
   await page.selectOption('#na-res', resIds[0]);
   await page.fill('#na-day', '2026-12-02');
   await page.fill('#na-time', '10:00');
