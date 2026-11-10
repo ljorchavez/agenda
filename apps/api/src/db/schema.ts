@@ -267,6 +267,23 @@ export const classSessions = pgTable(
   (t) => [index('class_sessions_tenant_starts_idx').on(t.tenantId, t.startsAt)],
 );
 
+/** Discount codes a business hands out ("VERANO10"). */
+export const coupons = pgTable('coupons', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  discountType: text('discount_type').$type<'percent' | 'amount'>().notNull(),
+  /** Percent (1–100) or cents */
+  value: integer('value').notNull(),
+  active: boolean('active').notNull().default(true),
+  maxUses: integer('max_uses'),
+  validUntil: date('valid_until', { mode: 'string' }),
+  ...timestamps,
+});
+export type Coupon = typeof coupons.$inferSelect;
+
 export const appointments = pgTable(
   'appointments',
   {
@@ -296,6 +313,10 @@ export const appointments = pgTable(
     /** Location (sucursal). Filled with the primary location by a DB trigger when omitted. */
     locationId: uuid('location_id').notNull().default(sql`null`),
     reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
+    /** Discount already taken off priceCents ('reward' every N visits, or 'coupon') */
+    discountCents: integer('discount_cents').notNull().default(0),
+    discountReason: text('discount_reason').$type<'reward' | 'coupon'>(),
+    couponId: uuid('coupon_id').references(() => coupons.id, { onDelete: 'set null' }),
     ...timestamps,
   },
   (t) => [

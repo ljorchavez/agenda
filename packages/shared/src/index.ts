@@ -341,8 +341,61 @@ export function socialUrl(network: 'instagram' | 'facebook' | 'tiktok', value: s
   return network === 'instagram' ? `https://instagram.com/${h}` : network === 'facebook' ? `https://facebook.com/${h}` : `https://tiktok.com/@${h}`;
 }
 
+/** "Every 6th visit gets 10% off": counts completed visits since the last reward. */
+export const rewardSettingsSchema = z.object({
+  enabled: z.boolean(),
+  /** Visits needed; the next booking after them gets the discount */
+  everyVisits: z.number().int().min(2).max(50),
+  discountType: z.enum(['percent', 'amount']),
+  /** Percent (1–100) or cents */
+  value: z.number().int().min(1),
+});
+export type RewardSettings = z.infer<typeof rewardSettingsSchema>;
+export const DEFAULT_REWARDS: RewardSettings = { enabled: false, everyVisits: 5, discountType: 'percent', value: 10 };
+export const rewardSettingsOf = (s: { rewards?: RewardSettings } | null | undefined): RewardSettings => ({ ...DEFAULT_REWARDS, ...(s?.rewards ?? {}) });
+export const couponsEnabled = (s: { coupons?: { enabled: boolean } } | null | undefined) => Boolean(s?.coupons?.enabled);
+
+/** Cents taken off `priceCents` (never more than the price). */
+export function discountCents(priceCents: number, d: { discountType: 'percent' | 'amount'; value: number }): number {
+  if (priceCents <= 0) return 0;
+  const off = d.discountType === 'percent' ? Math.round((priceCents * Math.min(d.value, 100)) / 100) : d.value;
+  return Math.max(0, Math.min(priceCents, off));
+}
+
+export const couponInputSchema = z.object({
+  code: z.string().trim().min(3).max(30).regex(/^[A-Za-z0-9_-]+$/, 'code_format').transform((c) => c.toUpperCase()),
+  discountType: z.enum(['percent', 'amount']),
+  value: z.number().int().min(1),
+  active: z.boolean().default(true),
+  maxUses: z.number().int().min(1).nullable().optional(),
+  validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+}).refine((c) => c.discountType !== 'percent' || c.value <= 100, { path: ['value'], message: 'percent_max' });
+export type CouponInput = z.infer<typeof couponInputSchema>;
+export interface CouponDto {
+  id: string;
+  code: string;
+  discountType: 'percent' | 'amount';
+  value: number;
+  active: boolean;
+  maxUses: number | null;
+  validUntil: string | null;
+  /** Bookings (not cancelled) that used it */
+  uses: number;
+}
+/** What a booking would get off: the best of the reward and the coupon (they don't add up). */
+export interface DiscountPreviewDto {
+  discountCents: number;
+  reason: 'reward' | 'coupon' | null;
+  couponCode: string | null;
+  /** Coupon typed but not valid: 'coupon_invalid' | 'coupon_expired' | 'coupon_used_up' */
+  couponError: string | null;
+  reward: { enabled: boolean; everyVisits: number; visitsSince: number; eligible: boolean } | null;
+}
+
 export const tenantSettingsSchema = z.object({
   page: pageSettingsSchema.optional(),
+  rewards: rewardSettingsSchema.optional(),
+  coupons: z.object({ enabled: z.boolean() }).optional(),
   hours: businessHoursSchema,
   remindersEnabled: z.boolean(),
   /** Hours before the appointment to send the WhatsApp reminder */
@@ -853,6 +906,8 @@ export const appointmentCreateSchema = z.object({
   classSessionId: z.string().uuid().optional(),
   /** Location (sucursal); inferred from the resource/class, else the main one */
   locationId: z.string().uuid().optional(),
+  /** Discount code; the loyalty reward applies by itself */
+  couponCode: z.string().trim().max(30).optional(),
 }).refine((x) => Boolean(x.startsAt || x.classSessionId), { path: ['startsAt'], message: 'startsAt required' });
 export type AppointmentCreateInput = z.infer<typeof appointmentCreateSchema>;
 
@@ -1025,6 +1080,7 @@ export const publicBookingSchema = z.object({
   phone: phoneSchema,
   email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
   notes: z.string().max(1000).optional(),
+  couponCode: z.string().trim().max(30).optional(),
 });
 export type PublicBookingInput = z.infer<typeof publicBookingSchema>;
 
@@ -1101,6 +1157,10 @@ export interface ServiceDto {
 }
 
 export interface AppointmentDto {
+  /** Taken off the price already (priceCents is what's charged) */
+  discountCents: number;
+  discountReason: 'reward' | 'coupon' | null;
+  couponCode: string | null;
   locationId: string;
   id: string;
   customerId: string;
@@ -1297,6 +1357,8 @@ export interface PublicBusinessDto {
   locations: PublicLocationDto[];
   /** Banner, profile picture, gallery, social links and notice */
   page: PageSettings & { gallery: string[] };
+  /** Promotions customers can see: coupon box and the loyalty reward */
+  promos: { coupons: boolean; reward: Pick<RewardSettings, 'everyVisits' | 'discountType' | 'value'> | null };
 }
 
 export interface PublicBookingResult {
@@ -1308,8 +1370,10 @@ export interface PublicBookingResult {
   partySize: number | null;
   /** Resource assigned, if any */
   resourceName: string | null;
-  /** Total price of the booking */
+  /** Total price of the booking (after any discount) */
   priceCents: number;
+  discountCents: number;
+  discountReason: 'reward' | 'coupon' | null;
   /** Private path (/c/<token>) where the customer can reschedule or cancel */
   managePath: string;
   deposit: null | {

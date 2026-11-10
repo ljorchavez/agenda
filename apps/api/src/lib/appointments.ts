@@ -15,7 +15,8 @@ export async function queryAppointments(
            a.service_id, s.name as service_name, a.staff_user_id,
            a.starts_at, a.ends_at, a.status, a.price_cents, a.source, a.notes, a.rating,
            a.party_size, a.resource_id, r.name as resource_name, r.color as resource_color,
-           a.class_session_id, a.location_id,
+           a.class_session_id, a.location_id, a.discount_cents, a.discount_reason,
+           (select cp.code from coupons cp where cp.id = a.coupon_id) as coupon_code,
            coalesce((select sum(p.amount_cents) from payments p
                      where p.appointment_id = a.id and p.tenant_id = a.tenant_id
                        and p.status = 'paid'), 0) as paid_cents,

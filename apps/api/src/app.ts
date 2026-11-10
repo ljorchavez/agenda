@@ -22,6 +22,7 @@ import { locationRoutes } from './routes/locations.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { passwordRoutes } from './routes/password.js';
 import { blockRoutes } from './routes/blocks.js';
+import { couponRoutes } from './routes/coupons.js';
 import { uploadRoutes } from './routes/uploads.js';
 import { pruneAuthTables } from './lib/throttle.js';
 import { getDb } from './db/client.js';
@@ -66,7 +67,7 @@ export function createApp() {
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();
   // Auth on explicit prefixes so unknown paths still return 404 instead of 401.
-  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections']) {
+  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections', '/coupons']) {
     priv.use(prefix, requireAuth);
     priv.use(`${prefix}/*`, requireAuth);
   }
@@ -80,6 +81,7 @@ export function createApp() {
   priv.route('/', classRoutes);
   priv.route('/', locationRoutes);
   priv.route('/', blockRoutes);
+  priv.route('/', couponRoutes);
   priv.route('/', uploadRoutes);
   app.route('/', priv);
 

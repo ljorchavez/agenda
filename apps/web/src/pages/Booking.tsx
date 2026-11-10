@@ -7,6 +7,7 @@ import {
   bookingPriceCents,
   eligibleResources,
   kindConfig,
+  discountCents,
   openIntervals,
   socialUrl,
   type PublicBookingResult,
@@ -288,16 +289,54 @@ function SlotGrid({ loading, slots, value, onChange, tz }: { loading: boolean; s
   );
 }
 
-function CustomerForm({ onSubmit, pending, error, summary, cta }: { onSubmit: (f: { name: string; phone: string; email?: string }) => void; pending: boolean; error: unknown; summary?: ReactNode; cta: string }) {
+type CouponCheck = { code: string; discountType: 'percent' | 'amount'; value: number };
+
+function CustomerForm({ onSubmit, pending, error, summary, cta, promo }: {
+  onSubmit: (f: { name: string; phone: string; email?: string; couponCode?: string }) => void;
+  pending: boolean;
+  error: unknown;
+  summary?: ReactNode;
+  cta: string;
+  /** Coupon box and loyalty reward note (bookings with a price) */
+  promo?: { slug: string; totalCents: number; coupons: boolean; reward: PublicBusinessDto['promos']['reward'] };
+}) {
   const { t } = useTranslation();
   const [form, setForm] = useState({ name: '', phone: '', email: '' });
+  const [code, setCode] = useState('');
+  const [coupon, setCoupon] = useState<CouponCheck | null>(null);
+  const check = useMutation({
+    mutationFn: () => api<CouponCheck>(`/public/${promo!.slug}/coupons/${encodeURIComponent(code.trim())}`),
+    onSuccess: setCoupon,
+  });
+  const off = coupon && promo ? discountCents(promo.totalCents, coupon) : 0;
   return (
-    <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, email: form.email || undefined }); }}>
+    <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, email: form.email || undefined, ...(coupon ? { couponCode: coupon.code } : {}) }); }}>
       <h2 className="font-semibold">{t('booking.yourData')}</h2>
       {summary}
+      {promo?.reward && promo.totalCents > 0 && (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          🎁 {t('promos.rewardPublic', { count: promo.reward.everyVisits, off: promo.reward.discountType === 'percent' ? `${promo.reward.value}%` : money(promo.reward.value) })}
+        </p>
+      )}
       <input required minLength={2} placeholder={t('customers.name')} className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <input required type="tel" placeholder={t('customers.phone')} className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
       <input type="email" placeholder={`${t('customers.email')} (${t('common.optional')})`} className="input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+      {promo?.coupons && promo.totalCents > 0 && (
+        coupon ? (
+          <p className="flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900" data-testid="coupon-applied">
+            <span>🏷️ {coupon.code}: −{money(off)} · <b>{money(promo.totalCents - off)}</b></span>
+            <button type="button" className="text-xs underline" onClick={() => { setCoupon(null); setCode(''); }}>{t('common.remove')}</button>
+          </p>
+        ) : (
+          <div>
+            <div className="flex gap-2">
+              <input className="input uppercase" placeholder={t('promos.couponPlaceholder')} aria-label={t('promos.coupon')} value={code} onChange={(e) => setCode(e.target.value)} />
+              <button type="button" className="btn-secondary shrink-0" disabled={code.trim().length < 3 || check.isPending} onClick={() => check.mutate()}>{t('promos.apply')}</button>
+            </div>
+            <ErrorText error={check.error} ns="promos" />
+          </div>
+        )
+      )}
       <button className="btn-primary w-full" disabled={pending}>{cta}</button>
       <ErrorText error={error} ns="booking" />
     </form>
@@ -475,6 +514,7 @@ function BookingFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
           pending={pending}
           error={error}
           cta={t(`kinds.${kind}.confirm`)}
+          promo={{ slug: business.slug, totalCents: total, coupons: business.promos.coupons, reward: business.promos.reward }}
           summary={
             <p className="rounded-lg bg-slate-50 p-3 text-sm">
               {[
@@ -627,6 +667,11 @@ function Success({ business, result, onAnother }: { business: PublicBusinessDto;
       <p className="mt-2 text-slate-600">{detail}</p>
       {result.priceCents > 0 && (
         <p className="mt-1 text-sm text-slate-500">{t('booking.total')}: {money(result.priceCents)}</p>
+      )}
+      {result.discountCents > 0 && (
+        <p className="mt-1 text-sm font-medium text-emerald-700" data-testid="booking-discount">
+          {result.discountReason === 'reward' ? '🎁 ' + t('promos.rewardApplied') : '🏷️ ' + t('promos.couponApplied')}: −{money(result.discountCents)}
+        </p>
       )}
       {result.deposit && <DepositBox deposit={result.deposit} />}
       <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-sm">

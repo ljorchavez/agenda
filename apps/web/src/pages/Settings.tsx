@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageLookSection } from '../components/PageLook';
+import { CouponsSection, RewardsSection } from '../components/Promotions';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -10,7 +11,9 @@ import {
   isValidClabe,
   kindConfig,
   paymentSettingsOf,
+  couponsEnabled,
   pageSettingsOf,
+  rewardSettingsOf,
   rentalSettingsOf,
   reservationSettingsOf,
   selfServiceOf,
@@ -196,6 +199,7 @@ function BusinessSettings() {
     { id: 'business', label: t('settings.tabs.business') },
     { id: 'booking', label: t('settings.tabs.booking') },
     { id: 'payments', label: t('settings.tabs.payments') },
+    ...(businessManager ? [{ id: 'promos', label: t('settings.tabs.promos') }] : []),
     ...(businessManager ? [{ id: 'locations', label: t('settings.tabs.locations') }] : []),
     { id: 'users', label: t('settings.tabs.users') },
     ...(businessManager ? [{ id: 'plan', label: t('settings.tabs.plan') }] : []),
@@ -203,7 +207,7 @@ function BusinessSettings() {
   ];
   const tab = tabs.some((x) => x.id === params.get('tab')) ? params.get('tab')! : 'business';
   // Tabs that share one "Guardar" (business data, booking rules, payments)
-  const saveBar = canEdit && ['business', 'booking', 'payments'].includes(tab) && (
+  const saveBar = canEdit && ['business', 'booking', 'payments', 'promos'].includes(tab) && (
     <div className="flex items-center gap-3">
       <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
       {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
@@ -392,6 +396,16 @@ function BusinessSettings() {
           disabled={!isOwner}
           onChange={(p) => setSettings((s) => ({ ...s, payments: p }))}
         />
+          </div>
+          {saveBar}
+        </div>
+      )}
+
+      {tab === 'promos' && (
+        <div className="space-y-6">
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <RewardsSection value={rewardSettingsOf(settings)} onChange={(r) => setSettings((s) => ({ ...s, rewards: r }))} disabled={!canEdit} />
+            <CouponsSection enabled={couponsEnabled(settings)} onToggle={(on) => setSettings((s) => ({ ...s, coupons: { enabled: on } }))} disabled={!canEdit} />
           </div>
           {saveBar}
         </div>

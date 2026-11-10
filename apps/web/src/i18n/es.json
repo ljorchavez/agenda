@@ -17,7 +17,8 @@
     "saved": "Guardado",
     "copy": "Copiar",
     "copied": "¡Copiado!",
-    "saving": "Guardando…"
+    "saving": "Guardando…",
+    "remove": "Quitar"
   },
   "nav": {
     "dashboard": "Inicio",
@@ -378,7 +379,8 @@
       "locations": "Sucursales",
       "users": "Usuarios",
       "plan": "Plan",
-      "account": "Mi cuenta"
+      "account": "Mi cuenta",
+      "promos": "Promociones"
     }
   },
   "booking": {
@@ -721,7 +723,11 @@
     "unsupported_image": "Usa una foto JPG, PNG o WebP.",
     "image_too_large": "La foto pesa más de 2 MB.",
     "uploads_not_configured": "La subida de fotos aún no está configurada.",
-    "online_method_manual": "Los pagos con Mercado Pago se registran solos cuando llega el dinero."
+    "online_method_manual": "Los pagos con Mercado Pago se registran solos cuando llega el dinero.",
+    "coupon_invalid": "Ese cupón no existe o está pausado.",
+    "coupon_expired": "Ese cupón ya venció.",
+    "coupon_used_up": "Ese cupón ya se usó todas las veces permitidas.",
+    "coupon_exists": "Ya tienes un cupón con ese código."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -1009,5 +1015,39 @@
     "notice": "Aviso destacado",
     "noticePlaceholder": "Ej. Cerramos el 24 de diciembre",
     "photo": "Foto"
+  },
+  "promos": {
+    "rewardsTitle": "Recompensas por visitas",
+    "rewardsHelp": "Premia a tus clientes frecuentes: después de cierto número de visitas, su siguiente reserva lleva descuento.",
+    "everyVisits": "Cada cuántas visitas",
+    "discount": "Descuento",
+    "value": "Cantidad",
+    "rewardExample": "Después de {{count}} visitas, la visita {{next}} tiene {{off}} de descuento. Se aplica solo al reservar.",
+    "couponsTitle": "Cupones de descuento",
+    "couponsHelp": "Códigos que compartes en redes o con clientes; se escriben al reservar.",
+    "code": "Código",
+    "maxUses": "Usos máximos",
+    "validUntil": "Válido hasta (opcional)",
+    "newCoupon": "Nuevo cupón",
+    "uses_one": "{{count}} uso",
+    "uses_other": "{{count}} usos",
+    "until": "hasta {{date}}",
+    "pause": "Pausar",
+    "resume": "Activar",
+    "deleteConfirm": "¿Borrar el cupón {{code}}? Las reservas que ya lo usaron conservan su descuento.",
+    "coupon": "Cupón",
+    "couponPlaceholder": "¿Tienes un cupón?",
+    "apply": "Aplicar",
+    "couponApplied": "Cupón",
+    "rewardApplied": "Recompensa por visitas",
+    "rewardEarned_one": "Recompensa: ya lleva {{count}} visita",
+    "rewardEarned_other": "Recompensa: ya lleva {{count}} visitas",
+    "rewardProgress": "Lleva {{done}} de {{every}} visitas para su recompensa",
+    "rewardPublic_one": "Cada visita, tu siguiente reserva lleva {{off}} de descuento.",
+    "rewardPublic_other": "Clientes frecuentes: después de {{count}} visitas, tu siguiente reserva lleva {{off}} de descuento.",
+    "coupon_invalid": "Ese cupón no existe o no está activo.",
+    "coupon_expired": "Ese cupón ya venció.",
+    "coupon_used_up": "Ese cupón ya no tiene usos disponibles.",
+    "coupon_exists": "Ya tienes un cupón con ese código."
   }
 }

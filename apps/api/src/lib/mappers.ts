@@ -151,6 +151,9 @@ export type AppointmentRow = {
   resource_color: string | null;
   class_session_id: string | null;
   location_id: string;
+  discount_cents?: number | string | null;
+  discount_reason?: 'reward' | 'coupon' | null;
+  coupon_code?: string | null;
 };
 
 /** text[] from node-pg (already an array) or its raw '{a,b}' form. */
@@ -185,5 +188,8 @@ export function toAppointmentDto(r: AppointmentRow): AppointmentDto {
     resourceColor: r.resource_color,
     classSessionId: r.class_session_id,
     locationId: r.location_id,
+    discountCents: Number(r.discount_cents ?? 0),
+    discountReason: r.discount_reason ?? null,
+    couponCode: r.coupon_code ?? null,
   };
 }

@@ -20,6 +20,16 @@ import { hasOverlap, queryAppointments } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { activeResources, assertNotBlocked, assignResource, defaultService, findResource } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
+import { resolveDiscount } from '../lib/discounts.js';
+import { DateTime } from 'luxon';
+import { z } from 'zod';
+
+const discountPreviewSchema = z.object({
+  customerId: z.string().uuid().nullable().optional(),
+  couponCode: z.string().trim().max(30).optional(),
+  priceCents: z.number().int().min(0),
+});
+const todayIn = (tz: string) => DateTime.now().setZone(tz).toISODate()!;
 import { assertLocation, forbiddenScope, getScope, inScope, scopeSql } from '../lib/access.js';
 import { locationForWrite } from '../lib/locations.js';
 import { assertCanAddBooking } from '../lib/plan.js';
@@ -164,6 +174,20 @@ appointmentRoutes.post('/appointments/check', async (c) => {
   return c.json(out);
 });
 
+/** What a booking would get off (reward every N visits or a coupon), before saving it. */
+appointmentRoutes.post('/appointments/discount', async (c) => {
+  const body = discountPreviewSchema.parse(await c.req.json());
+  const db = getDb();
+  const { tenant } = await tenantKind(db, c.get('tenantId'));
+  if (body.customerId) {
+    const cu = await db.query.customers.findFirst({ where: and(eq(customers.id, body.customerId), eq(customers.tenantId, tenant.id)) });
+    if (!cu) throw notFound('customer');
+  }
+  const d = await resolveDiscount(db, tenant, { customerId: body.customerId ?? null, couponCode: body.couponCode, priceCents: body.priceCents, today: todayIn(tenant.timezone), soft: true });
+  const { couponId: _omit, ...out } = d;
+  return c.json(out);
+});
+
 appointmentRoutes.post('/appointments', async (c) => {
   const input = appointmentCreateSchema.parse(await c.req.json());
   const tenantId = c.get('tenantId');
@@ -251,6 +275,8 @@ appointmentRoutes.post('/appointments', async (c) => {
       locationId: locationId!,
       staffUserId: input.staffUserId ?? null,
     });
+    const fullPrice = input.priceCents ?? bookingPriceCents(resource, svc.priceCents, durationMin);
+    const discount = await resolveDiscount(tx, tenant, { customerId: customer.id, couponCode: input.couponCode, priceCents: fullPrice, today: todayIn(tenant.timezone) });
     const [inserted] = await tx
       .insert(appointments)
       .values({
@@ -261,7 +287,10 @@ appointmentRoutes.post('/appointments', async (c) => {
         startsAt,
         endsAt,
         partySize,
-        priceCents: input.priceCents ?? bookingPriceCents(resource, svc.priceCents, durationMin),
+        priceCents: fullPrice - discount.discountCents,
+        discountCents: discount.discountCents,
+        discountReason: discount.reason,
+        couponId: discount.couponId,
       })
       .returning({ id: appointments.id });
     return inserted!;

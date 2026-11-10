@@ -5,6 +5,8 @@ import { addDays, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
 import {
   bookingPriceCents,
   computeDepositCents,
+  couponsEnabled,
+  rewardSettingsOf,
   eligibleResources,
   intervalsOnWeekday,
   kindConfig,
@@ -17,6 +19,7 @@ import {
   type BusinessHours,
   type ClassSessionDto,
   type CustomerDto,
+  type DiscountPreviewDto,
   type PaymentDto,
   type ResourceDto,
   type TimeBlockDto,
@@ -621,6 +624,9 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const [allowOverlap, setAllowOverlap] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const couponsOn = couponsEnabled(tenant!.settings);
+  const rewardsOn = rewardSettingsOf(tenant!.settings).enabled;
 
   const active = (services.data ?? []).filter((s) => s.active);
   const svc = active.find((s) => s.id === serviceId);
@@ -659,6 +665,20 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
   const taken = check.data && !check.data.free && JSON.stringify(debouncedCheck) === checkKey ? check.data : null;
   useEffect(() => setAllowOverlap(false), [checkKey]);
 
+  // Reward every N visits / coupon: shown before saving; the API applies the same rule.
+  const basePrice = price !== '' ? toCents(price) : suggested;
+  const [debouncedCode, setDebouncedCode] = useState('');
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedCode(couponCode.trim()), 400);
+    return () => window.clearTimeout(id);
+  }, [couponCode]);
+  const discount = useQuery({
+    queryKey: ['discount-preview', customerId, debouncedCode, basePrice],
+    queryFn: () => api<DiscountPreviewDto>('/appointments/discount', { method: 'POST', body: { customerId: customerId || null, couponCode: debouncedCode || undefined, priceCents: basePrice } }),
+    enabled: (rewardsOn && Boolean(customerId)) || (couponsOn && debouncedCode.length >= 3),
+  });
+  const d = discount.data;
+
   const create = useMutation({
     mutationFn: async () => {
       let cid = customerId;
@@ -679,6 +699,7 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
           priceCents: price !== '' ? toCents(price) : undefined,
           notes: notes || null,
           allowOverlap,
+          ...(couponsOn && couponCode.trim() && !d?.couponError ? { couponCode: couponCode.trim() } : {}),
           ...(cfg.partySize ? { partySize: Number(partySize) } : {}),
           ...(scoped ? { resourceId: ownResource } : atLoc.length ? { resourceId: resourceId || null } : {}),
           ...(!scoped && effectiveLoc ? { locationId: effectiveLoc } : {}),
@@ -832,12 +853,33 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
                 onChange={(e) => setPrice(e.target.value)}
               />
             </div>
+            {couponsOn && (
+              <div className="w-36">
+                <label className="label" htmlFor="na-coupon">{t('promos.coupon')}</label>
+                <input id="na-coupon" className="input uppercase" placeholder={t('common.optional')} value={couponCode} onChange={(e) => setCouponCode(e.target.value)} />
+              </div>
+            )}
             {!showNotes && (
               <button type="button" className="pb-2.5 text-sm font-medium text-brand-700 hover:underline" onClick={() => setShowNotes(true)}>
                 + {t('agenda.addNote')}
               </button>
             )}
           </div>
+          {d && (d.discountCents > 0 || d.couponError || d.reward) && (
+            <div className="space-y-1 text-sm" data-testid="discount-preview">
+              {d.discountCents > 0 ? (
+                <p className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-900">
+                  {d.reason === 'reward'
+                    ? `🎁 ${t('promos.rewardEarned', { count: d.reward?.visitsSince ?? 0 })}`
+                    : `🏷️ ${t('promos.couponApplied')} ${d.couponCode}`}
+                  : −{money(d.discountCents)} → <b>{money(basePrice - d.discountCents)}</b>
+                </p>
+              ) : d.reward && !d.reward.eligible && customerId ? (
+                <p className="text-xs text-slate-500">🎁 {t('promos.rewardProgress', { done: d.reward.visitsSince, every: d.reward.everyVisits })}</p>
+              ) : null}
+              {d.couponError && <p className="text-xs text-rose-700">{t(`errors.${d.couponError}`)}</p>}
+            </div>
+          )}
           {showNotes && (
             <textarea id="na-notes" className="input" rows={2} autoFocus placeholder={t('agenda.notesPlaceholder')} aria-label={t('agenda.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} />
           )}
@@ -1116,6 +1158,11 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <div><div className="text-slate-500">{t('agenda.paid')}</div><div className="font-semibold text-emerald-700">{money(cur.paidCents)}</div></div>
             <div><div className="text-slate-500">{t('agenda.outstanding')}</div><div className="font-semibold text-amber-700">{money(outstanding)}</div></div>
           </div>
+          {cur.discountCents > 0 && (
+            <p className="mt-2 text-center text-xs text-emerald-800" data-testid="appt-discount">
+              {cur.discountReason === 'reward' ? `🎁 ${t('promos.rewardApplied')}` : `🏷️ ${t('promos.couponApplied')}${cur.couponCode ? ` ${cur.couponCode}` : ''}`}: −{money(cur.discountCents)}
+            </p>
+          )}
           {editing === 'pay' ? (
             <form
               className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-slate-200 pt-3"

@@ -17,7 +17,8 @@
     "saved": "Saved",
     "copy": "Copy",
     "copied": "Copied!",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "remove": "Remove"
   },
   "nav": {
     "dashboard": "Home",
@@ -378,7 +379,8 @@
       "locations": "Locations",
       "users": "Users",
       "plan": "Plan",
-      "account": "My account"
+      "account": "My account",
+      "promos": "Promotions"
     }
   },
   "booking": {
@@ -721,7 +723,11 @@
     "unsupported_image": "Use a JPG, PNG or WebP picture.",
     "image_too_large": "The picture is larger than 2 MB.",
     "uploads_not_configured": "Photo uploads aren't set up yet.",
-    "online_method_manual": "Mercado Pago payments are recorded automatically when the money arrives."
+    "online_method_manual": "Mercado Pago payments are recorded automatically when the money arrives.",
+    "coupon_invalid": "That coupon does not exist or is paused.",
+    "coupon_expired": "That coupon has expired.",
+    "coupon_used_up": "That coupon has no uses left.",
+    "coupon_exists": "You already have a coupon with that code."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -1009,5 +1015,39 @@
     "notice": "Highlighted notice",
     "noticePlaceholder": "E.g. Closed on December 24",
     "photo": "Photo"
+  },
+  "promos": {
+    "rewardsTitle": "Visit rewards",
+    "rewardsHelp": "Reward regulars: after a number of visits, their next booking gets a discount.",
+    "everyVisits": "Every how many visits",
+    "discount": "Discount",
+    "value": "Amount",
+    "rewardExample": "After {{count}} visits, visit {{next}} gets {{off}} off. Applied automatically when booking.",
+    "couponsTitle": "Discount coupons",
+    "couponsHelp": "Codes you share on social media or with customers; typed when booking.",
+    "code": "Code",
+    "maxUses": "Max uses",
+    "validUntil": "Valid until (optional)",
+    "newCoupon": "New coupon",
+    "uses_one": "{{count}} use",
+    "uses_other": "{{count}} uses",
+    "until": "until {{date}}",
+    "pause": "Pause",
+    "resume": "Activate",
+    "deleteConfirm": "Delete coupon {{code}}? Bookings that used it keep their discount.",
+    "coupon": "Coupon",
+    "couponPlaceholder": "Have a coupon?",
+    "apply": "Apply",
+    "couponApplied": "Coupon",
+    "rewardApplied": "Visit reward",
+    "rewardEarned_one": "Reward: {{count}} visit so far",
+    "rewardEarned_other": "Reward: {{count}} visits so far",
+    "rewardProgress": "{{done}} of {{every}} visits towards their reward",
+    "rewardPublic_one": "Every visit, your next booking gets {{off}} off.",
+    "rewardPublic_other": "Regulars: after {{count}} visits, your next booking gets {{off}} off.",
+    "coupon_invalid": "That coupon does not exist or is not active.",
+    "coupon_expired": "That coupon has expired.",
+    "coupon_used_up": "That coupon has no uses left.",
+    "coupon_exists": "You already have a coupon with that code."
   }
 }

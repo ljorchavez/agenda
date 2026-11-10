@@ -1115,4 +1115,63 @@ d('API (integration)', () => {
     const other = (await call('POST', '/auth/register', { businessName: 'Otro Cobros', businessType: 'spa', name: 'Otro', email: 'otro-cobros@test.mx', password: 'password123' })).body;
     expect((await call('GET', `/collections?${range}&all=1`, undefined, other.token)).body).toHaveLength(0);
   });
+
+  it('promotions: reward every N visits, coupons, availability check', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Promos Prueba', businessType: 'barbershop', name: 'Dueño Promos', email: 'promos@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const cust = (await call('POST', '/customers', { name: 'Cliente Frecuente', phone: '5588880011' }, tok)).body;
+    const now = DateTime.now().setZone('America/Mexico_City');
+    const book = async (d: DateTime, extra: Record<string, unknown> = {}) =>
+      call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: d.toISO(), allowOverlap: true, ...extra }, tok);
+    // Two finished visits
+    for (const k of [10, 9]) {
+      const a = (await book(now.minus({ days: k }).set({ hour: 10, minute: 0 }))).body;
+      await call('PATCH', `/appointments/${a.id}`, { status: 'completed' }, tok);
+    }
+    // Off by default: no discount
+    expect((await book(now.plus({ days: 1 }).set({ hour: 10, minute: 0 }))).body.discountCents).toBe(0);
+
+    const me = (await call('GET', '/auth/me', undefined, tok)).body;
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, rewards: { enabled: true, everyVisits: 2, discountType: 'percent', value: 10 }, coupons: { enabled: true } } }, tok);
+    const preview = (await call('POST', '/appointments/discount', { customerId: cust.id, priceCents: 20000 }, tok)).body;
+    expect(preview).toMatchObject({ discountCents: 2000, reason: 'reward', reward: { visitsSince: 2, eligible: true } });
+    const rewarded = (await book(now.plus({ days: 2 }).set({ hour: 10, minute: 0 }))).body;
+    expect(rewarded).toMatchObject({ priceCents: 18000, discountCents: 2000, discountReason: 'reward' });
+    // Not given twice while it's waiting on an upcoming booking
+    expect((await book(now.plus({ days: 3 }).set({ hour: 10, minute: 0 }))).body.discountCents).toBe(0);
+
+    // Coupons: the better discount wins, uses are counted, bad codes are refused
+    const coupon = await call('POST', '/coupons', { code: 'verano50', discountType: 'amount', value: 5000, maxUses: 1 }, tok);
+    expect(coupon.status).toBe(201);
+    expect(coupon.body.code).toBe('VERANO50');
+    expect((await call('POST', '/coupons', { code: 'VERANO50', discountType: 'percent', value: 5 }, tok)).status).toBe(409);
+    const withCoupon = (await book(now.plus({ days: 4 }).set({ hour: 10, minute: 0 }), { couponCode: 'Verano50' })).body;
+    expect(withCoupon).toMatchObject({ priceCents: 15000, discountCents: 5000, discountReason: 'coupon', couponCode: 'VERANO50' });
+    expect((await book(now.plus({ days: 5 }).set({ hour: 10, minute: 0 }), { couponCode: 'VERANO50' })).status).toBe(422); // used up
+    expect((await book(now.plus({ days: 5 }).set({ hour: 10, minute: 0 }), { couponCode: 'NOEXISTE' })).body.code).toBe('coupon_invalid');
+    const list = (await call('GET', '/coupons', undefined, tok)).body;
+    expect(list[0].uses).toBe(1);
+    const soft = (await call('POST', '/appointments/discount', { couponCode: 'NOEXISTE', priceCents: 20000 }, tok)).body;
+    expect(soft.couponError).toBe('coupon_invalid');
+
+    // Public page shows the promos and checks codes
+    const slug = me.tenant.slug;
+    const pub = (await call('GET', `/public/${slug}`)).body;
+    expect(pub.promos).toMatchObject({ coupons: true, reward: { everyVisits: 2 } });
+    await call('PUT', `/coupons/${coupon.body.id}`, { code: 'VERANO50', discountType: 'amount', value: 5000, maxUses: null }, tok);
+    expect((await call('GET', `/public/${slug}/coupons/verano50`)).body).toMatchObject({ code: 'VERANO50', value: 5000 });
+    expect((await call('GET', `/public/${slug}/coupons/nada`)).status).toBe(422);
+
+    // Availability check before saving: a taken time answers with nearby free times
+    const at = now.plus({ days: 6 }).set({ hour: 11, minute: 0 });
+    await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: at.toISO() }, tok);
+    const free = (await call('POST', '/appointments/check', { serviceId: svc.id, startsAt: at.plus({ hours: 2 }).toISO() }, tok)).body;
+    expect(free.free).toBe(true);
+    const taken = (await call('POST', '/appointments/check', { serviceId: svc.id, startsAt: at.toISO() }, tok)).body;
+    expect(taken.free).toBe(false);
+    expect(taken.times.length).toBeGreaterThan(0);
+  });
 });

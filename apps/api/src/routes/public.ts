@@ -2,7 +2,9 @@ import { Hono } from 'hono';
 import { and, asc, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
+  couponsEnabled,
   pageSettingsOf,
+  rewardSettingsOf,
   bookingPriceCents,
   businessKind,
   computeDepositCents,
@@ -22,6 +24,7 @@ import {
 import { getDb, type Db } from '../db/client.js';
 import { appointments, customers, services, tenants, type Appointment, type Customer, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
+import { findUsableCoupon, resolveDiscount } from '../lib/discounts.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
 import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
 import { activeResources, assignResource, closedRanges, defaultService, locationBlocks, pickResource, resourceBusy, type Need } from '../lib/resources.js';
@@ -97,8 +100,19 @@ publicRoutes.get('/public/:slug', async (c) => {
     rentalDurations: cfg.durations ? rentalSettingsOf(tenant.settings).durations : null,
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
     page: pageSettingsOf(tenant.settings),
+    promos: (() => {
+      const r = rewardSettingsOf(tenant.settings);
+      return { coupons: couponsEnabled(tenant.settings), reward: r.enabled ? { everyVisits: r.everyVisits, discountType: r.discountType, value: r.value } : null };
+    })(),
   };
   return c.json(body);
+});
+
+/** Checks a coupon code on the booking page: what it takes off, or why it can't be used. */
+publicRoutes.get('/public/:slug/coupons/:code', async (c) => {
+  const tenant = await getTenantBySlug(c.req.param('slug'));
+  const coupon = await findUsableCoupon(getDb(), tenant.id, tenant.settings, c.req.param('code'), DateTime.now().setZone(tenant.timezone).toISODate()!);
+  return c.json({ code: coupon.code, discountType: coupon.discountType, value: coupon.value });
 });
 
 /**
@@ -322,6 +336,8 @@ function result(tenant: Tenant, appt: Appointment, serviceName: string, resource
     partySize: appt.partySize,
     resourceName,
     priceCents: appt.priceCents,
+    discountCents: appt.discountCents,
+    discountReason: appt.discountReason ?? null,
     managePath: `/c/${manageToken(appt.id)}`,
     deposit: null,
   };
@@ -446,6 +462,13 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
     }
     await assertCanAddBooking(tx, tenant.id);
     const customer = await findOrCreateCustomer(tx, tenant.id, input);
+    const fullPrice = bookingPriceCents(resource, service.priceCents, durationMin);
+    const discount = await resolveDiscount(tx, tenant, {
+      customerId: customer.id,
+      couponCode: input.couponCode,
+      priceCents: fullPrice,
+      today: DateTime.now().setZone(tenant.timezone).toISODate()!,
+    });
     const [row] = await tx
       .insert(appointments)
       .values({
@@ -457,7 +480,10 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
         startsAt,
         endsAt,
         partySize,
-        priceCents: bookingPriceCents(resource, service.priceCents, durationMin),
+        priceCents: fullPrice - discount.discountCents,
+        discountCents: discount.discountCents,
+        discountReason: discount.reason,
+        couponId: discount.couponId,
         source: 'online',
         notes: input.notes ?? null,
       })

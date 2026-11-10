@@ -10,7 +10,7 @@ import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { getDb } from './client.js';
-import { appointments, classSessions, customers, locations, memberships, payments, resources, services, tenants, users } from './schema.js';
+import { appointments, classSessions, coupons, customers, locations, memberships, payments, resources, services, tenants, users } from './schema.js';
 
 const TZ = 'America/Mexico_City';
 
@@ -220,7 +220,23 @@ async function seedPageLooks() {
   };
   for (const [slug, page] of Object.entries(looks)) {
     const t = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
-    if (t) await db.update(tenants).set({ settings: { ...t.settings, page: { gallery: [], ...page } } }).where(eq(tenants.id, t.id));
+    if (!t) continue;
+    // Promotions on: a reward every 5 visits and two coupons to try
+    await db
+      .update(tenants)
+      .set({
+        settings: {
+          ...t.settings,
+          page: { gallery: [], ...page },
+          rewards: { enabled: true, everyVisits: 5, discountType: 'percent', value: 10 },
+          coupons: { enabled: true },
+        },
+      })
+      .where(eq(tenants.id, t.id));
+    await db.insert(coupons).values([
+      { tenantId: t.id, code: 'BIENVENIDA', discountType: 'percent', value: 15 },
+      { tenantId: t.id, code: 'AMIGO50', discountType: 'amount', value: 5000, maxUses: 100 },
+    ]);
   }
 }
 
