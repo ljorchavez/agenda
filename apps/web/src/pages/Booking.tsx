@@ -634,6 +634,7 @@ function ClassesFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
           pending={pending}
           error={error}
           cta={t(`kinds.${business.kind}.confirm`)}
+          promo={{ slug: business.slug, totalCents: chosen.priceCents * spots, coupons: business.promos.coupons, reward: business.promos.reward }}
           summary={chosen.priceCents > 0 && <p className="rounded-lg bg-slate-50 p-3 text-sm">{t('booking.total')}: <b>{money(chosen.priceCents * spots)}</b></p>}
           onSubmit={(f) => onBook({ classSessionId: chosen.id, spots, ...f })}
         />

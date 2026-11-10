@@ -802,6 +802,7 @@ export const publicClassBookingSchema = z.object({
   phone: phoneSchema,
   email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
   notes: z.string().max(1000).optional(),
+  couponCode: z.string().trim().max(30).optional(),
 });
 export type PublicClassBookingInput = z.infer<typeof publicClassBookingSchema>;
 

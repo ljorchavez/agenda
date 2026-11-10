@@ -255,7 +255,11 @@ appointmentRoutes.post('/appointments', async (c) => {
           startsAt: session.startsAt,
           endsAt: session.endsAt,
           partySize: spots,
-          priceCents: input.priceCents ?? (svc?.priceCents ?? 0) * spots,
+          ...(await (async () => {
+            const full = input.priceCents ?? (svc?.priceCents ?? 0) * spots;
+            const d = await resolveDiscount(tx, tenant, { customerId: customer.id, couponCode: input.couponCode, priceCents: full, today: todayIn(tenant.timezone) });
+            return { priceCents: full - d.discountCents, discountCents: d.discountCents, discountReason: d.reason, couponId: d.couponId };
+          })()),
           locationId: session.locationId,
         })
         .returning({ id: appointments.id });

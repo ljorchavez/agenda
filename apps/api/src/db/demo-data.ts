@@ -215,7 +215,7 @@ async function seedPageLooks() {
     'barberia-demo': { instagram: '@barberiademo', tiktok: '@barberiademo', notice: 'Martes de 2x1 en corte niño' },
     'padel-demo': { instagram: '@padelclubdemo', facebook: 'padelclubdemo', notice: 'Torneo relámpago el sábado: inscríbete en recepción' },
     'medico-demo': { facebook: 'consultoriodemo', notice: 'Trae tus estudios previos a tu primera consulta' },
-    'yoga-demo': { instagram: '@yogademo' },
+    'yoga-demo': { instagram: '@yogademo', notice: 'Primera clase con 15% usando el cupón BIENVENIDA' },
     'restaurante-demo': { instagram: '@restaurantedemo', notice: 'Grupos de 6 o más: menú especial con anticipo' },
     'nutricion-demo': { instagram: '@nutriciondemo', notice: 'Primera consulta con 15% usando el cupón BIENVENIDA' },
   };
@@ -258,7 +258,7 @@ async function discountExamples(tenantId: string, welcomeId: string, friendId: s
       select id, price_cents,
              row_number() over (order by starts_at) as n
       from appointments
-      where tenant_id = ${tenantId} and price_cents >= 10000 and class_session_id is null and status <> 'cancelled'
+      where tenant_id = ${tenantId} and price_cents >= 5000 and status <> 'cancelled'
     ), chosen as (
       select id, price_cents,
              case when n % 13 = 0 then 'reward' when n % 17 = 0 then 'welcome' when n % 29 = 0 then 'friend' end as kind

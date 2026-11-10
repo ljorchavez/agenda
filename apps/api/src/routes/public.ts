@@ -411,7 +411,11 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         startsAt: session.startsAt,
         endsAt: session.endsAt,
         partySize: input.spots,
-        priceCents: service.priceCents * input.spots,
+        ...(await (async () => {
+          const full = service.priceCents * input.spots;
+          const d = await resolveDiscount(tx, tenant, { customerId: customer.id, couponCode: input.couponCode, priceCents: full, today: DateTime.now().setZone(tenant.timezone).toISODate()! });
+          return { priceCents: full - d.discountCents, discountCents: d.discountCents, discountReason: d.reason, couponId: d.couponId };
+        })()),
         locationId: session.locationId,
         source: 'online',
         notes: input.notes ?? null,
