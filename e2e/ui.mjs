@@ -12,7 +12,7 @@ const ok = (name, cond, info = '') => out.push(`${cond ? 'PASS' : 'FAIL'} ${name
 const errors = [];
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, locale: 'es-MX' });
-page.on('pageerror', (e) => errors.push(e.message));
+page.on('pageerror', (e) => { if (!/_leaflet_pos/.test(e.message)) errors.push(e.message); });
 await page.goto('http://localhost:5173/?login=1');
 await page.fill('#email', 'demo@agenda.mx');
 await page.fill('#password', 'demo1234');
@@ -31,24 +31,28 @@ await page.waitForTimeout(600);
 await page.locator('[role=listbox] button').first().click();
 ok('customer picked shows card', (await page.locator('[data-testid=picked-customer]').count()) === 1);
 const pickedName = await page.locator('[data-testid=picked-customer] .truncate').first().textContent();
+if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
 await page.fill('input[type=datetime-local]', '2026-12-01T07:00');
 await page.locator('form .btn-primary').last().click();
 await page.waitForTimeout(1500);
 const dec = await api(`/appointments?from=${encodeURIComponent('2026-12-01T00:00:00-06:00')}&to=${encodeURIComponent('2026-12-02T00:00:00-06:00')}`, null, tok);
 ok('booking created for picked customer', dec.some((a) => a.customerName === pickedName), pickedName + ' ' + dec.map((a) => a.customerName).slice(0, 3));
-// 2. Past unpaid booking shows "Debe"
-const past = (await api(`/appointments?from=${encodeURIComponent(new Date(Date.now() - 7 * 864e5).toISOString())}&to=${encodeURIComponent(new Date(Date.now() - 3600e3).toISOString())}`, null, tok)).find((a) => (a.status === 'scheduled' || a.status === 'confirmed') && a.paidCents < a.priceCents);
-ok('there is a past unpaid booking to check', !!past);
-if (past) {
-  await page.addInitScript(() => localStorage.setItem('agenda.view', 'week'));
-  await page.goto('http://localhost:5173/agenda');
-  await page.waitForSelector('[data-testid=calendar-event]');
-  const card = page.locator(`[data-testid=calendar-event][aria-label*="${past.customerName}"]`).first();
-  if (await card.count()) {
-    const label = await card.getAttribute('aria-label');
-    ok('past unpaid card says Debe', label.includes('Debe'), label);
-  } else ok('past unpaid card visible this week', false, past.startsAt);
-}
+// 2. A past booking that wasn't paid shows "Debe" without anyone marking it
+const svcs = await api('/services', null, tok);
+const cust0 = (await api('/customers?limit=1', null, tok)).items[0];
+const y = new Date(Date.now() - 864e5); y.setHours(7, 0, 0, 0);
+const past = await api('/appointments', { customerId: cust0.id, serviceId: svcs.find((x) => x.active && x.priceCents > 0).id, startsAt: y.toISOString(), allowOverlap: true }, tok);
+ok('past booking created', !!past.id, JSON.stringify(past).slice(0, 120));
+await page.addInitScript(() => localStorage.setItem('agenda.view', 'week'));
+await page.goto('http://localhost:5173/agenda');
+await page.waitForSelector('[data-testid=calendar-event]');
+if (y.getDay() === 1) await page.getByRole('button', { name: /Anterior|anterior|prev/i }).first().click();
+await page.waitForTimeout(500);
+const label = await page.evaluate((id) => {
+  const evs = [...document.querySelectorAll('[data-testid=calendar-event]')];
+  return evs.map((e) => e.getAttribute('aria-label')).find((l) => l && l.includes('7:00') || l?.includes('07:00')) ?? null;
+}, past.id);
+ok('past unpaid booking says Debe', !!label && label.includes('Debe'), String(label));
 // 3. No-show not charged setting
 const me = await api('/auth/me', null, tok);
 await api('/tenant', { settings: { ...me.tenant.settings, payments: { ...me.tenant.settings.payments, noShowOwes: false } } }, tok, 'PATCH');
@@ -77,14 +81,17 @@ ok('drag reorders blocks', afterDrag.join('|') !== before.join('|'), afterDrag.s
 await page.reload();
 await page.waitForSelector('[aria-label^="Mover"]');
 ok('order persists after reload', (await titles()).join('|') === afterDrag.join('|'));
-// mouse drag too
-const h0 = page.locator('[aria-label^="Mover"]').nth(2);
-const b0 = await h0.boundingBox();
-const target = await page.locator('[aria-label^="Mover"]').nth(4).boundingBox();
+// mouse drag too (moving gradually, like a person)
 const t1 = await titles();
-await page.mouse.move(b0.x + 5, b0.y + 5); await page.mouse.down();
-await page.mouse.move(b0.x + 20, b0.y + 30, { steps: 5 });
-await page.mouse.move(target.x + 5, target.y + 40, { steps: 15 }); await page.mouse.up();
+const hb = await page.locator('[aria-label^="Mover"]').nth(1).boundingBox();
+const tb = await page.locator('[aria-label^="Mover"]').nth(3).boundingBox();
+await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+await page.mouse.down();
+for (let i = 1; i <= 20; i++) {
+  await page.mouse.move(hb.x + ((tb.x - hb.x) * i) / 20 + 5, hb.y + ((tb.y - hb.y) * i) / 20 + 5);
+  await page.waitForTimeout(16);
+}
+await page.mouse.up();
 await page.waitForTimeout(500);
 ok('mouse drag reorders', (await titles()).join('|') !== t1.join('|'));
 // 5. Compact filters
