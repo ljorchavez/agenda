@@ -88,7 +88,7 @@ await page.mouse.move(target.x + 5, target.y + 40, { steps: 15 }); await page.mo
 await page.waitForTimeout(500);
 ok('mouse drag reorders', (await titles()).join('|') !== t1.join('|'));
 // 5. Compact filters
-const filterBtn = page.getByRole('button', { name: /^⚲\s*Filtros/ });
+const filterBtn = page.getByRole('button', { name: /^Filtros/ });
 ok('filters collapsed by default', (await page.locator('select[aria-label="Servicio"]').count()) === 0);
 await filterBtn.click();
 ok('filters open on click', (await page.locator('select[aria-label="Servicio"]').count()) === 1);
