@@ -25,7 +25,7 @@ const at = (h) => { const d = new Date(day); d.setHours(h, 0, 0, 0); return d.to
 await api('/time-blocks', { resourceId: res[0].id, startsAt: at(14), endsAt: at(16), reason: 'Comida' }, tok);
 const browser = await chromium.launch();
 const shot = async (name, w, h, fn) => {
-  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1, locale: 'es-MX' });
   await page.addInitScript((t) => { localStorage.setItem('agenda.token', t); }, tok);
   await fn(page);
   await page.waitForTimeout(800);
