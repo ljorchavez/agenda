@@ -46,7 +46,6 @@ ok('past booking created', !!past.id, JSON.stringify(past).slice(0, 120));
 await page.addInitScript(() => localStorage.setItem('agenda.view', 'week'));
 await page.goto('http://localhost:5173/agenda');
 await page.waitForSelector('[data-testid=calendar-event]');
-if (y.getDay() === 1) await page.getByRole('button', { name: /Anterior|anterior|prev/i }).first().click();
 await page.waitForTimeout(500);
 const label = await page.evaluate((name) => {
   const evs = [...document.querySelectorAll('[data-testid=calendar-event]')];
