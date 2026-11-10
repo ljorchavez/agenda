@@ -133,3 +133,22 @@ Necesario:
 - Nota y calificación interna 1–5 por cita; promedio por cliente.
 - Pendiente sugerido: que el cliente califique su visita con un enlace por WhatsApp.
 
+
+---
+
+## 9. Página pública personalizada (pendiente)
+Cada negocio ya tiene su página `/b/<slug>`. Agregar personalización sencilla, para todos los
+planes, guardada en la configuración del negocio (sin migración) y editable en Configuración →
+Negocio con vista previa:
+- Banner arriba y logo junto al nombre (también en el directorio).
+- Galería sencilla del lugar (4–8 fotos), para todos los planes.
+- Redes (Instagram, Facebook, TikTok) y botón de WhatsApp.
+- Aviso destacado opcional ("Cerramos el 24", "2x1 los martes").
+- Vista previa al compartir la liga en WhatsApp con su banner y nombre.
+- **Mismos colores de Agenda para todos** (sin color de marca ni plantillas).
+- Después: dominio propio por negocio (Premium).
+
+## 10. Precio con "Cualquiera disponible" (por decidir)
+Hoy se asigna el espacio libre con menos uso, sin ver el precio: quien ve "desde $450" puede
+caer en la Cancha Central de $550. Propuesta: dar el más barato libre (repartiendo entre los del
+mismo precio) y mostrar el precio final antes de confirmar si solo queda uno más caro.
