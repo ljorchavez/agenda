@@ -534,7 +534,7 @@ export function AgendaPage() {
           startMin={startMin}
           endMin={endMin}
           maxLanes={view === 'week' ? 2 : 3}
-          minColWidth={view === 'week' ? (small ? 112 : 176) : columns.length > 1 ? (small ? 156 : 184) : 220}
+          minColWidth={view === 'week' ? (small ? 112 : 150) : columns.length > 1 ? (small ? 156 : 184) : 220}
           pxPerHour={ZOOMS[zoom]!}
           compact={small}
           slotMinutes={tenant?.settings.hours.slotMinutes ?? 30}

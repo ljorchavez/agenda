@@ -74,6 +74,8 @@ interface Props {
 
 const MIN_EVENT_PX = 30;
 const CHIP_LANE_PX = 36;
+/** Narrowest card that still shows a readable name ("Jimena P.") and time */
+const MIN_CARD_PX = 112;
 
 const minutesOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
 
@@ -150,6 +152,18 @@ export function CalendarGrid(props: Props) {
   const height = ((endMin - startMin) / 60) * pxPerHour;
   const scroller = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
+  // Real column width decides how many bookings fit side by side, so cards never get too thin to read.
+  const [boxWidth, setBoxWidth] = useState(0);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([e]) => setBoxWidth(e!.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const colWidth = Math.max(minColWidth, columns.length ? (boxWidth - gutter) / columns.length : minColWidth);
+  const lanesThatFit = Math.max(1, Math.floor((colWidth - CHIP_LANE_PX) / MIN_CARD_PX));
+  const lanes = boxWidth ? Math.min(maxLanes, lanesThatFit) : maxLanes;
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(id);
@@ -221,7 +235,7 @@ export function CalendarGrid(props: Props) {
 
         {/* Day / resource columns */}
         {columns.map((col) => {
-          const placed = layoutEvents(col.events, maxLanes, pxPerMin, slotMinutes);
+          const placed = layoutEvents(col.events, lanes, pxPerMin, slotMinutes);
           const nowMin = minutesOfDay(now);
           return (
             <div
