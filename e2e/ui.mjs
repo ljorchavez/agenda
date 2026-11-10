@@ -240,7 +240,7 @@ const methodsBox = await page.getByText('Métodos de pago').boundingBox();
 ok('no-show in right column', !!noShowBox && !!methodsBox && noShowBox.x > methodsBox.x + 200, JSON.stringify([noShowBox?.x, methodsBox?.x]));
 // Promotions: settings tab, coupon in a new booking
 await page.goto('http://localhost:5173/settings?tab=promos');
-await page.getByTestId('coupons-section').waitFor();
+await page.getByTestId('coupons-section').filter({ hasText: 'BIENVENIDA' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('promotions tab shows rewards and coupons', (await page.getByTestId('rewards-section').isVisible()) && ((await page.getByTestId('coupons-section').textContent()) ?? '').includes('BIENVENIDA'));
 await page.goto('http://localhost:5173/agenda');
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
