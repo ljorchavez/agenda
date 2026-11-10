@@ -98,7 +98,22 @@ const filterBtn = page.getByRole('button', { name: /^Filtros/ });
 ok('filters collapsed by default', (await page.locator('select[aria-label="Servicio"]').count()) === 0);
 await filterBtn.click();
 ok('filters open on click', (await page.locator('select[aria-label="Servicio"]').count()) === 1);
+// Cobros: one row per booking with its state; tiles filter the list
 await page.goto('http://localhost:5173/payments');
+await page.waitForSelector('tbody tr');
+ok('Cobros in the menu', (await page.locator('nav a[href="/payments"]').first().textContent())?.includes('Cobros'));
+const allBookings = await page.locator('tbody tr').count();
+await page.getByRole('button', { name: /Debe\b/ }).first().click();
+await page.waitForTimeout(300);
+const owedRows = await page.locator('tbody tr').count();
+const owedBadges = await page.locator('tbody tr td:nth-child(3), tbody tr td:nth-child(4)').filter({ hasText: /Debe/ }).count();
+ok('owed tile filters bookings', owedRows > 0 && owedRows < allBookings && owedBadges >= owedRows, `${allBookings}->${owedRows} (${owedBadges})`);
+const recordBtn = page.getByRole('button', { name: 'Registrar pago' }).first();
+await recordBtn.click();
+ok('record payment only offers in-person methods', !(await page.locator('#rp-method option').allTextContents()).some((m) => /Mercado Pago/.test(m)));
+await page.keyboard.press('Escape');
+// Movements tab keeps the payment records
+await page.goto('http://localhost:5173/payments?tab=movements');
 await page.waitForSelector('tbody tr');
 const rowsAll = await page.locator('tbody tr').count();
 await page.getByRole('button', { name: /Filtros/ }).click();
