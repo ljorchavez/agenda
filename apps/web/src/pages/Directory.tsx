@@ -230,13 +230,15 @@ export function DirectoryPage() {
         ) : dir.isError ? (
           <p className="mt-6 text-rose-700">{t('common.error')}</p>
         ) : (
-          <div className="mt-4 grid gap-4 lg:grid-cols-5">
-            <section className={`lg:col-span-2 ${view === 'map' ? 'hidden lg:block' : ''}`} aria-label={t('directory.list')}>
-              <p className="mb-2 text-sm text-slate-500">{t('directory.results', { count: results.length })}</p>
+          <>
+          <p className="mt-4 text-sm text-slate-500">{t('directory.results', { count: results.length })}</p>
+          {/* List and map share the same height, so their tops and bottoms line up */}
+          <div className="mt-2 grid gap-4 lg:grid-cols-5">
+            <section className={`lg:col-span-2 lg:h-[calc(100vh-200px)] lg:min-h-[420px] ${view === 'map' ? 'hidden lg:block' : ''}`} aria-label={t('directory.list')}>
               {results.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">{t('directory.empty')}</div>
               ) : (
-                <ul className="space-y-3 lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto lg:pr-1">
+                <ul className="space-y-3 lg:h-full lg:overflow-y-auto lg:pr-1">
                   {results.map((e) => (
                     <li key={e.locationId}>
                       <article
@@ -293,18 +295,17 @@ export function DirectoryPage() {
               )}
             </section>
             <section className={`lg:col-span-3 ${view === 'list' ? 'hidden lg:block' : ''}`} aria-label={t('directory.map')}>
-              <div className="lg:sticky lg:top-20">
-                <MapView
-                  markers={markers}
-                  selectedId={selected}
-                  onSelect={setSelected}
-                  userLocation={me}
-                  fitKey={`${fitKey}|${view}`}
-                  className="h-[60vh] lg:h-[calc(100vh-180px)]"
-                />
-              </div>
+              <MapView
+                markers={markers}
+                selectedId={selected}
+                onSelect={setSelected}
+                userLocation={me}
+                fitKey={`${fitKey}|${view}`}
+                className="h-[60vh] lg:h-[calc(100vh-200px)] lg:min-h-[420px]"
+              />
             </section>
           </div>
+          </>
         )}
 
         <div className="mt-10 rounded-2xl bg-brand-700 p-6 text-white sm:flex sm:items-center sm:justify-between">

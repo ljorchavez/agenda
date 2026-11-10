@@ -277,22 +277,8 @@ function AddAttendee({ sessionId, onDone }: { sessionId: string; onDone: () => v
   });
   return (
     <form className="mt-3 space-y-2 rounded-lg border border-slate-200 p-3" onSubmit={(e) => { e.preventDefault(); add.mutate(); }}>
-      <div className="flex items-center justify-between">
-        <span className="label mb-0">{t('agenda.customer')}</span>
-        <button type="button" className="text-sm font-medium text-brand-700" onClick={() => setNewCustomer(newCustomer ? null : { name: '', phone: '' })}>
-          {newCustomer ? t('common.cancel') : t('agenda.newCustomer')}
-        </button>
-      </div>
-      {newCustomer ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <input required placeholder={t('customers.name')} className="input" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} />
-          <input type="tel" placeholder={t('customers.phone')} className="input" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
-        </div>
-      ) : (
-        <>
-          <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={scoped} />
-        </>
-      )}
+      <span className="label mb-0">{t('agenda.customer')}</span>
+      <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={scoped} newCustomer={newCustomer} onNewCustomer={setNewCustomer} />
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm">
           {t('classes.spots')}

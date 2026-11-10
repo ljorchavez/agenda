@@ -32,6 +32,13 @@ async function shrink(file: File, maxSide = 800): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('encode'))), 'image/jpeg', 0.85));
 }
 
+/** Shrinks and uploads one picture; returns its https URL. */
+export async function uploadPhoto(file: File, maxSide = 800): Promise<string> {
+  const form = new FormData();
+  form.append('file', new File([await shrink(file, maxSide)], 'photo.jpg', { type: 'image/jpeg' }));
+  return (await api<{ url: string }>('/uploads/photo', { method: 'POST', body: form })).url;
+}
+
 /** Pick, upload and preview one photo. `value` is the saved https URL (or null). */
 export function PhotoInput({
   value,
@@ -39,12 +46,16 @@ export function PhotoInput({
   name,
   color,
   shape = 'round',
+  label,
+  maxSide = 800,
 }: {
   value: string | null;
   onChange: (url: string | null) => void;
   name: string;
   color?: string;
   shape?: 'round' | 'wide';
+  label?: string;
+  maxSide?: number;
 }) {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
@@ -55,10 +66,7 @@ export function PhotoInput({
     setBusy(true);
     setError(null);
     try {
-      const form = new FormData();
-      form.append('file', new File([await shrink(file)], 'photo.jpg', { type: 'image/jpeg' }));
-      const { url } = await api<{ url: string }>('/uploads/photo', { method: 'POST', body: form });
-      onChange(url);
+      onChange(await uploadPhoto(file, maxSide));
     } catch (e) {
       setError(e);
     } finally {
@@ -69,7 +77,7 @@ export function PhotoInput({
 
   return (
     <div>
-      <div className="label">{t('photos.photo')}</div>
+      <div className="label">{label ?? t('photos.photo')}</div>
       <div className="flex items-center gap-3">
         {shape === 'wide' ? (
           value ? (
@@ -101,6 +109,60 @@ export function PhotoInput({
           }}
         />
       </div>
+      <ErrorText error={error} />
+    </div>
+  );
+}
+
+/** Up to `max` small pictures (the place, the work). Add several at once; tap ✕ to remove. */
+export function GalleryInput({ value, onChange, max = 8, disabled }: { value: string[]; onChange: (urls: string[]) => void; max?: number; disabled?: boolean }) {
+  const { t } = useTranslation();
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const add = async (files: File[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const urls: string[] = [];
+      for (const f of files.slice(0, max - value.length)) urls.push(await uploadPhoto(f, 1200));
+      onChange([...value, ...urls]);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+      if (input.current) input.current.value = '';
+    }
+  };
+  return (
+    <div>
+      <div className="label">{t('page.gallery', { max })}</div>
+      <div className="flex flex-wrap gap-2" data-testid="gallery-input">
+        {value.map((u) => (
+          <div key={u} className="relative">
+            <img src={u} alt="" className="h-16 w-16 rounded-lg object-cover" />
+            {!disabled && (
+              <button type="button" aria-label={t('photos.remove')} className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[10px] text-white" onClick={() => onChange(value.filter((x) => x !== u))}>✕</button>
+            )}
+          </div>
+        ))}
+        {!disabled && value.length < max && (
+          <button type="button" disabled={busy} onClick={() => input.current?.click()} className="flex h-16 w-16 items-center justify-center rounded-lg border-2 border-dashed border-slate-300 text-xl text-slate-400 hover:border-brand-500 hover:text-brand-600">
+            {busy ? '…' : '+'}
+          </button>
+        )}
+      </div>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length) void add(files);
+        }}
+      />
       <ErrorText error={error} />
     </div>
   );

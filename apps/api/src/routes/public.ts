@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { and, asc, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import {
+  pageSettingsOf,
   bookingPriceCents,
   businessKind,
   computeDepositCents,
@@ -95,6 +96,7 @@ publicRoutes.get('/public/:slug', async (c) => {
       })),
     rentalDurations: cfg.durations ? rentalSettingsOf(tenant.settings).durations : null,
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
+    page: pageSettingsOf(tenant.settings),
   };
   return c.json(body);
 });

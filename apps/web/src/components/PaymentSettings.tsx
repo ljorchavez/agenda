@@ -138,6 +138,8 @@ export function PaymentSettingsSection({
         </div>
       </section>
 
+      {/* Right column: deposit and no-shows stacked, so the page doesn't grow downwards */}
+      <div className="space-y-6">
       <section className="card space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -195,6 +197,7 @@ export function PaymentSettingsSection({
           </label>
         </div>
       </section>
+      </div>
     </>
   );
 }

@@ -312,7 +312,37 @@ export function isValidClabe(clabe: string): boolean {
   return (10 - (sum % 10)) % 10 === Number(clabe[17]);
 }
 
+const httpsUrl = z.string().trim().url().max(500).refine((u) => u.startsWith('https://'), 'https_only');
+/** A social handle or link: "@barberia", "barberia" or a full https link. */
+const handle = z.string().trim().max(120).nullable().optional();
+/** How the public booking page looks: banner, profile picture, gallery, social links, notice. */
+export const pageSettingsSchema = z.object({
+  bannerUrl: httpsUrl.nullable().optional(),
+  logoUrl: httpsUrl.nullable().optional(),
+  gallery: z.array(httpsUrl).max(8).optional(),
+  instagram: handle,
+  facebook: handle,
+  tiktok: handle,
+  /** Short highlighted message ("Cerramos el 24 de diciembre") */
+  notice: z.string().trim().max(200).nullable().optional(),
+});
+export type PageSettings = z.infer<typeof pageSettingsSchema>;
+export const pageSettingsOf = (settings: { page?: PageSettings } | null | undefined): Required<Pick<PageSettings, 'gallery'>> & PageSettings => ({
+  gallery: [],
+  ...(settings?.page ?? {}),
+});
+/** Turns "@barberia" / "barberia" / a link into a link for that network. */
+export function socialUrl(network: 'instagram' | 'facebook' | 'tiktok', value: string | null | undefined): string | null {
+  const v = value?.trim();
+  if (!v) return null;
+  if (/^https:\/\//.test(v)) return v;
+  const h = v.replace(/^@/, '').replace(/[^\w.\-]/g, '');
+  if (!h) return null;
+  return network === 'instagram' ? `https://instagram.com/${h}` : network === 'facebook' ? `https://facebook.com/${h}` : `https://tiktok.com/@${h}`;
+}
+
 export const tenantSettingsSchema = z.object({
+  page: pageSettingsSchema.optional(),
   hours: businessHoursSchema,
   remindersEnabled: z.boolean(),
   /** Hours before the appointment to send the WhatsApp reminder */
@@ -826,6 +856,26 @@ export const appointmentCreateSchema = z.object({
 }).refine((x) => Boolean(x.startsAt || x.classSessionId), { path: ['startsAt'], message: 'startsAt required' });
 export type AppointmentCreateInput = z.infer<typeof appointmentCreateSchema>;
 
+/** Is a time free before saving? Answers with other free spaces/people and nearby free times. */
+export const availabilityCheckSchema = z.object({
+  serviceId: z.string().uuid().optional(),
+  startsAt: z.string().datetime({ offset: true }),
+  durationMin: z.number().int().min(5).max(600).optional(),
+  partySize: z.number().int().min(1).max(50).optional(),
+  resourceId: z.string().uuid().nullable().optional(),
+  locationId: z.string().uuid().optional(),
+  staffUserId: z.string().uuid().nullable().optional(),
+});
+export interface AvailabilityCheckDto {
+  free: boolean;
+  /** Why it's taken: 'overlap' | 'resource_busy' | 'blocked' | 'no_resource_available' | ... */
+  reason: string | null;
+  /** Other resources free at the same time (when a specific one was asked for) */
+  freeResources: { id: string; name: string }[];
+  /** Nearby start times that are free with the same choice, ISO */
+  times: string[];
+}
+
 export const appointmentUpdateSchema = z.object({
   startsAt: z.string().datetime({ offset: true }).optional(),
   durationMin: z.number().int().min(5).max(600).optional(),
@@ -1245,6 +1295,8 @@ export interface PublicBusinessDto {
   rentalDurations: number[] | null;
   /** Active locations; the booking page asks which one when there are several */
   locations: PublicLocationDto[];
+  /** Banner, profile picture, gallery, social links and notice */
+  page: PageSettings & { gallery: string[] };
 }
 
 export interface PublicBookingResult {

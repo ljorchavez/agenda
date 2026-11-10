@@ -200,7 +200,25 @@
     "reschedule": "Change date and time",
     "changeResource": "Change {{what}}",
     "charge": "Take payment",
-    "recordPayment": "Record payment"
+    "recordPayment": "Record payment",
+    "customerSearchOrNew": "Search, or type a new customer’s name",
+    "notFoundRegistering": "“{{name}}” is not on your list: they will be added as a new customer.",
+    "registeringNew": "Adding “{{name}}” as a new customer.",
+    "newCustomerPhone": "New customer’s phone / WhatsApp",
+    "backToList": "← Pick from the list instead",
+    "typeToCreate": "Type a name to search or add someone new",
+    "registerAsNew": "Add “{{name}}” as new",
+    "day": "Day",
+    "time": "Time",
+    "slotFree": "Available",
+    "addNote": "Add a note",
+    "taken": {
+      "overlap": "That time is already taken.",
+      "resource_busy": "{{name}} is already booked then.",
+      "blocked": "That time is blocked.",
+      "no_resource_available": "Nobody is free at that time.",
+      "try": "Free:"
+    }
   },
   "customers": {
     "title": "Customers",
@@ -977,5 +995,19 @@
     "range": "{{from}}–{{to}} of {{total}}",
     "prev": "Previous page",
     "next": "Next page"
+  },
+  "page": {
+    "title": "How your page looks",
+    "help": "What your customers see: cover, profile picture, photos and social links.",
+    "view": "View my page",
+    "banner": "Cover",
+    "logo": "Profile picture or logo",
+    "gallery": "Photos of the place (up to {{max}})",
+    "instagram": "Instagram",
+    "facebook": "Facebook",
+    "tiktok": "TikTok",
+    "notice": "Highlighted notice",
+    "noticePlaceholder": "E.g. Closed on December 24",
+    "photo": "Photo"
   }
 }

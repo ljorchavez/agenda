@@ -203,8 +203,25 @@ export async function seedDemo() {
   await seedClasses();
   await seedPadel();
   await seedDoctor();
+  await seedPageLooks();
   await seedDirectory();
   console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
+}
+
+/** Social links and a notice on the demo booking pages (pictures are uploaded from Configuración). */
+async function seedPageLooks() {
+  const db = getDb();
+  const looks: Record<string, { instagram?: string; facebook?: string; tiktok?: string; notice?: string }> = {
+    'barberia-demo': { instagram: '@barberiademo', tiktok: '@barberiademo', notice: 'Martes de 2x1 en corte niño' },
+    'padel-demo': { instagram: '@padelclubdemo', facebook: 'padelclubdemo', notice: 'Torneo relámpago el sábado: inscríbete en recepción' },
+    'medico-demo': { facebook: 'consultoriodemo', notice: 'Trae tus estudios previos a tu primera consulta' },
+    'yoga-demo': { instagram: '@yogademo' },
+    'restaurante-demo': { instagram: '@restaurantedemo', notice: 'Grupos de 6 o más: menú especial con anticipo' },
+  };
+  for (const [slug, page] of Object.entries(looks)) {
+    const t = await db.query.tenants.findFirst({ where: eq(tenants.slug, slug) });
+    if (t) await db.update(tenants).set({ settings: { ...t.settings, page: { gallery: [], ...page } } }).where(eq(tenants.id, t.id));
+  }
 }
 
 /** Inserts in chunks to stay under Postgres' parameter limit. */

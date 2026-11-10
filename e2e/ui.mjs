@@ -32,11 +32,48 @@ await page.locator('[role=listbox] button').first().click();
 ok('customer picked shows card', (await page.locator('[data-testid=picked-customer]').count()) === 1);
 const pickedName = await page.locator('[data-testid=picked-customer] .truncate').first().textContent();
 if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
-await page.fill('input[type=datetime-local]', '2026-12-01T07:00');
+await page.fill('#na-day', '2026-12-01');
+await page.fill('#na-time', '07:00');
+await page.waitForTimeout(800);
 await page.locator('form .btn-primary').last().click();
 await page.waitForTimeout(1500);
 const dec = await api(`/appointments?from=${encodeURIComponent('2026-12-01T00:00:00-06:00')}&to=${encodeURIComponent('2026-12-02T00:00:00-06:00')}`, null, tok);
 ok('booking created for picked customer', dec.some((a) => a.customerName === pickedName), pickedName + ' ' + dec.map((a) => a.customerName).slice(0, 3));
+// 1b. Typing a name that isn't on the list registers a new customer right there,
+//     and a taken time shows up before saving, with free options to tap
+await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
+const newName = `Zacarías Nuevo ${Date.now() % 10000}`;
+await page.getByRole('searchbox', { name: /Cliente/ }).fill(newName);
+await page.getByTestId('new-customer').waitFor({ timeout: 5000 }).catch(() => {});
+ok('unknown name becomes a new customer', ((await page.getByTestId('new-customer').textContent().catch(() => '')) ?? '').includes('no está en tu lista'));
+await page.getByTestId('new-customer').locator('input[type=tel]').fill('3121112233');
+if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
+const resIds = await page.locator('#na-res option').evaluateAll((os) => os.map((o) => o.value).filter(Boolean));
+let warned = false;
+if (resIds.length) {
+  const svcId = await page.locator('#na-svc').inputValue().catch(() => undefined);
+  const busyCust = (await api('/customers?limit=1', null, tok)).items[0];
+  const blocker = await api('/appointments', { customerId: busyCust.id, ...(svcId ? { serviceId: svcId } : {}), resourceId: resIds[0], startsAt: '2026-12-02T10:00:00-06:00', allowOverlap: true }, tok);
+  await page.selectOption('#na-res', resIds[0]);
+  await page.fill('#na-day', '2026-12-02');
+  await page.fill('#na-time', '10:00');
+  await page.getByTestId('slot-taken').waitFor({ timeout: 6000 }).catch(() => {});
+  warned = await page.getByTestId('slot-taken').isVisible().catch(() => false);
+  ok('taken time warned before saving', warned);
+  ok('save disabled while taken', await page.locator('form .btn-primary').last().isDisabled());
+  const chips = page.getByTestId('slot-taken').locator('button');
+  ok('suggestions offered', (await chips.count()) > 0);
+  await chips.first().click();
+  await page.getByTestId('slot-free').waitFor({ timeout: 6000 }).catch(() => {});
+  ok('suggestion makes it free', await page.getByTestId('slot-free').isVisible().catch(() => false));
+  await page.locator('form .btn-primary').last().click();
+  await page.waitForTimeout(1500);
+  const found = (await api(`/customers?q=${encodeURIComponent(newName)}`, null, tok)).items[0];
+  ok('new customer saved with phone', !!found && (found.phone ?? '').includes('3121112233'), JSON.stringify(found ?? null).slice(0, 120));
+  await api(`/appointments/${blocker.id}`, null, tok, 'DELETE').catch(() => null);
+} else {
+  await page.keyboard.press('Escape');
+}
 // 2. A past booking that wasn't paid shows "Debe" without anyone marking it
 const svcs = await api('/services', null, tok);
 const cust0 = (await api('/customers?limit=1', null, tok)).items[0];
@@ -188,6 +225,17 @@ ok('charge in place settles it', after.paidCents >= after.priceCents && after.pa
 ok('window shows both methods', ((await page.getByTestId('paid-methods').textContent()) ?? '').includes('Tarjeta'));
 await page.keyboard.press('Escape');
 await api(`/appointments/${bk.id}`, null, tok, 'DELETE').catch(() => null);
+// Public page looks like a profile
+await page.goto('http://localhost:5173/b/barberia-demo');
+await page.getByTestId('profile-header').waitFor();
+const head = (await page.getByTestId('profile-header').textContent()) ?? '';
+ok('public page header has hours, notice and socials', head.includes('🕒') && head.includes('2x1') && head.includes('Instagram'), head.slice(0, 160));
+// Payments settings: no-show sits next to deposit (no long scroll)
+await page.goto('http://localhost:5173/settings?tab=payments');
+await page.getByText('Cuando un cliente no asiste').waitFor();
+const noShowBox = await page.getByText('Cuando un cliente no asiste').boundingBox();
+const methodsBox = await page.getByText('Métodos de pago').boundingBox();
+ok('no-show in right column', !!noShowBox && !!methodsBox && noShowBox.x > methodsBox.x + 200, JSON.stringify([noShowBox?.x, methodsBox?.x]));
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));

@@ -7,6 +7,8 @@ import {
   bookingPriceCents,
   eligibleResources,
   kindConfig,
+  openIntervals,
+  socialUrl,
   type PublicBookingResult,
   type PublicBusinessDto,
   type PublicClassSessionDto,
@@ -87,34 +89,14 @@ export function BookingPage() {
   const flowProps: FlowProps = { business, loc, onBook: (b) => book.mutate({ ...b, ...(loc ? { locationId: loc } : {}) }), pending: book.isPending, error: book.error, resetKey };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-8">
-      <div className="mx-auto max-w-xl">
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <Link to="/" className="text-xs text-slate-500 hover:text-brand-700">← {t('directory.title')}</Link>
-            <h1 className="text-2xl font-bold text-slate-900">{business.name}</h1>
-            {multi && location && (
-              <p className="text-sm font-medium text-brand-700">
-                ⌂ {location.name} ·{' '}
-                <button className="underline" onClick={() => pickLocation('')}>{t('booking.changeLocation')}</button>
-              </p>
-            )}
-            <p className="text-slate-600">{subtitle}</p>
-            {business.description && <p className="mt-2 max-w-md text-sm text-slate-600">{business.description}</p>}
-            {(business.address || business.neighborhood) && (
-              <p className="mt-1 text-sm text-slate-500">
-                {[business.address, business.neighborhood, business.city].filter(Boolean).join(', ')}
-                {mapsUrl && (
-                  <>
-                    {' · '}
-                    <a href={mapsUrl} target="_blank" rel="noreferrer" className="font-medium text-brand-700">{t('booking.directions')}</a>
-                  </>
-                )}
-              </p>
-            )}
-          </div>
-          <LanguageSwitch />
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-3 py-4 sm:px-4 sm:py-8">
+      <div className="mx-auto max-w-2xl">
+        <ProfileHeader business={business} subtitle={subtitle} mapsUrl={mapsUrl} locationLine={multi && location ? (
+          <p className="text-sm font-medium text-brand-700">
+            ⌂ {location.name} ·{' '}
+            <button className="underline" onClick={() => pickLocation('')}>{t('booking.changeLocation')}</button>
+          </p>
+        ) : null} />
 
         {multi && !location ? (
           <div className="card">
@@ -143,6 +125,89 @@ export function BookingPage() {
 }
 
 // ---------- Shared pieces ----------
+
+/** "Lun–Sáb · 9:00–14:00, 16:00–19:00" */
+function hoursText(h: PublicBusinessDto['hours'], locale: string) {
+  const name = (iso: number) => new Date(Date.UTC(2024, 0, iso)).toLocaleDateString(locale, { weekday: 'short', timeZone: 'UTC' }).replace('.', '');
+  const days = [...h.days].sort((a, b) => a - b);
+  // Group consecutive days: 1-6 → "lun–sáb"
+  const runs: number[][] = [];
+  for (const d of days) {
+    const last = runs[runs.length - 1];
+    if (last && d === last[last.length - 1]! + 1) last.push(d);
+    else runs.push([d]);
+  }
+  const dayTxt = runs.map((r) => (r.length > 2 ? `${name(r[0]!)}–${name(r[r.length - 1]!)}` : r.map(name).join(', '))).join(', ');
+  const hm = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+  const times = openIntervals(h).map(([a, b]) => `${hm(a)}–${hm(b)}`).join(', ');
+  return `${dayTxt.charAt(0).toUpperCase()}${dayTxt.slice(1)} · ${times}`;
+}
+
+/** Social-style header: banner, profile picture, name, about, notice, location, hours, links and a few photos. */
+function ProfileHeader({ business, subtitle, mapsUrl, locationLine }: { business: PublicBusinessDto; subtitle: string; mapsUrl: string | null; locationLine: ReactNode }) {
+  const { t, i18n } = useTranslation();
+  const page = business.page;
+  const [zoom, setZoom] = useState<string | null>(null);
+  const socials = (['instagram', 'facebook', 'tiktok'] as const)
+    .map((n) => ({ n, url: socialUrl(n, page[n]) }))
+    .filter((x): x is { n: 'instagram' | 'facebook' | 'tiktok'; url: string } => Boolean(x.url));
+  const wa = business.phone ? `https://wa.me/${business.phone.replace(/\D/g, '')}` : null;
+  const address = [business.address, business.neighborhood, business.city].filter(Boolean).join(', ');
+  return (
+    <header className="card mb-6 overflow-hidden !p-0" data-testid="profile-header">
+      <div className="relative h-32 bg-gradient-to-r from-brand-600 to-brand-800 sm:h-48">
+        {page.bannerUrl && <img src={page.bannerUrl} alt="" className="h-full w-full object-cover" />}
+        <Link to="/" className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-white">← {t('directory.title')}</Link>
+        <div className="absolute right-3 top-3"><LanguageSwitch /></div>
+      </div>
+      <div className="px-4 pb-5 sm:px-6">
+        <div className="-mt-10 sm:-mt-12">
+          <span className="inline-block rounded-full bg-white p-1 shadow-sm">
+            <Avatar name={business.name} photoUrl={page.logoUrl} size={88} />
+          </span>
+        </div>
+        <h1 className="mt-1 text-2xl font-bold text-slate-900">{business.name}</h1>
+        {locationLine}
+        <p className="text-slate-600">{subtitle}</p>
+        {business.description && <p className="mt-2 text-sm text-slate-700">{business.description}</p>}
+        {page.notice && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">📣 {page.notice}</p>}
+        <ul className="mt-3 space-y-1 text-sm text-slate-600">
+          {address && (
+            <li>
+              📍 {address}
+              {mapsUrl && <> · <a href={mapsUrl} target="_blank" rel="noreferrer" className="font-medium text-brand-700">{t('booking.directions')}</a></>}
+            </li>
+          )}
+          <li>🕒 {hoursText(business.hours, i18n.language.startsWith('en') ? 'en-US' : 'es-MX')}</li>
+        </ul>
+        {(wa || socials.length > 0) && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {wa && <a href={wa} target="_blank" rel="noreferrer" className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700">WhatsApp</a>}
+            {socials.map((x) => (
+              <a key={x.n} href={x.url} target="_blank" rel="noreferrer" className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-brand-500">
+                {t(`page.${x.n}`)}
+              </a>
+            ))}
+          </div>
+        )}
+        {page.gallery.length > 0 && (
+          <div className="mt-4 grid grid-cols-4 gap-1.5 sm:grid-cols-6" data-testid="gallery">
+            {page.gallery.slice(0, 8).map((u) => (
+              <button key={u} type="button" onClick={() => setZoom(u)} className="aspect-square overflow-hidden rounded-lg">
+                <img src={u} alt="" loading="lazy" className="h-full w-full object-cover transition hover:scale-105" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {zoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setZoom(null)} role="dialog" aria-label={t('page.photo')}>
+          <img src={zoom} alt="" className="max-h-full max-w-full rounded-lg" />
+        </div>
+      )}
+    </header>
+  );
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (

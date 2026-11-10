@@ -13,6 +13,7 @@ import {
   rentalSettingsOf,
   selfServiceOf,
   type AppointmentDto,
+  type AvailabilityCheckDto,
   type BusinessHours,
   type ClassSessionDto,
   type CustomerDto,
@@ -31,7 +32,7 @@ import type { HoursValue } from '../components/Schedule';
 import { StarRating } from '../components/Rating';
 import { BOOKING_ICON, PAYMENT_PILL, PAYMENT_PILL_TEXT, paymentState } from '../lib/status';
 import { NewSessionModal, SessionModal } from '../components/ClassModals';
-import { CustomerPicker } from '../components/CustomerPicker';
+import { CustomerPicker, type NewCustomer } from '../components/CustomerPicker';
 
 type View = 'day' | 'week';
 const VIEW_KEY = 'agenda.view';
@@ -611,12 +612,14 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
   const [partySize, setPartySize] = useState('2');
   const services = useServices();
   const [customerId, setCustomerId] = useState('');
-  const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string } | null>(null);
+  const [newCustomer, setNewCustomer] = useState<NewCustomer | null>(null);
   const [serviceId, setServiceId] = useState('');
-  const [startsAt, setStartsAt] = useState(toLocalInput(initial));
+  const [day, setDay] = useState(format(initial, 'yyyy-MM-dd'));
+  const [time, setTime] = useState(format(initial, 'HH:mm'));
   const [duration, setDuration] = useState(cfg.durations ? String(durations[0]) : '');
   const [price, setPrice] = useState('');
   const [notes, setNotes] = useState('');
+  const [showNotes, setShowNotes] = useState(false);
   const [allowOverlap, setAllowOverlap] = useState(false);
 
   const active = (services.data ?? []).filter((s) => s.active);
@@ -626,6 +629,35 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
   const resource = atLoc.find((r) => r.id === resourceId);
   const durationMin = Number(duration || svc?.durationMin || 0);
   const suggested = bookingPriceCents(resource, svc?.priceCents ?? 0, durationMin);
+  const startsAt = day && time ? new Date(`${day}T${time}`) : null;
+  const effectiveResource = scoped ? ownResource : resourceId || null;
+
+  // Checks the time while you fill the form, so a taken slot shows up before saving.
+  const checkBody = startsAt && !Number.isNaN(startsAt.getTime()) && (!needsService || serviceId)
+    ? {
+        serviceId: needsService ? serviceId : undefined,
+        startsAt: startsAt.toISOString(),
+        durationMin: duration ? Number(duration) : undefined,
+        ...(cfg.partySize ? { partySize: Number(partySize) || 1 } : {}),
+        resourceId: effectiveResource,
+        ...(!scoped && effectiveLoc ? { locationId: effectiveLoc } : {}),
+      }
+    : null;
+  const [debouncedCheck, setDebouncedCheck] = useState(checkBody);
+  const checkKey = JSON.stringify(checkBody);
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedCheck(checkBody), 300);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkKey]);
+  const check = useQuery({
+    queryKey: ['availability-check', JSON.stringify(debouncedCheck)],
+    queryFn: () => api<AvailabilityCheckDto>('/appointments/check', { method: 'POST', body: debouncedCheck }),
+    enabled: Boolean(debouncedCheck),
+    staleTime: 10_000,
+  });
+  const taken = check.data && !check.data.free && JSON.stringify(debouncedCheck) === checkKey ? check.data : null;
+  useEffect(() => setAllowOverlap(false), [checkKey]);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -642,7 +674,7 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
         body: {
           customerId: cid,
           serviceId: needsService ? serviceId || active[0]?.id : undefined,
-          startsAt: new Date(startsAt).toISOString(),
+          startsAt: startsAt!.toISOString(),
           durationMin: duration ? Number(duration) : undefined,
           priceCents: price !== '' ? toCents(price) : undefined,
           notes: notes || null,
@@ -657,6 +689,7 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
       void qc.invalidateQueries({ queryKey: ['appointments'] });
       void qc.invalidateQueries({ queryKey: ['customers'] });
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['collections'] });
       onClose();
     },
   });
@@ -669,6 +702,8 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
       setPrice('');
     }
   };
+  const resName = (id: string) => atLoc.find((r) => r.id === id)?.name ?? '';
+  const section = 'space-y-3 border-t border-slate-100 pt-4 first:border-0 first:pt-0';
 
   return (
     <Modal open title={t(`kinds.${kind}.newBooking`)} onClose={onClose}>
@@ -679,112 +714,139 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
           create.mutate();
         }}
       >
-        {!scoped && locs.multi && (
-          <div>
-            <label className="label" htmlFor="na-loc">{t('locations.location')}</label>
-            <LocationSelect
-              id="na-loc"
-              value={effectiveLoc}
-              onChange={(v) => { setLocationId(v); setResourceId(''); }}
-              list={locs.list}
-            />
-          </div>
-        )}
-        <div>
-          <div className="mb-1 flex items-center justify-between">
-            <label className="label mb-0">{t('agenda.customer')}</label>
-            <button
-              type="button"
-              className="text-sm font-medium text-brand-700"
-              onClick={() => setNewCustomer(newCustomer ? null : { name: '', phone: '' })}
-            >
-              {newCustomer ? t('common.cancel') : t('agenda.newCustomer')}
-            </button>
-          </div>
-          {newCustomer ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input required placeholder={t('customers.name')} className="input" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} />
-              <input type="tel" placeholder={t('customers.phone')} className="input" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
-            </div>
-          ) : (
-            <>
-              <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={scoped} />
-            </>
-          )}
+        {/* Who */}
+        <div className={section}>
+          <label className="label !mb-0">{t('agenda.customer')}</label>
+          <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={scoped} newCustomer={newCustomer} onNewCustomer={setNewCustomer} />
         </div>
-        {needsService && (
-          <div>
-            <label className="label" htmlFor="na-svc">{t('agenda.service')}</label>
-            <select id="na-svc" required className="input" value={serviceId} onChange={(e) => pickService(e.target.value)}>
-              <option value="">{t('agenda.selectService')}</option>
-              {active.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} · {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {cfg.partySize && (
+
+        {/* What and where */}
+        <div className={section}>
+          {!scoped && locs.multi && (
             <div>
-              <label className="label" htmlFor="na-party">{t('agenda.partySize')}</label>
-              <input id="na-party" type="number" min={1} max={50} required className="input" value={partySize} onChange={(e) => setPartySize(e.target.value)} />
+              <label className="label" htmlFor="na-loc">{t('locations.location')}</label>
+              <LocationSelect id="na-loc" value={effectiveLoc} onChange={(v) => { setLocationId(v); setResourceId(''); }} list={locs.list} />
             </div>
           )}
-          {scoped ? (
-            <p className="text-sm text-slate-500 sm:col-span-2">{t('roles.bookingFor', { name: atLoc.find((r) => r.id === ownResource)?.name ?? user?.name })}</p>
-          ) : atLoc.length > 0 && (
+          {needsService && (
             <div>
-              <label className="label" htmlFor="na-res">{t(`kinds.${kind}.resource`)}</label>
-              <select id="na-res" className="input" value={resourceId} onChange={(e) => setResourceId(e.target.value)}>
-                <option value="">{t('resources.auto')}</option>
-                {eligible.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
+              <label className="label" htmlFor="na-svc">{t('agenda.service')}</label>
+              <select id="na-svc" required className="input" value={serviceId} onChange={(e) => pickService(e.target.value)}>
+                <option value="">{t('agenda.selectService')}</option>
+                {active.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} · {s.durationMin} {t('common.minutes')} · {money(s.priceCents)}</option>
+                ))}
               </select>
             </div>
           )}
+          {(cfg.partySize || scoped || atLoc.length > 0) && (
+            <div className="grid grid-cols-2 gap-3">
+              {scoped ? (
+                <p className="col-span-2 text-sm text-slate-500">{t('roles.bookingFor', { name: atLoc.find((r) => r.id === ownResource)?.name ?? user?.name })}</p>
+              ) : atLoc.length > 0 && (
+                <div className={cfg.partySize ? '' : 'col-span-2'}>
+                  <label className="label" htmlFor="na-res">{t(`kinds.${kind}.resource`)}</label>
+                  <select id="na-res" className="input" value={resourceId} onChange={(e) => setResourceId(e.target.value)}>
+                    <option value="">{t('resources.auto')}</option>
+                    {eligible.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
+                  </select>
+                </div>
+              )}
+              {cfg.partySize && (
+                <div>
+                  <label className="label" htmlFor="na-party">{t('agenda.partySize')}</label>
+                  <input id="na-party" type="number" min={1} max={50} required className="input" value={partySize} onChange={(e) => setPartySize(e.target.value)} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="sm:col-span-3">
-            <label className="label" htmlFor="na-start">{t('agenda.startsAt')}</label>
-            <input id="na-start" type="datetime-local" required className="input" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+
+        {/* When */}
+        <div className={section}>
+          <div className="grid grid-cols-[1.4fr_1fr_1fr] gap-3">
+            <div>
+              <label className="label" htmlFor="na-day">{t('agenda.day')}</label>
+              <input id="na-day" type="date" required className="input" value={day} onChange={(e) => setDay(e.target.value)} />
+            </div>
+            <div>
+              <label className="label" htmlFor="na-time">{t('agenda.time')}</label>
+              <input id="na-time" type="time" required step={300} className="input" value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            <div>
+              <label className="label" htmlFor="na-dur">{t('agenda.duration')}</label>
+              {cfg.durations ? (
+                <select id="na-dur" className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
+                  {durations.map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
+                </select>
+              ) : (
+                <input id="na-dur" type="number" min={5} className="input" placeholder={svc ? String(svc.durationMin) : ''} value={duration} onChange={(e) => setDuration(e.target.value)} />
+              )}
+            </div>
           </div>
-          <div>
-            <label className="label" htmlFor="na-dur">{t('agenda.duration')}</label>
-            {cfg.durations ? (
-              <select id="na-dur" className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
-                {durations.map((m) => <option key={m} value={m}>{m} {t('common.minutes')}</option>)}
-              </select>
-            ) : (
-              <input id="na-dur" type="number" min={5} className="input" placeholder={svc ? String(svc.durationMin) : ''} value={duration} onChange={(e) => setDuration(e.target.value)} />
+          {taken ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm" role="alert" data-testid="slot-taken">
+              <p className="font-medium text-rose-800">
+                {t(`agenda.taken.${['blocked', 'resource_busy', 'no_resource_available'].includes(taken.reason ?? '') ? taken.reason : 'overlap'}`, { name: resource?.name ?? '' })}
+              </p>
+              {(taken.freeResources.length > 0 || taken.times.length > 0) && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-slate-600">{t('agenda.taken.try')}</span>
+                  {taken.freeResources.map((r) => (
+                    <button key={r.id} type="button" className="rounded-full border border-emerald-300 bg-white px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-50" onClick={() => setResourceId(r.id)}>
+                      {resName(r.id) || r.name} · {time}
+                    </button>
+                  ))}
+                  {taken.times.map((iso) => (
+                    <button key={iso} type="button" className="rounded-full border border-emerald-300 bg-white px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-50" onClick={() => setTime(format(new Date(iso), 'HH:mm'))}>
+                      {timeOnly(iso)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!scoped && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
+                  {t('agenda.allowOverlap')}
+                </label>
+              )}
+            </div>
+          ) : check.data?.free && JSON.stringify(debouncedCheck) === checkKey ? (
+            <p className="text-sm text-emerald-700" data-testid="slot-free">✓ {t('agenda.slotFree')}</p>
+          ) : null}
+        </div>
+
+        {/* Price and notes */}
+        <div className={section}>
+          <div className="flex items-end gap-3">
+            <div className="w-36">
+              <label className="label" htmlFor="na-price">{t('agenda.price')}</label>
+              <input
+                id="na-price"
+                type="number"
+                min={0}
+                step="0.01"
+                className="input"
+                placeholder={suggested ? String(suggested / 100) : t('common.optional')}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+            </div>
+            {!showNotes && (
+              <button type="button" className="pb-2.5 text-sm font-medium text-brand-700 hover:underline" onClick={() => setShowNotes(true)}>
+                + {t('agenda.addNote')}
+              </button>
             )}
           </div>
-          <div>
-            <label className="label" htmlFor="na-price">{t('agenda.price')}</label>
-            <input
-              id="na-price"
-              type="number"
-              min={0}
-              step="0.01"
-              className="input"
-              placeholder={suggested ? String(suggested / 100) : t('common.optional')}
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-            />
-          </div>
+          {showNotes && (
+            <textarea id="na-notes" className="input" rows={2} autoFocus placeholder={t('agenda.notesPlaceholder')} aria-label={t('agenda.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          )}
         </div>
-        <div>
-          <label className="label" htmlFor="na-notes">{t('agenda.notes')}</label>
-          <textarea id="na-notes" className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </div>
-        {!scoped && (
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={allowOverlap} onChange={(e) => setAllowOverlap(e.target.checked)} />
-            {t('agenda.allowOverlap')}
-          </label>
-        )}
+
         <ErrorText error={create.error} ns="agenda" />
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
-          <button className="btn-primary" disabled={create.isPending}>{t('common.save')}</button>
+          <button className="btn-primary" disabled={create.isPending || (Boolean(taken) && !allowOverlap)}>{t('common.save')}</button>
         </div>
       </form>
     </Modal>

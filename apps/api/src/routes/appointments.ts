@@ -4,6 +4,9 @@ import {
   appointmentCreateSchema,
   appointmentListQuerySchema,
   appointmentUpdateSchema,
+  availabilityCheckSchema,
+  eligibleResources,
+  type AvailabilityCheckDto,
   bookingPriceCents,
   businessKind,
   kindConfig,
@@ -98,6 +101,67 @@ appointmentRoutes.get('/appointments/:id', async (c) => {
   );
   if (!row) throw notFound('appointment');
   return c.json(row);
+});
+
+/**
+ * Checks a time before saving the booking: is it free? If not, which other resources are free
+ * then, and which nearby times are free with the same choice. Nothing is written.
+ */
+appointmentRoutes.post('/appointments/check', async (c) => {
+  const input = availabilityCheckSchema.parse(await c.req.json());
+  const tenantId = c.get('tenantId');
+  const db = getDb();
+  const { tenant, kind } = await tenantKind(db, tenantId);
+  const cfg = kindConfig(kind);
+  const scope = await getScope(db, c);
+  if (scope.personal) input.resourceId = scope.resourceId;
+  let service: Service | undefined;
+  if (input.serviceId) service = await db.query.services.findFirst({ where: and(eq(services.id, input.serviceId), eq(services.tenantId, tenantId)) });
+  else if (cfg.durations || cfg.partySize) service = await defaultService(db, tenant, kind);
+  if (!service) throw new AppError(422, 'service_required', 'serviceId is required');
+  const chosen = input.resourceId ? await findResource(db, tenantId, input.resourceId) : null;
+  const locationId = (await locationForWrite(db, c, chosen?.locationId ?? input.locationId, { create: true }))!;
+  const durationMin = input.durationMin ?? (cfg.durations ? rentalSettingsOf(tenant.settings).durations[0]! : service.durationMin);
+  const partySize = cfg.partySize ? (input.partySize ?? 2) : null;
+  const start = new Date(input.startsAt);
+
+  /** null when free, else the reason it isn't. */
+  const tryAt = async (at: Date, resourceId: string | null): Promise<string | null> => {
+    try {
+      await resolveResource(db as Db, tenantId, at, new Date(at.getTime() + durationMin * MIN), {
+        resourceId,
+        serviceId: service!.id,
+        partySize,
+        locationId,
+        staffUserId: input.staffUserId ?? null,
+      });
+      return null;
+    } catch (e) {
+      if (e instanceof AppError && (e.status === 409 || e.status === 422)) return e.code;
+      throw e;
+    }
+  };
+
+  const reason = await tryAt(start, input.resourceId ?? null);
+  const out: AvailabilityCheckDto = { free: reason === null, reason, freeResources: [], times: [] };
+  if (reason === null) return c.json(out);
+
+  if (input.resourceId && !scope.personal) {
+    const others = eligibleResources(await activeResources(db, tenantId, locationId), { serviceId: service.id, partySize }).filter((r) => r.id !== input.resourceId);
+    for (const r of others) if ((await tryAt(start, r.id)) === null) out.freeResources.push({ id: r.id, name: r.name });
+  }
+  // Nearby times the same day, closest first (every 30 min, up to 4 h either way).
+  const step = 30 * MIN;
+  const dayOf = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: tenant.timezone });
+  const now = Date.now();
+  for (let k = 1; k <= 8 && out.times.length < 4; k++) {
+    for (const at of [new Date(start.getTime() + k * step), new Date(start.getTime() - k * step)]) {
+      if (out.times.length >= 4 || at.getTime() < now || dayOf(at) !== dayOf(start)) continue;
+      if ((await tryAt(at, input.resourceId ?? null)) === null) out.times.push(at.toISOString());
+    }
+  }
+  out.times.sort();
+  return c.json(out);
 });
 
 appointmentRoutes.post('/appointments', async (c) => {

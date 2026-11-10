@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { PageLookSection } from '../components/PageLook';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -9,6 +10,7 @@ import {
   isValidClabe,
   kindConfig,
   paymentSettingsOf,
+  pageSettingsOf,
   rentalSettingsOf,
   reservationSettingsOf,
   selfServiceOf,
@@ -44,7 +46,7 @@ function MemberSettings() {
   return (
     <>
       <PageHeader title={t('settings.title')} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <AccountSection />
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.business')}</h2>
@@ -150,6 +152,7 @@ function BusinessSettings() {
     selfService: selfServiceOf(tenant!.settings),
     reservations: reservationSettingsOf(tenant!.settings),
     rentals: rentalSettingsOf(tenant!.settings),
+    page: pageSettingsOf(tenant!.settings),
   });
   const kind = tenant?.kind ?? 'appointments';
   const isRentals = kindConfig(kind).durations;
@@ -228,7 +231,7 @@ function BusinessSettings() {
 
       {tab === 'business' && (
         <div className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid items-start gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.business')}</h2>
           <div>
@@ -269,8 +272,15 @@ function BusinessSettings() {
         </section>
 
           </div>
+          <PageLookSection
+            value={pageSettingsOf(settings)}
+            onChange={(p) => setSettings((s) => ({ ...s, page: p }))}
+            disabled={!canEdit}
+            name={name}
+            slug={tenant!.slug}
+          />
           {saveBar}
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid items-start gap-6 lg:grid-cols-2">
             <PublicProfileSection disabled={!canEdit} />
           </div>
         </div>
@@ -278,7 +288,7 @@ function BusinessSettings() {
 
       {tab === 'booking' && (
         <div className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid items-start gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.publicLink')}</h2>
           <div className="flex gap-2">
@@ -376,7 +386,7 @@ function BusinessSettings() {
 
       {tab === 'payments' && (
         <div className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid items-start gap-6 lg:grid-cols-2">
         <PaymentSettingsSection
           value={payments}
           disabled={!isOwner}
@@ -391,7 +401,7 @@ function BusinessSettings() {
       {tab === 'users' && <UsersSection kind={kind} />}
       {tab === 'plan' && <PlanSection canChange={isOwner} />}
       {tab === 'account' && (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid items-start gap-6 lg:grid-cols-2">
           <AccountSection />
           <section className="card space-y-4">
             <LanguageSelect />

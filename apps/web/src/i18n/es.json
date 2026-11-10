@@ -200,7 +200,25 @@
     "reschedule": "Cambiar fecha y hora",
     "changeResource": "Cambiar {{what}}",
     "charge": "Cobrar",
-    "recordPayment": "Registrar pago"
+    "recordPayment": "Registrar pago",
+    "customerSearchOrNew": "Busca o escribe el nombre de un cliente nuevo",
+    "notFoundRegistering": "«{{name}}» no está en tu lista: se registrará como cliente nuevo.",
+    "registeringNew": "Registrando a «{{name}}» como cliente nuevo.",
+    "newCustomerPhone": "Teléfono / WhatsApp del cliente nuevo",
+    "backToList": "← Mejor elegir de la lista",
+    "typeToCreate": "Escribe el nombre para buscar o registrar uno nuevo",
+    "registerAsNew": "Registrar «{{name}}» como nuevo",
+    "day": "Día",
+    "time": "Hora",
+    "slotFree": "Disponible",
+    "addNote": "Agregar nota",
+    "taken": {
+      "overlap": "Ya está ocupado a esa hora.",
+      "resource_busy": "{{name}} ya está ocupado a esa hora.",
+      "blocked": "Ese horario está bloqueado.",
+      "no_resource_available": "No queda nadie libre a esa hora.",
+      "try": "Libre:"
+    }
   },
   "customers": {
     "title": "Clientes",
@@ -977,5 +995,19 @@
     "range": "{{from}}–{{to}} de {{total}}",
     "prev": "Página anterior",
     "next": "Página siguiente"
+  },
+  "page": {
+    "title": "Cómo se ve tu página",
+    "help": "Así te ven tus clientes: portada, foto de perfil, fotos del lugar y redes.",
+    "view": "Ver mi página",
+    "banner": "Portada",
+    "logo": "Foto de perfil o logo",
+    "gallery": "Fotos del lugar (hasta {{max}})",
+    "instagram": "Instagram",
+    "facebook": "Facebook",
+    "tiktok": "TikTok",
+    "notice": "Aviso destacado",
+    "noticePlaceholder": "Ej. Cerramos el 24 de diciembre",
+    "photo": "Foto"
   }
 }
