@@ -20,7 +20,7 @@ import {
   type TimeBlockDto,
 } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
-import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
+import { ErrorText, Loading, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
 import { useCustomers, useMyLocations, useResources, useServices } from '../lib/queries';
@@ -28,6 +28,7 @@ import { LocationSelect } from '../components/Locations';
 import { CalendarGrid, type CalBlock, type CalColumn, type CalEvent } from '../components/CalendarGrid';
 import type { HoursValue } from '../components/Schedule';
 import { StarRating } from '../components/Rating';
+import { BOOKING_ICON, PAYMENT_PILL, PAYMENT_PILL_TEXT, paymentState } from '../lib/status';
 import { NewSessionModal, SessionModal } from '../components/ClassModals';
 
 type View = 'day' | 'week';
@@ -78,13 +79,6 @@ const range = (h: BusinessHours): [number, number] => {
   const open = toMin(h.open);
   const close = toMin(h.close);
   return [open, close <= open ? 24 * 60 : close];
-};
-const STATUS_ICON: Record<AppointmentDto['status'], string> = {
-  scheduled: '',
-  confirmed: '✓',
-  completed: '✔',
-  cancelled: '⊘',
-  no_show: '✕',
 };
 const BRAND = '#0f766e';
 /** "Alejandro Aguilar" -> "Alejandro A." for narrow blocks */
@@ -242,9 +236,20 @@ export function AgendaPage() {
             shortTitle: shortName(a.customerName),
             subtitle: sub,
             detail: showResource ? a.resourceName : null,
-            icon: STATUS_ICON[a.status],
+            icon: BOOKING_ICON[a.status],
+            badge: (() => {
+              const ps = paymentState(a);
+              return ps === 'free' || a.status === 'cancelled' ? undefined : { text: PAYMENT_PILL_TEXT[ps], className: PAYMENT_PILL[ps] };
+            })(),
             tone: a.status === 'cancelled' ? 'cancelled' : a.status === 'no_show' ? 'alert' : a.status === 'completed' ? 'muted' : 'normal',
-            label: [fmtRange(start, end), a.customerName, sub, a.resourceName, t(`status.${a.status}`)].filter(Boolean).join(' · '),
+            label: [
+              fmtRange(start, end),
+              a.customerName,
+              sub,
+              a.resourceName,
+              t(`status.${a.status}`),
+              paymentState(a) !== 'free' && t(`payState.${paymentState(a)}`),
+            ].filter(Boolean).join(' · '),
             onClick: () => setSelected(a),
           };
         },
@@ -545,7 +550,8 @@ export function AgendaPage() {
           moreLabel={(n) => t('agenda.more', { count: n })}
         />
       )}
-      {canCreate && <p className="mt-2 hidden text-xs text-slate-500 sm:block">{t('agenda.tapToCreate')}</p>}
+      <StatusLegend />
+      {canCreate && <p className="mt-1 hidden text-xs text-slate-500 sm:block">{t('agenda.tapToCreate')}</p>}
 
       {creating &&
         (cfg.sessions ? (
@@ -860,20 +866,60 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
     },
   });
 
-  // Notes and rating save in place (the modal stays open).
+  // Notes save by themselves (shortly after typing, and when the window closes) so nothing is lost.
   const [notes, setNotes] = useState(appt.notes ?? '');
   const [rating, setRating] = useState<number | null>(appt.rating);
-  const [savedNote, setSavedNote] = useState(false);
+  const savedNotes = useRef(appt.notes ?? '');
+  const pendingNotes = useRef<string | null>(null);
+  const [noteState, setNoteState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saveNotes = useMutation({
     mutationFn: (body: { notes?: string | null; rating?: number | null }) =>
       api<AppointmentDto>(`/appointments/${appt.id}`, { method: 'PATCH', body }),
-    onSuccess: () => {
-      setSavedNote(true);
+    onSuccess: () => refresh(),
+  });
+  const flushNotes = (value = pendingNotes.current) => {
+    if (value === null || value === savedNotes.current) return;
+    pendingNotes.current = null;
+    setNoteState('saving');
+    saveNotes.mutate(
+      { notes: value.trim() || null },
+      {
+        onSuccess: () => {
+          savedNotes.current = value;
+          setNoteState('saved');
+        },
+        onError: () => setNoteState('error'),
+      },
+    );
+  };
+  useEffect(() => {
+    if (notes === savedNotes.current) return;
+    pendingNotes.current = notes;
+    const id = window.setTimeout(() => flushNotes(notes), 800);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes]);
+  // Closing the window (or the page) still saves what was typed.
+  useEffect(() => () => {
+    const v = pendingNotes.current;
+    if (v !== null && v !== savedNotes.current) {
+      void api(`/appointments/${appt.id}`, { method: 'PATCH', body: { notes: v.trim() || null } }).then(refresh, () => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Status can always be changed (a "No asistió" by mistake goes back to "Confirmada").
+  const [status, setStatus] = useState(appt.status);
+  const changeStatus = useMutation({
+    mutationFn: (next: AppointmentDto['status']) =>
+      api<AppointmentDto>(`/appointments/${appt.id}`, { method: 'PATCH', body: { status: next } }),
+    onSuccess: (a) => {
+      setStatus(a.status);
       refresh();
     },
   });
 
-  const open = appt.status === 'scheduled' || appt.status === 'confirmed';
+  const open = status === 'scheduled' || status === 'confirmed';
   const waLink = (url: string) =>
     appt.customerPhone
       ? `https://wa.me/${appt.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(url)}`
@@ -882,11 +928,22 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   return (
     <Modal open title={t(`kinds.${kind}.booking`)} onClose={onClose}>
       <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <div className="text-lg font-semibold">{appt.customerName}</div>
-          <StatusBadge status={appt.status} />
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-lg font-semibold leading-tight">{appt.customerName}</div>
+            {appt.customerPhone && (
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-sm">
+                <a href={`tel:${appt.customerPhone}`} className="text-slate-600 hover:text-brand-700">{appt.customerPhone}</a>
+                <a href={`https://wa.me/${appt.customerPhone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="font-medium text-emerald-700 hover:underline">WhatsApp</a>
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <StatusBadge status={status} />
+            <PaymentBadge appt={{ priceCents: appt.priceCents, paidCents: appt.paidCents, status }} />
+          </div>
         </div>
-        <div className="text-slate-600">{appt.serviceName}</div>
+        <div className="pt-1 text-slate-600">{appt.serviceName}</div>
         <div className="text-sm text-slate-500">{dateTime(appt.startsAt)} – {timeOnly(appt.endsAt)} · {t(`source.${appt.source}`)}</div>
         {(appt.resourceName || withParty) && (
           <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -895,7 +952,6 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
           </div>
         )}
         {apptLocs.anyMulti && <div className="text-sm text-slate-500">⌂ {apptLocs.byId.get(appt.locationId)?.name}</div>}
-        {appt.customerPhone && <div className="text-sm text-slate-500">{appt.customerPhone}</div>}
         <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm">
           <div><div className="text-slate-500">{t('agenda.price')}</div><div className="font-semibold">{money(appt.priceCents)}</div></div>
           <div><div className="text-slate-500">{t('agenda.paid')}</div><div className="font-semibold text-emerald-700">{money(appt.paidCents)}</div></div>
@@ -903,8 +959,25 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
+        <label className="label !mb-0 mr-1" htmlFor="am-status">{t('agenda.status')}</label>
+        <select
+          id="am-status"
+          className="input !w-auto !py-1.5"
+          value={status}
+          disabled={changeStatus.isPending}
+          onChange={(e) => changeStatus.mutate(e.target.value as AppointmentDto['status'])}
+        >
+          {(['scheduled', 'confirmed', 'completed', 'no_show', 'cancelled'] as const).map((st) => (
+            <option key={st} value={st}>{BOOKING_ICON[st]} {t(`status.${st}`)}</option>
+          ))}
+        </select>
+        {changeStatus.isPending && <span className="text-xs text-slate-500">{t('common.saving')}</span>}
+        <ErrorText error={changeStatus.error} ns="agenda" />
+      </div>
+
       {!appt.classSessionId && (
-        <div className="mt-4 space-y-2 rounded-lg border border-slate-200 p-3">
+        <div className="mt-3 space-y-2 rounded-lg border border-slate-200 p-3">
           <div className="flex items-center justify-between gap-2">
             <label className="label !mb-0" htmlFor="am-notes">{t('agenda.notes')}</label>
             <div className="flex items-center gap-2">
@@ -913,7 +986,6 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
                 value={rating}
                 onChange={(v) => {
                   setRating(v);
-                  setSavedNote(false);
                   saveNotes.mutate({ rating: v });
                 }}
               />
@@ -926,30 +998,21 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             className="input"
             placeholder={t('agenda.notesPlaceholder')}
             value={notes}
-            onChange={(e) => {
-              setNotes(e.target.value);
-              setSavedNote(false);
-            }}
+            onChange={(e) => setNotes(e.target.value)}
+            onBlur={() => flushNotes()}
           />
-          <div className="flex items-center justify-end gap-3">
-            {savedNote && !saveNotes.isPending && <span className="text-xs text-emerald-700">✓ {t('common.saved')}</span>}
-            <button
-              type="button"
-              className="btn-secondary !py-1.5 text-sm"
-              disabled={saveNotes.isPending || notes === (appt.notes ?? '')}
-              onClick={() => saveNotes.mutate({ notes: notes.trim() || null })}
-            >
-              {t('agenda.saveNotes')}
-            </button>
-          </div>
-          <ErrorText error={saveNotes.error} ns="agenda" />
+          <p className="h-4 text-right text-xs" aria-live="polite">
+            {noteState === 'saving' && <span className="text-slate-500">{t('common.saving')}</span>}
+            {noteState === 'saved' && <span className="text-emerald-700">✓ {t('common.saved')}</span>}
+            {noteState === 'error' && <span className="text-rose-700">{t('agenda.notesError')}</span>}
+          </p>
         </div>
       )}
 
       {open && (
         <div className="mt-5 space-y-4">
           <div className="flex flex-wrap gap-2">
-            {appt.status === 'scheduled' && (
+            {status === 'scheduled' && (
               <button className="btn-secondary" onClick={() => update.mutate({ status: 'confirmed' })}>{t('agenda.confirm')}</button>
             )}
             <button className="btn-secondary" onClick={() => update.mutate({ status: 'no_show' })}>{t('agenda.noShow')}</button>
@@ -1221,3 +1284,28 @@ function BlockModal({
     </Modal>
   );
 }
+
+/** What the marks on the cards mean: booking state on the left, payment state on the right. */
+function StatusLegend() {
+  const { t } = useTranslation();
+  const statuses = ['scheduled', 'confirmed', 'completed', 'no_show', 'cancelled'] as const;
+  const pays = ['paid', 'partial', 'unpaid', 'owed'] as const;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+      {statuses.map((st) => (
+        <span key={st} className="inline-flex items-center gap-1">
+          <span className="w-3 text-center font-semibold" aria-hidden>{BOOKING_ICON[st]}</span>
+          {t(`status.${st}`)}
+        </span>
+      ))}
+      <span className="hidden h-4 w-px bg-slate-300 sm:inline-block" aria-hidden />
+      {pays.map((p) => (
+        <span key={p} className="inline-flex items-center gap-1">
+          <span className={`rounded px-1 text-[10px] font-bold leading-4 ${PAYMENT_PILL[p]}`} aria-hidden>{PAYMENT_PILL_TEXT[p]}</span>
+          {t(`payState.${p}`)}
+        </span>
+      ))}
+    </div>
+  );
+}
+

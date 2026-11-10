@@ -1,8 +1,9 @@
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AppointmentStatus } from '@agenda/shared';
+import type { AppointmentDto, AppointmentStatus } from '@agenda/shared';
 import { ApiError } from '../lib/api';
 import { STATUS_COLORS } from '../lib/format';
+import { BOOKING_ICON, PAYMENT_PILL, PAYMENT_PILL_TEXT, paymentState } from '../lib/status';
 
 export function Modal({
   open,
@@ -51,7 +52,8 @@ export function Modal({
 export function StatusBadge({ status }: { status: AppointmentStatus }) {
   const { t } = useTranslation();
   return (
-    <span className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status]}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status]}`}>
+      <span aria-hidden>{BOOKING_ICON[status]}</span>
       {t(`status.${status}`)}
     </span>
   );
@@ -88,3 +90,17 @@ export function Loading() {
   const { t } = useTranslation();
   return <div className="p-6 text-slate-500">{t('common.loading')}</div>;
 }
+
+/** Payment state of a booking as a pill: "$✓ Pagada", "$½ Anticipo", "$ Por cobrar", "$! Debe". */
+export function PaymentBadge({ appt }: { appt: Pick<AppointmentDto, 'priceCents' | 'paidCents' | 'status'> }) {
+  const { t } = useTranslation();
+  const state = paymentState(appt);
+  if (state === 'free') return null;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${PAYMENT_PILL[state]}`}>
+      <span aria-hidden>{PAYMENT_PILL_TEXT[state]}</span>
+      {t(`payState.${state}`)}
+    </span>
+  );
+}
+

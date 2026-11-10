@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   paymentCreateSchema,
@@ -8,7 +8,7 @@ import {
   PAYMENT_STATUSES,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, payments, services, tenants } from '../db/schema.js';
+import { appointments, customers, locations, memberships, payments, services, tenants } from '../db/schema.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { apiBaseUrl, createOnlinePayment } from '../lib/online-payments.js';
 import { toPaymentDto } from '../lib/mappers.js';
@@ -17,28 +17,66 @@ import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 export const paymentRoutes = new Hono<AppEnv>();
 
+/**
+ * Payments in a date range. `all=1` lists every business where this login manages the whole
+ * business (owners with several businesses see all their money in one list).
+ */
 paymentRoutes.get('/payments', async (c) => {
   const tenantId = c.get('tenantId');
   const from = c.req.query('from');
   const to = c.req.query('to');
   const customerId = c.req.query('customerId');
-  const filters = [eq(payments.tenantId, tenantId)];
+  const db = getDb();
   const when = sql`coalesce(${payments.paidAt}, ${payments.createdAt})`;
+  const filters = [];
   if (from) filters.push(gte(when, new Date(from)));
   if (to) filters.push(lt(when, new Date(to)));
   if (customerId) filters.push(eq(payments.customerId, customerId));
-  const db = getDb();
-  const scope = await getScope(db, c);
-  if (!scope.all) filters.push(sql`true ${paymentScopeSql(scope, 'payments')}`);
+
+  let tenantIds = [tenantId];
+  if (c.req.query('all') === '1') {
+    const managed = await db
+      .select({ t: memberships.tenantId })
+      .from(memberships)
+      .where(and(eq(memberships.userId, c.get('userId')), inArray(memberships.role, ['owner', 'admin']), isNull(memberships.locationId)));
+    if (managed.length) tenantIds = managed.map((m) => m.t);
+  }
+  if (tenantIds.length === 1 && tenantIds[0] === tenantId) {
+    filters.push(eq(payments.tenantId, tenantId));
+    const scope = await getScope(db, c);
+    if (!scope.all) filters.push(sql`true ${paymentScopeSql(scope, 'payments')}`);
+  } else {
+    filters.push(inArray(payments.tenantId, tenantIds));
+  }
 
   const rows = await db
-    .select({ p: payments, customerName: customers.name })
+    .select({
+      p: payments,
+      customerName: customers.name,
+      businessName: tenants.name,
+      locationId: appointments.locationId,
+      locationName: locations.name,
+      serviceName: services.name,
+    })
     .from(payments)
     .innerJoin(customers, eq(customers.id, payments.customerId))
+    .innerJoin(tenants, eq(tenants.id, payments.tenantId))
+    .leftJoin(appointments, eq(appointments.id, payments.appointmentId))
+    .leftJoin(locations, eq(locations.id, appointments.locationId))
+    .leftJoin(services, eq(services.id, appointments.serviceId))
     .where(and(...filters))
-    .orderBy(desc(sql`coalesce(${payments.paidAt}, ${payments.createdAt})`))
-    .limit(500);
-  return c.json(rows.map((r) => toPaymentDto({ ...r.p, customerName: r.customerName })));
+    .orderBy(desc(when))
+    .limit(1000);
+  return c.json(
+    rows.map((r) => ({
+      ...toPaymentDto({ ...r.p, customerName: r.customerName }),
+      tenantId: r.p.tenantId,
+      businessName: r.businessName,
+      locationId: r.locationId,
+      locationName: r.locationName,
+      serviceName: r.serviceName,
+    })),
+  );
 });
 
 /** Registers a payment received outside the platform (cash, terminal, transfer). */

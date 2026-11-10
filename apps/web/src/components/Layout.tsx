@@ -6,8 +6,9 @@ import { useAuth } from '../lib/auth';
 type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
 
 const NAV: NavItem[] = [
-  { to: '/inicio', key: 'dashboard', icon: '◧', end: true },
+  // The agenda is the daily screen, so it comes first (and is where login lands).
   { to: '/agenda', key: 'calendar', icon: '▦' },
+  { to: '/inicio', key: 'dashboard', icon: '◧', end: true },
   { to: '/customers', key: 'customers', icon: '☺' },
   { to: '/services', key: 'services', icon: '✂' },
   { to: '/resources', key: 'resources', icon: '♟', desktopOnly: true },
@@ -46,7 +47,7 @@ function BusinessSwitcher({ className = '' }: { className?: string }) {
       onChange={(e) => {
         const v = e.target.value;
         if (v === '__new') return navigate('/new-business');
-        void switchBusiness(v).then(() => navigate('/inicio'));
+        void switchBusiness(v).then(() => navigate('/agenda'));
       }}
     >
       {(businesses.length ? businesses : tenant ? [{ id: tenant.id, name: tenant.name }] : []).map((b) => (

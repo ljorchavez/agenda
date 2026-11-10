@@ -22,6 +22,8 @@ export interface CalEvent {
   detail?: string | null;
   /** Small status mark shown before the title (✓, ✕ …) */
   icon?: string;
+  /** Pill in the top-right corner (payment state: "$✓", "$!") */
+  badge?: { text: string; className: string };
   tone?: 'normal' | 'muted' | 'cancelled' | 'alert';
   /** Full description for screen readers and the hover tooltip */
   label: string;
@@ -361,13 +363,17 @@ export function CalendarGrid(props: Props) {
                     }}
                   >
                     {oneLine ? (
-                      <span className="flex min-w-0 items-baseline gap-1.5 text-[13px]">
+                      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 text-[13px]">
                         <span className="shrink-0 text-[11px] tabular-nums text-slate-500">{props.formatTime(ev.start)}</span>
                         <span className="truncate font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</span>
+                        {ev.badge && <span className={`ml-auto shrink-0 self-center rounded px-1 text-[10px] font-bold leading-4 ${ev.badge.className}`}>{ev.badge.text}</span>}
                       </span>
                     ) : (
                       <>
-                        <div className="text-[11px] font-medium tabular-nums text-slate-500">{narrow ? props.formatTime(ev.start) : props.formatRange(ev.start, ev.end)}</div>
+                        <div className="flex items-center gap-1 text-[11px] font-medium tabular-nums text-slate-500">
+                          <span className="truncate">{narrow ? props.formatTime(ev.start) : props.formatRange(ev.start, ev.end)}</span>
+                          {ev.badge && <span className={`ml-auto shrink-0 rounded px-1 text-[10px] font-bold leading-4 ${ev.badge.className}`}>{ev.badge.text}</span>}
+                        </div>
                         <div className="truncate text-[13px] font-semibold">{ev.icon ? `${ev.icon} ` : ''}{title}</div>
                         {h >= 62 && ev.subtitle && <div className="mt-0.5 truncate text-xs text-slate-600">{ev.subtitle}</div>}
                         {h >= 80 && ev.detail && (

@@ -132,7 +132,7 @@ export function DirectoryPage() {
           <div className="flex items-center gap-2">
             <LanguageSwitch />
             {user ? (
-              <Link to="/inicio" className="btn-primary !py-1.5 text-sm">{t('directory.myBusiness')}</Link>
+              <Link to="/agenda" className="btn-primary !py-1.5 text-sm">{t('directory.myBusiness')}</Link>
             ) : (
               <>
                 <Link to="/registro" className="hidden text-sm font-medium text-brand-700 sm:inline">{t('directory.forBusinesses')}</Link>

@@ -22,7 +22,7 @@ export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?
     onSuccess: (res) => {
       setSession(res);
       onDone?.();
-      navigate('/inicio');
+      navigate('/agenda');
     },
   });
 
@@ -206,7 +206,7 @@ export function RegisterPage() {
     },
   });
 
-  if (user) return <Navigate to="/inicio" replace />;
+  if (user) return <Navigate to="/agenda" replace />;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-6">

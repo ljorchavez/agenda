@@ -1014,4 +1014,45 @@ d('API (integration)', () => {
     expect(ok.body.photoUrl).toBe('https://example.com/corte.jpg');
     expect((await call('GET', `/public/${slug}`)).body.services[0].photoUrl).toBe('https://example.com/corte.jpg');
   });
+
+  it('payments: location and service per payment, all my businesses; status can be undone', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Pagos Uno', businessType: 'barbershop', name: 'Dueño Pagos', email: 'pagos@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const svc = (await call('POST', '/services', { name: 'Corte Pagos', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const cust = (await call('POST', '/customers', { name: 'Cliente Pagos', phone: '5577770001' }, tok)).body;
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 3 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const appt = (await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, startsAt: day.set({ hour: 10, minute: 0 }).toISO() }, tok)).body;
+    expect((await call('POST', '/payments', { customerId: cust.id, appointmentId: appt.id, amountCents: 5000, method: 'cash' }, tok)).status).toBe(201);
+    expect((await call('POST', '/payments', { customerId: cust.id, amountCents: 3000, method: 'card' }, tok)).status).toBe(201);
+
+    const range = `from=${encodeURIComponent(DateTime.now().minus({ days: 1 }).toISO()!)}&to=${encodeURIComponent(DateTime.now().plus({ days: 1 }).toISO()!)}`;
+    const mine = (await call('GET', `/payments?${range}`, undefined, tok)).body;
+    expect(mine).toHaveLength(2);
+    const linked = mine.find((p: { appointmentId: string | null }) => p.appointmentId === appt.id);
+    expect(linked.serviceName).toBe('Corte Pagos');
+    expect(linked.locationName).toBeTruthy();
+    expect(linked.businessName).toBe('Pagos Uno');
+    expect(mine.find((p: { appointmentId: string | null }) => !p.appointmentId).locationId).toBeNull();
+
+    // A second business: "all" lists both, the default stays on the current one
+    const second = (await call('POST', '/businesses', { businessName: 'Pagos Dos', businessType: 'restaurant' }, tok)).body;
+    const tok2 = second.token;
+    const cust2 = (await call('POST', '/customers', { name: 'Cliente Dos', phone: '5577770002' }, tok2)).body;
+    await call('POST', '/payments', { customerId: cust2.id, amountCents: 7000, method: 'transfer' }, tok2);
+    expect((await call('GET', `/payments?${range}`, undefined, tok2)).body).toHaveLength(1);
+    const all = (await call('GET', `/payments?${range}&all=1`, undefined, tok2)).body;
+    expect(all.map((p: { businessName: string }) => p.businessName).sort()).toEqual(['Pagos Dos', 'Pagos Uno', 'Pagos Uno']);
+    // Someone else's login never sees these, even asking for all
+    const other = (await call('POST', '/auth/register', { businessName: 'Ajeno Pagos', businessType: 'spa', name: 'Ajeno', email: 'ajeno-pagos@test.mx', password: 'password123' })).body;
+    expect((await call('GET', `/payments?${range}&all=1`, undefined, other.token)).body).toHaveLength(0);
+
+    // "No asistió" by mistake goes back to "Confirmada"
+    expect((await call('PATCH', `/appointments/${appt.id}`, { status: 'no_show' }, tok)).body.status).toBe('no_show');
+    const back = await call('PATCH', `/appointments/${appt.id}`, { status: 'confirmed' }, tok);
+    expect(back.status).toBe(200);
+    expect(back.body.status).toBe('confirmed');
+  });
 });

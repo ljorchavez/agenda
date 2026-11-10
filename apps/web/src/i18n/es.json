@@ -16,7 +16,8 @@
     "total": "Total",
     "saved": "Guardado",
     "copy": "Copiar",
-    "copied": "¡Copiado!"
+    "copied": "¡Copiado!",
+    "saving": "Guardando…"
   },
   "nav": {
     "dashboard": "Inicio",
@@ -81,9 +82,9 @@
     "studio": "Estudio (foto, grabación, ensayo)"
   },
   "status": {
-    "scheduled": "Agendada",
+    "scheduled": "Por confirmar",
     "confirmed": "Confirmada",
-    "completed": "Completada",
+    "completed": "Asistió",
     "cancelled": "Cancelada",
     "no_show": "No asistió"
   },
@@ -190,7 +191,9 @@
     "partySize": "Personas",
     "bill": "Cuenta (MXN)",
     "notesPlaceholder": "Algo a recordar de esta cita (preferencias, observaciones…)",
-    "saveNotes": "Guardar nota"
+    "saveNotes": "Guardar nota",
+    "status": "Estado",
+    "notesError": "No se pudo guardar la nota; revisa tu conexión."
   },
   "customers": {
     "title": "Clientes",
@@ -245,7 +248,31 @@
     "amount": "Monto",
     "empty": "No hay pagos en este periodo",
     "paidTotal": "Cobrado",
-    "pendingTotal": "Pendiente"
+    "pendingTotal": "Pendiente",
+    "period": "Periodo",
+    "presets": {
+      "thisMonth": "Este mes",
+      "lastMonth": "Mes pasado",
+      "last7": "Últimos 7 días",
+      "last30": "Últimos 30 días",
+      "thisYear": "Este año",
+      "custom": "Elegir fechas"
+    },
+    "from": "Desde",
+    "to": "Hasta",
+    "business": "Negocio",
+    "allBusinesses": "Todos mis negocios",
+    "noLocation": "Sin sucursal (pagos sueltos)",
+    "any": "Todos",
+    "amountRange": "Monto (MXN)",
+    "min": "Mín.",
+    "max": "Máx.",
+    "search": "Buscar",
+    "searchPlaceholder": "Cliente o servicio",
+    "clearFilters": "Quitar filtros",
+    "refundedTotal": "Reembolsado",
+    "count": "Pagos",
+    "noMatch": "Ningún pago coincide con los filtros"
   },
   "settings": {
     "title": "Configuración",
@@ -875,5 +902,12 @@
     "stars_other": "{{count}} estrellas",
     "basedOn_one": "Promedio de {{count}} cita calificada",
     "basedOn_other": "Promedio de {{count}} citas calificadas"
+  },
+  "payState": {
+    "paid": "Pagada",
+    "partial": "Anticipo",
+    "unpaid": "Por cobrar",
+    "owed": "Debe",
+    "free": "Sin costo"
   }
 }

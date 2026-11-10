@@ -16,7 +16,8 @@
     "total": "Total",
     "saved": "Saved",
     "copy": "Copy",
-    "copied": "Copied!"
+    "copied": "Copied!",
+    "saving": "Saving…"
   },
   "nav": {
     "dashboard": "Home",
@@ -81,9 +82,9 @@
     "studio": "Studio (photo, recording, rehearsal)"
   },
   "status": {
-    "scheduled": "Scheduled",
+    "scheduled": "To confirm",
     "confirmed": "Confirmed",
-    "completed": "Completed",
+    "completed": "Attended",
     "cancelled": "Cancelled",
     "no_show": "No-show"
   },
@@ -190,7 +191,9 @@
     "partySize": "People",
     "bill": "Bill (MXN)",
     "notesPlaceholder": "Anything to remember about this booking (preferences, remarks…)",
-    "saveNotes": "Save note"
+    "saveNotes": "Save note",
+    "status": "Status",
+    "notesError": "Couldn't save the note; check your connection."
   },
   "customers": {
     "title": "Customers",
@@ -245,7 +248,31 @@
     "amount": "Amount",
     "empty": "No payments in this period",
     "paidTotal": "Collected",
-    "pendingTotal": "Pending"
+    "pendingTotal": "Pending",
+    "period": "Period",
+    "presets": {
+      "thisMonth": "This month",
+      "lastMonth": "Last month",
+      "last7": "Last 7 days",
+      "last30": "Last 30 days",
+      "thisYear": "This year",
+      "custom": "Pick dates"
+    },
+    "from": "From",
+    "to": "To",
+    "business": "Business",
+    "allBusinesses": "All my businesses",
+    "noLocation": "No location (standalone payments)",
+    "any": "All",
+    "amountRange": "Amount (MXN)",
+    "min": "Min",
+    "max": "Max",
+    "search": "Search",
+    "searchPlaceholder": "Customer or service",
+    "clearFilters": "Clear filters",
+    "refundedTotal": "Refunded",
+    "count": "Payments",
+    "noMatch": "No payments match the filters"
   },
   "settings": {
     "title": "Settings",
@@ -875,5 +902,12 @@
     "stars_other": "{{count}} stars",
     "basedOn_one": "Average of {{count}} rated booking",
     "basedOn_other": "Average of {{count}} rated bookings"
+  },
+  "payState": {
+    "paid": "Paid",
+    "partial": "Deposit",
+    "unpaid": "To collect",
+    "owed": "Owes",
+    "free": "Free"
   }
 }

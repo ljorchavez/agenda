@@ -1026,6 +1026,13 @@ export interface PaymentDto {
   paidAt: string | null;
   createdAt: string;
   notes: string | null;
+  /** Business it belongs to (useful when listing every business at once) */
+  tenantId?: string;
+  businessName?: string;
+  /** Location of the booking it pays; null when it isn't tied to a booking */
+  locationId?: string | null;
+  locationName?: string | null;
+  serviceName?: string | null;
 }
 
 export interface DashboardDto {

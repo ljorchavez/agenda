@@ -53,9 +53,9 @@ export function toLocalInput(d: Date): string {
 }
 
 export const STATUS_COLORS: Record<string, string> = {
-  scheduled: 'bg-sky-100 text-sky-800 border-sky-200',
-  confirmed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  completed: 'bg-slate-100 text-slate-700 border-slate-200',
-  cancelled: 'bg-rose-50 text-rose-700 border-rose-200 line-through',
-  no_show: 'bg-amber-100 text-amber-800 border-amber-200',
+  scheduled: 'bg-slate-50 text-slate-700 border-slate-300 border-dashed',
+  confirmed: 'bg-sky-100 text-sky-800 border-sky-200',
+  completed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  cancelled: 'bg-slate-100 text-slate-500 border-slate-200 line-through',
+  no_show: 'bg-rose-100 text-rose-800 border-rose-200',
 };
