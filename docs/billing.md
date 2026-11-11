@@ -15,7 +15,7 @@ Features by plan (`PLAN_LIMITS.packages | records | cash | recordPhotosMb`):
 |---|---|---|---|
 | Verified reviews, iCal calendar links | ✓ | ✓ | ✓ |
 | Packages, memberships, gift cards | – | ✓ | ✓ |
-| Client record (encrypted) | – | ✓ (1 GB photos) | ✓ (10 GB photos) |
+| Client record (encrypted) + questionnaires per booking type | – | ✓ (1 GB photos) | ✓ (10 GB photos) |
 | Commissions and cash closing | – | ✓ | ✓ |
 
 Missing feature → **402** `plan_limit_packages | plan_limit_records | plan_limit_cash`; photo

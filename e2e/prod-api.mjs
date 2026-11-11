@@ -277,7 +277,7 @@ if (process.env.CRON_SECRET) {
 // ---- Customer self-service link (reschedule / cancel)
 {
   const pub = await call('GET', '/api/public/nutricion-demo');
-  const svc2 = pub.body.services[0];
+  const svc2 = pub.body.services.find((x) => x.id === svc.id) ?? pub.body.services[0];
   let slots2 = [];
   let day2;
   for (let i = 8; i < 16 && !slots2.length; i++) {
@@ -610,6 +610,41 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('record is never cached', /no-store/.test(rec.headers.get('cache-control') ?? ''));
   check('delete the E2E note', (await call('DELETE', `/api/record-notes/${note.body?.id}`, null, token)).status === 204);
   check('record photo storage reported', typeof rec.body?.photosEnabled === 'boolean', String(rec.body?.photosEnabled));
+}
+
+// ---- Questionnaires: a temporary form on the nutrition demo, answered when booking online
+{
+  const { token } = await asDemo('nutricion-demo');
+  const pub0 = await call('GET', '/api/public/nutricion-demo');
+  const svcF = pub0.body?.services?.find((x) => /bioimpedancia/i.test(x.name)) ?? pub0.body?.services?.at(-1);
+  const created = await call('POST', '/api/forms', { name: 'Cuestionario E2E', fields: [{ id: 'e2eyes', label: '¿Pregunta E2E?', type: 'yesno', required: true }, { id: 'e2etxt', label: 'Comentario', type: 'text' }], serviceIds: [svcF?.id], askOnline: true }, token);
+  check('create questionnaire', created.status === 201 && created.body?.serviceIds?.includes(svcF?.id), created.text.slice(0, 200));
+  const fid = created.body?.id;
+  const pub = await call('GET', '/api/public/nutricion-demo');
+  check('booking page carries the questionnaire', pub.body?.forms?.some((f) => f.id === fid));
+  let fSlots = [];
+  for (let i = 30; i < 40 && !fSlots.length; i++) {
+    const day = new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    fSlots = (await call('GET', `/api/public/nutricion-demo/availability?serviceId=${svcF?.id}&date=${day}`)).body?.slots ?? [];
+  }
+  const noAns = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svcF?.id, startsAt: fSlots[0], name: 'Cuestionario QA', phone: '5517170001' });
+  check('required questionnaire unanswered -> 422', noAns.status === 422 && noAns.body?.error === 'form_required', noAns.text.slice(0, 200));
+  const ok = await call('POST', '/api/public/nutricion-demo/bookings', { serviceId: svcF?.id, startsAt: fSlots[0], name: 'Cuestionario QA', phone: '5517170001', forms: [{ formId: fid, values: { e2eyes: true, e2etxt: 'hola' } }] });
+  check('booking with answers', ok.status === 201, ok.text.slice(0, 200));
+  const appt = (await call('GET', `/api/appointments?from=${encodeURIComponent(new Date(fSlots[0]).toISOString())}&to=${encodeURIComponent(new Date(new Date(fSlots[0]).getTime() + 36e5).toISOString())}`, null, token)).body?.find?.((a) => a.customerName === 'Cuestionario QA');
+  const af = appt && (await call('GET', `/api/appointments/${appt.id}/forms`, null, token));
+  check('booking shows the answers to the team', af?.body?.some?.((x) => x.form.id === fid && x.response?.source === 'customer' && x.response.answers[0]?.value === true), af?.text?.slice(0, 200));
+  const rec = appt && (await call('GET', `/api/customers/${appt.customerId}/record`, null, token));
+  check('answers saved in the client record', rec?.body?.responses?.some((r) => r.formName === 'Cuestionario E2E'), rec?.text?.slice(0, 200));
+  const staff = appt && (await call('POST', `/api/appointments/${appt.id}/forms`, { formId: fid, values: { e2eyes: false, e2etxt: 'corregido' } }, token));
+  check('team corrects the answers (same response)', staff?.status === 201 && staff.body?.source === 'staff' && staff.body?.answers?.[1]?.value === 'corregido', staff?.text?.slice(0, 200));
+  const tok = (ok.body?.managePath ?? '/c/x').slice(3);
+  check('cancel the questionnaire booking', (await call('POST', `/api/public/manage/${tok}/cancel`)).status === 200);
+  check('delete questionnaire', (await call('DELETE', `/api/forms/${fid}`, null, token)).status === 204);
+  const after = appt && (await call('GET', `/api/customers/${appt.customerId}/record`, null, token));
+  check('answers stay in the record after deleting the form', after?.body?.responses?.some((r) => r.formName === 'Cuestionario E2E'));
+  const pub2 = await call('GET', '/api/public/nutricion-demo');
+  check('deleted questionnaire no longer asked', !pub2.body?.forms?.some((f) => f.id === fid));
 }
 
 // ---- Commissions and cash closing (barbershop demo)

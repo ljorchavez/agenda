@@ -23,6 +23,7 @@ import {
   PAYMENT_STATUSES,
   ROLES,
   type BusinessHours,
+  type FormField,
   type PlanId,
   type WorkHours,
   type TenantSettings,
@@ -575,4 +576,38 @@ export const calendarFeeds = pgTable('calendar_feeds', {
   locationId: uuid('location_id').references(() => locations.id, { onDelete: 'cascade' }),
   resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------- Questionnaires ----------
+
+/** A reusable questionnaire, asked on the booking types (services) it is attached to. */
+export const forms = pgTable('forms', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  fields: jsonb('fields').$type<FormField[]>().notNull().default([]),
+  serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
+  /** Also asked to the customer when booking online */
+  askOnline: boolean('ask_online').notNull().default(true),
+  active: boolean('active').notNull().default(true),
+  ...timestamps,
+});
+export type Form = typeof forms.$inferSelect;
+
+/** Answers to a questionnaire; part of the client record (encrypted). */
+export const formResponses = pgTable('form_responses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+  appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
+  formId: uuid('form_id').references(() => forms.id, { onDelete: 'set null' }),
+  /** Snapshot: renaming or editing the form later doesn't change past answers */
+  formName: text('form_name').notNull(),
+  /** encryptSecret(JSON of [{ label, type, value }]) */
+  answersEnc: text('answers_enc').notNull(),
+  source: text('source').$type<'customer' | 'staff'>().notNull(),
+  authorId: uuid('author_id'),
+  authorName: text('author_name'),
+  ...timestamps,
 });

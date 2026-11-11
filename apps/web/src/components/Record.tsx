@@ -8,6 +8,7 @@ import { dateOnly, dateTime } from '../lib/format';
 import { shrink } from './Photo';
 import { ErrorText } from './ui';
 import { UpgradeNote, useFeature } from './Sales';
+import { ResponsesList } from './Forms';
 
 /** A private photo: fetched with the login's token and shown from memory, never by public URL. */
 function PrivatePhoto({ photo, onOpen }: { photo: RecordPhotoDto; onOpen: (url: string) => void }) {
@@ -154,6 +155,8 @@ export function RecordSection({ customerId }: { customerId: string }) {
               {d.notes.length === 0 && <li className="text-sm text-slate-500">{t('record.noNotes')}</li>}
             </ul>
           </div>
+
+          <ResponsesList responses={d.responses ?? []} />
 
           <div>
             <h3 className="label">{t('record.photos')}</h3>

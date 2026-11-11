@@ -822,6 +822,7 @@ export const publicClassBookingSchema = z.object({
   email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
   notes: z.string().max(1000).optional(),
   couponCode: z.string().trim().max(30).optional(),
+  forms: z.lazy(() => z.array(formAnswersSchema).max(10)).optional(),
 });
 export type PublicClassBookingInput = z.infer<typeof publicClassBookingSchema>;
 
@@ -1101,6 +1102,8 @@ export const publicBookingSchema = z.object({
   email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
   notes: z.string().max(1000).optional(),
   couponCode: z.string().trim().max(30).optional(),
+  /** Answers to the questionnaires of the chosen service */
+  forms: z.lazy(() => z.array(formAnswersSchema).max(10)).optional(),
 });
 export type PublicBookingInput = z.infer<typeof publicBookingSchema>;
 
@@ -1386,6 +1389,8 @@ export interface PublicBusinessDto {
   page: PageSettings & { gallery: string[] };
   /** Verified reviews: average, count and the latest ones */
   reviews: ReviewSummaryDto;
+  /** Questionnaires asked when booking online (per service) */
+  forms: PublicFormDto[];
   /** Promotions customers can see: coupon box and the loyalty reward */
   promos: { coupons: boolean; reward: Pick<RewardSettings, 'everyVisits' | 'discountType' | 'value'> | null };
 }
@@ -1564,6 +1569,8 @@ export interface CustomerRecordDto {
   photos: RecordPhotoDto[];
   /** Photos are set up on the server (private storage connected) */
   photosEnabled: boolean;
+  /** Answered questionnaires, newest first */
+  responses: FormResponseDto[];
 }
 export const RECORD_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -1686,3 +1693,102 @@ export const calendarFeedTargetSchema = z.object({
   locationId: z.string().uuid().nullable().optional(),
   resourceId: z.string().uuid().nullable().optional(),
 });
+
+
+// ---------- Questionnaires (cuestionarios por tipo de cita) ----------
+
+export const FORM_FIELD_TYPES = ['text', 'longtext', 'yesno', 'choice', 'multi', 'number', 'date'] as const;
+export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
+export const formFieldSchema = z.object({
+  /** Stable id inside the form (answers point to it) */
+  id: z.string().regex(/^[a-z0-9]{4,12}$/),
+  label: z.string().trim().min(1).max(200),
+  type: z.enum(FORM_FIELD_TYPES),
+  required: z.boolean().default(false),
+  /** For 'choice' and 'multi' */
+  options: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
+  help: z.string().trim().max(200).nullable().optional(),
+});
+export type FormField = z.infer<typeof formFieldSchema>;
+export const formInputSchema = z
+  .object({
+    name: z.string().trim().min(2).max(100),
+    description: z.string().trim().max(500).nullable().optional(),
+    fields: z.array(formFieldSchema).min(1).max(40),
+    /** Booking types (services) it is asked on; a form can be on several */
+    serviceIds: z.array(z.string().uuid()).max(200).default([]),
+    askOnline: z.boolean().default(true),
+    active: z.boolean().default(true),
+  })
+  .refine((f) => f.fields.every((x) => !['choice', 'multi'].includes(x.type) || x.options.length >= 2), { path: ['fields'], message: 'choice_needs_options' })
+  .refine((f) => new Set(f.fields.map((x) => x.id)).size === f.fields.length, { path: ['fields'], message: 'duplicate_field' });
+export type FormInput = z.infer<typeof formInputSchema>;
+export interface FormDto {
+  id: string;
+  name: string;
+  description: string | null;
+  fields: FormField[];
+  serviceIds: string[];
+  askOnline: boolean;
+  active: boolean;
+  responses: number;
+}
+/** What the booking page needs to ask */
+export interface PublicFormDto {
+  id: string;
+  name: string;
+  description: string | null;
+  fields: FormField[];
+  serviceIds: string[];
+}
+export type FormAnswerValue = string | number | boolean | string[] | null;
+export const formAnswersSchema = z.object({
+  formId: z.string().uuid(),
+  values: z.record(z.string(), z.union([z.string().max(4000), z.number(), z.boolean(), z.array(z.string().max(100)).max(20), z.null()])),
+});
+export type FormAnswersInput = z.infer<typeof formAnswersSchema>;
+
+/** Checks answers against the form; returns the error code or null. */
+export function checkFormAnswers(fields: FormField[], values: Record<string, FormAnswerValue>): string | null {
+  for (const f of fields) {
+    const v = values[f.id];
+    const empty = v == null || v === '' || (Array.isArray(v) && v.length === 0);
+    if (empty) {
+      if (f.required) return 'form_required';
+      continue;
+    }
+    if (f.type === 'yesno' && typeof v !== 'boolean') return 'form_invalid';
+    if (f.type === 'number' && (typeof v !== 'number' || !Number.isFinite(v))) return 'form_invalid';
+    if (f.type === 'date' && (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v))) return 'form_invalid';
+    if (f.type === 'choice' && (typeof v !== 'string' || !f.options.includes(v))) return 'form_invalid';
+    if (f.type === 'multi' && (!Array.isArray(v) || v.some((x) => !f.options.includes(x)))) return 'form_invalid';
+    if ((f.type === 'text' || f.type === 'longtext') && typeof v !== 'string') return 'form_invalid';
+  }
+  return null;
+}
+
+/** An answered questionnaire as stored (labels snapshotted) */
+export interface FormAnswerDto {
+  /** Field id at the time it was answered (to pre-fill an edit) */
+  fieldId?: string;
+  label: string;
+  type: FormFieldType;
+  value: FormAnswerValue;
+}
+export interface FormResponseDto {
+  id: string;
+  formId: string | null;
+  formName: string;
+  appointmentId: string | null;
+  serviceName: string | null;
+  appointmentAt: string | null;
+  answers: FormAnswerDto[];
+  source: 'customer' | 'staff';
+  authorName: string | null;
+  createdAt: string;
+}
+/** Forms of a booking: the ones for its service, answered or not */
+export interface AppointmentFormDto {
+  form: PublicFormDto;
+  response: FormResponseDto | null;
+}

@@ -26,6 +26,7 @@ import { appointments, customers, services, tenants, type Appointment, type Cust
 import { hasOverlap } from '../lib/appointments.js';
 import { findUsableCoupon, resolveDiscount } from '../lib/discounts.js';
 import { customerPlans as customerPlansOf } from '../lib/plans.js';
+import { onlineForms, saveBookingAnswers } from '../lib/forms.js';
 import { reviewSummary } from './reviews.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
 import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
@@ -103,6 +104,7 @@ publicRoutes.get('/public/:slug', async (c) => {
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
     page: pageSettingsOf(tenant.settings),
     reviews: await reviewSummary(getDb(), tenant.id, 5),
+    forms: await onlineForms(getDb(), tenant.id),
     promos: (() => {
       const r = rewardSettingsOf(tenant.settings);
       return { coupons: couponsEnabled(tenant.settings), reward: r.enabled ? { everyVisits: r.everyVisits, discountType: r.discountType, value: r.value } : null };
@@ -433,6 +435,7 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         notes: input.notes ?? null,
       })
       .returning();
+    await saveBookingAnswers(tx as unknown as Db, tenant.id, { id: row!.id, customerId: customer.id, serviceId: service.id }, input.forms);
     const res = session.resourceId ? await tx.query.resources.findFirst({ where: (r, { eq: e }) => e(r.id, session.resourceId!) }) : null;
     return { appt: row!, customer, serviceName: service.name, res };
   });
@@ -504,6 +507,8 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
         notes: input.notes ?? null,
       })
       .returning();
+    const cfgK = kindConfig(businessKind(tenant.businessType));
+    await saveBookingAnswers(tx as unknown as Db, tenant.id, { id: row!.id, customerId: customer.id, serviceId: service.id }, input.forms, Boolean(cfgK.partySize || cfgK.durations));
     return { appt: row!, customer, resource };
   });
   const title = kindConfig(businessKind(tenant.businessType)).durations && resource ? `${resource.name} (${durationMin} min)` : service.name;

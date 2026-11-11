@@ -7,7 +7,7 @@
  */
 import { and, eq, inArray, like, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
+import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS, type FormAnswerValue, type FormField } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { getDb } from './client.js';
 import {
@@ -18,6 +18,7 @@ import {
   customerPlans,
   customerRecords,
   customers,
+  forms,
   giftCards,
   locations,
   memberships,
@@ -32,6 +33,7 @@ import {
   users,
 } from './schema.js';
 import { encryptSecret } from '../lib/crypto.js';
+import { saveResponse } from '../lib/forms.js';
 
 const TZ = 'America/Mexico_City';
 
@@ -1134,7 +1136,69 @@ async function seedExtras() {
       }
     }
   }
+  await seedForms();
   await seedReviews();
+}
+
+/**
+ * Questionnaires: nutrition "Historia clínica nutricional" (initial consult, asked online) and the
+ * doctor's "Antecedentes" (first-time consult), reused on a second booking type, with answers.
+ */
+async function seedForms() {
+  const db = getDb();
+  const specs: { slug: string; name: string; description: string; services: string[]; fields: FormField[]; answers: Record<string, FormAnswerValue>[] }[] = [
+    {
+      slug: 'nutricion-demo',
+      name: 'Historia clínica nutricional',
+      description: 'Nos ayuda a preparar tu primera consulta. Tus respuestas son confidenciales.',
+      services: ['Consulta inicial', 'Plan alimenticio + bioimpedancia'],
+      fields: [
+        { id: 'objetivo', label: '¿Cuál es tu objetivo principal?', type: 'choice', required: true, options: ['Bajar de peso', 'Subir masa muscular', 'Rendimiento deportivo', 'Control de glucosa', 'Comer mejor'], help: null },
+        { id: 'alergias', label: '¿Tienes alergias o intolerancias a algún alimento?', type: 'text', required: false, options: [], help: 'Ej. lactosa, gluten, mariscos' },
+        { id: 'ejercicio', label: '¿Haces ejercicio?', type: 'yesno', required: true, options: [], help: null },
+        { id: 'dias', label: '¿Cuántos días a la semana?', type: 'number', required: false, options: [], help: null },
+        { id: 'comidas', label: '¿Qué comidas haces al día?', type: 'multi', required: false, options: ['Desayuno', 'Colación', 'Comida', 'Cena'], help: null },
+        { id: 'notas', label: '¿Algo más que debamos saber?', type: 'longtext', required: false, options: [], help: null },
+      ],
+      answers: [
+        { objetivo: 'Bajar de peso', alergias: 'Lactosa', ejercicio: true, dias: 3, comidas: ['Desayuno', 'Comida', 'Cena'], notas: 'Trabajo de noche dos veces por semana.' },
+        { objetivo: 'Rendimiento deportivo', alergias: '', ejercicio: true, dias: 5, comidas: ['Desayuno', 'Colación', 'Comida', 'Cena'], notas: 'Corro medio maratón en marzo.' },
+        { objetivo: 'Control de glucosa', alergias: 'Ninguna', ejercicio: false, dias: null, comidas: ['Desayuno', 'Comida'], notas: '' },
+      ],
+    },
+    {
+      slug: 'medico-demo',
+      name: 'Antecedentes médicos',
+      description: 'Llénalo antes de tu consulta para aprovechar mejor el tiempo con el médico.',
+      services: ['Consulta de primera vez', 'Consulta de medicina interna'],
+      fields: [
+        { id: 'motivo', label: 'Motivo de la consulta', type: 'longtext', required: true, options: [], help: null },
+        { id: 'cronicas', label: '¿Padeces alguna de estas?', type: 'multi', required: false, options: ['Diabetes', 'Hipertensión', 'Asma', 'Tiroides', 'Ninguna'], help: null },
+        { id: 'medicamentos', label: 'Medicamentos que tomas actualmente', type: 'text', required: false, options: [], help: null },
+        { id: 'alergiamed', label: '¿Eres alérgico a algún medicamento?', type: 'yesno', required: true, options: [], help: null },
+        { id: 'cirugia', label: 'Fecha de tu última cirugía (si aplica)', type: 'date', required: false, options: [], help: null },
+      ],
+      answers: [
+        { motivo: 'Dolor de cabeza frecuente desde hace dos semanas.', cronicas: ['Hipertensión'], medicamentos: 'Losartán 50 mg', alergiamed: false, cirugia: null },
+        { motivo: 'Chequeo anual y revisión de estudios de laboratorio.', cronicas: ['Ninguna'], medicamentos: '', alergiamed: true, cirugia: '2021-06-14' },
+        { motivo: 'Tos que no se quita.', cronicas: ['Asma'], medicamentos: 'Salbutamol', alergiamed: false, cirugia: null },
+      ],
+    },
+  ];
+  for (const sp of specs) {
+    const t = await tenantBySlug(sp.slug);
+    if (!t) continue;
+    const svc = (await db.select().from(services).where(eq(services.tenantId, t.id))).filter((s) => sp.services.includes(s.name));
+    if (!svc.length) continue;
+    const [form] = await db.insert(forms).values({ tenantId: t.id, name: sp.name, description: sp.description, fields: sp.fields, serviceIds: svc.map((s) => s.id), askOnline: true }).returning();
+    const res = await db.execute<{ id: string; customer_id: string }>(sql`
+      select distinct on (a.customer_id) a.id, a.customer_id from appointments a
+      where a.tenant_id = ${t.id} and a.service_id = ${svc.find((x) => x.name === sp.services[0])?.id ?? svc[0]!.id} and a.status in ('completed', 'scheduled', 'confirmed')
+      order by a.customer_id, a.starts_at desc limit 6`);
+    for (const [i, a] of res.rows.entries()) {
+      await saveResponse(db, { tenantId: t.id, customerId: a.customer_id, appointmentId: a.id, form: form!, values: sp.answers[i % sp.answers.length]!, source: i % 3 === 2 ? 'staff' : 'customer', authorName: i % 3 === 2 ? DEMO_OWNER.name : null });
+    }
+  }
 }
 
 /** Verified reviews on every business in the directory (on completed bookings). */

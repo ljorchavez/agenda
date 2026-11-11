@@ -385,7 +385,8 @@
       "account": "My account",
       "promos": "Promotions",
       "packages": "Packages",
-      "reviews": "Reviews"
+      "reviews": "Reviews",
+      "forms": "Questionnaires"
     }
   },
   "booking": {
@@ -745,7 +746,9 @@
     "plan_needs_completed": "Mark the booking as attended first.",
     "plan_no_sessions": "Not enough sessions left.",
     "already_reviewed": "This visit already has a review.",
-    "review_not_yet": "You can rate once your visit is over."
+    "review_not_yet": "You can rate once your visit is over.",
+    "form_required": "Answer the required questions (*).",
+    "form_invalid": "Check your answers."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -1243,5 +1246,61 @@
     "google": "On a computer open Google Calendar → \"Other calendars\" → \"+\" → \"From URL\" and paste the link.",
     "iphone": "Settings → Calendar → Accounts → Add account → Other → \"Add subscribed calendar\" and paste the link.",
     "note": "It updates by itself (Google can take a few hours). One way only: changes are made in Agenda."
+  },
+  "forms": {
+    "title": "Questionnaires",
+    "help": "Questions customers answer when booking (or your team fills in at the appointment). One questionnaire can be used on several booking types and answers are saved in the client record. Optional.",
+    "new": "New questionnaire",
+    "empty": "No questionnaires yet.",
+    "name": "Name",
+    "namePlaceholder": "E.g. Medical history",
+    "description": "Instructions (optional)",
+    "descriptionPlaceholder": "E.g. Your answers are confidential",
+    "questionsTitle": "Questions",
+    "question": "Question",
+    "questionPlaceholder": "Type the question",
+    "type": "Answer type",
+    "options": "Options",
+    "optionsPlaceholder": "One option per line",
+    "required": "Required",
+    "helpText": "Help",
+    "helpPlaceholder": "Help text (optional)",
+    "up": "Move up",
+    "down": "Move down",
+    "addQuestion": "Add question",
+    "services": "Asked on",
+    "servicesHelp": "Tick the booking types where it is used. The same questionnaire can be on several.",
+    "askOnline": "Ask when booking online",
+    "active": "Active",
+    "questions_one": "{{count}} question",
+    "questions_other": "{{count}} questions",
+    "noServices": "no booking type",
+    "online": "when booking",
+    "teamOnly": "team only",
+    "responses_one": "{{count}} answer",
+    "responses_other": "{{count}} answers",
+    "deleteConfirm": "Delete this questionnaire? Answers already saved stay in the client records.",
+    "types": {
+      "text": "Short text",
+      "longtext": "Long text",
+      "yesno": "Yes / No",
+      "choice": "One option",
+      "multi": "Several options",
+      "number": "Number",
+      "date": "Date"
+    },
+    "yes": "Yes",
+    "no": "No",
+    "answered": "Answered questionnaires",
+    "noneAnswered": "No answered questionnaires.",
+    "byCustomer": "answered by the customer",
+    "byTeam": "team",
+    "answeredByCustomer": "answered by the customer",
+    "answeredBy": "filled in by {{name}}",
+    "pending": "pending",
+    "fill": "Fill in",
+    "form_required": "Answer the required questions (*).",
+    "form_invalid": "Check your answers.",
+    "choice_needs_options": "Option questions need at least 2 options."
   }
 }

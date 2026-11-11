@@ -385,7 +385,8 @@
       "account": "Mi cuenta",
       "promos": "Promociones",
       "packages": "Paquetes",
-      "reviews": "Reseñas"
+      "reviews": "Reseñas",
+      "forms": "Cuestionarios"
     }
   },
   "booking": {
@@ -745,7 +746,9 @@
     "plan_needs_completed": "Primero marca la cita como \"Asistió\".",
     "plan_no_sessions": "Al paquete no le quedan sesiones suficientes.",
     "already_reviewed": "Esta visita ya tiene reseña.",
-    "review_not_yet": "Podrás calificar cuando termine tu visita."
+    "review_not_yet": "Podrás calificar cuando termine tu visita.",
+    "form_required": "Contesta las preguntas obligatorias (*).",
+    "form_invalid": "Revisa tus respuestas."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -1243,5 +1246,61 @@
     "google": "En la computadora abre Google Calendar → \"Otros calendarios\" → \"+\" → \"Desde URL\" y pega el enlace.",
     "iphone": "Ajustes → Calendario → Cuentas → Agregar cuenta → Otra → \"Agregar calendario suscrito\" y pega el enlace.",
     "note": "Se actualiza solo (Google puede tardar unas horas). Es de un solo sentido: los cambios se hacen en Agenda."
+  },
+  "forms": {
+    "title": "Cuestionarios",
+    "help": "Preguntas que el cliente contesta al reservar (o que tu equipo llena en la cita). Un cuestionario se puede usar en varios tipos de cita y las respuestas quedan en el expediente del cliente. Es opcional.",
+    "new": "Nuevo cuestionario",
+    "empty": "Aún no tienes cuestionarios.",
+    "name": "Nombre",
+    "namePlaceholder": "Ej. Historia clínica",
+    "description": "Instrucciones (opcional)",
+    "descriptionPlaceholder": "Ej. Tus respuestas son confidenciales",
+    "questionsTitle": "Preguntas",
+    "question": "Pregunta",
+    "questionPlaceholder": "Escribe la pregunta",
+    "type": "Tipo de respuesta",
+    "options": "Opciones",
+    "optionsPlaceholder": "Una opción por renglón",
+    "required": "Obligatoria",
+    "helpText": "Ayuda",
+    "helpPlaceholder": "Texto de ayuda (opcional)",
+    "up": "Subir",
+    "down": "Bajar",
+    "addQuestion": "Agregar pregunta",
+    "services": "Se pide en",
+    "servicesHelp": "Marca los tipos de cita donde se usa. El mismo cuestionario puede ir en varios.",
+    "askOnline": "Pedirlo al reservar en línea",
+    "active": "Activo",
+    "questions_one": "{{count}} pregunta",
+    "questions_other": "{{count}} preguntas",
+    "noServices": "sin tipo de cita",
+    "online": "al reservar",
+    "teamOnly": "solo el equipo",
+    "responses_one": "{{count}} respuesta",
+    "responses_other": "{{count}} respuestas",
+    "deleteConfirm": "¿Borrar este cuestionario? Las respuestas ya guardadas se quedan en los expedientes.",
+    "types": {
+      "text": "Texto corto",
+      "longtext": "Texto largo",
+      "yesno": "Sí / No",
+      "choice": "Una opción",
+      "multi": "Varias opciones",
+      "number": "Número",
+      "date": "Fecha"
+    },
+    "yes": "Sí",
+    "no": "No",
+    "answered": "Cuestionarios contestados",
+    "noneAnswered": "Sin cuestionarios contestados.",
+    "byCustomer": "contestó el cliente",
+    "byTeam": "equipo",
+    "answeredByCustomer": "lo contestó el cliente",
+    "answeredBy": "lo llenó {{name}}",
+    "pending": "pendiente",
+    "fill": "Llenar",
+    "form_required": "Contesta las preguntas obligatorias (*).",
+    "form_invalid": "Revisa tus respuestas.",
+    "choice_needs_options": "Las preguntas de opciones necesitan al menos 2 opciones."
   }
 }

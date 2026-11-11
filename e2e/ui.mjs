@@ -306,6 +306,58 @@ if (toReview) {
   await page.getByTestId('review-done').waitFor({ timeout: 6000 }).catch(() => {});
   ok('customer leaves a verified review', await page.getByTestId('review-done').isVisible().catch(() => false));
 } else ok('a completed booking to review exists', false);
+// ---- Questionnaires (nutrition demo): builder, asked when booking online, answers in the record
+{
+  const login = await api('/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const nutri = login.businesses.find((b) => b.slug === 'nutricion-demo');
+  const ntok = (await api('/auth/switch', { tenantId: nutri.id }, login.token)).token;
+  await page.evaluate((t) => localStorage.setItem('agenda.token', t), ntok);
+  await page.goto('http://localhost:5173/settings?tab=forms');
+  await page.getByTestId('forms-section').filter({ hasText: 'Historia clínica nutricional' }).waitFor({ timeout: 8000 }).catch(() => {});
+  ok('questionnaires tab lists the form and its booking types', ((await page.getByTestId('forms-section').textContent()) ?? '').match(/Historia clínica nutricional[\s\S]*Consulta inicial[\s\S]*Plan alimenticio/) != null);
+  await page.getByTestId('forms-section').getByRole('button', { name: /Nuevo cuestionario/ }).click();
+  await page.fill('#fm-name', 'Cuestionario UI');
+  await page.getByTestId('form-question').first().getByRole('textbox', { name: 'Pregunta' }).fill('¿Fumas?');
+  await page.getByTestId('form-question').first().getByRole('combobox', { name: 'Tipo de respuesta' }).selectOption('yesno');
+  await page.getByTestId('form-builder').getByRole('button', { name: /Agregar pregunta/ }).click();
+  await page.getByTestId('form-question').nth(1).getByRole('textbox', { name: 'Pregunta' }).fill('Deporte favorito');
+  await page.getByTestId('form-question').nth(1).getByRole('combobox', { name: 'Tipo de respuesta' }).selectOption('choice');
+  await page.getByTestId('form-question').nth(1).getByRole('textbox', { name: 'Opciones' }).fill('Correr\nNadar');
+  await page.getByTestId('form-builder').getByText('Consulta de seguimiento').click();
+  await page.getByTestId('form-builder').getByRole('button', { name: 'Guardar' }).click();
+  await page.getByTestId('forms-section').filter({ hasText: 'Cuestionario UI' }).waitFor({ timeout: 8000 }).catch(() => {});
+  const made = (await api('/forms', null, ntok)).find((f) => f.name === 'Cuestionario UI');
+  ok('builder saves a questionnaire with options and a booking type', made?.fields?.length === 2 && made.fields[1].options.join() === 'Correr,Nadar' && made.serviceIds.length === 1, JSON.stringify(made ?? null).slice(0, 200));
+  if (made) await api(`/forms/${made.id}`, null, ntok, 'DELETE');
+  // Booking page asks it for "Consulta inicial"
+  const before = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
+  await page.goto('http://localhost:5173/b/nutricion-demo');
+  await page.getByRole('button', { name: /Consulta inicial/ }).first().click();
+  await page.getByTestId('day').nth(4).click();
+  await page.getByTestId('slot').first().waitFor({ timeout: 8000 }).catch(() => {});
+  await page.getByTestId('slot').first().click();
+  const fs = page.getByTestId(`form-${before?.id}`);
+  await fs.waitFor({ timeout: 6000 }).catch(() => {});
+  ok('booking page asks the questionnaire for that booking type', ((await fs.textContent().catch(() => '')) ?? '').includes('objetivo principal'));
+  await page.getByPlaceholder('Nombre', { exact: true }).fill('Paciente Cuestionario UI');
+  await page.getByPlaceholder('WhatsApp', { exact: true }).fill('5516160001');
+  await page.locator('form .btn-primary').last().click();
+  ok('required questions are enforced before booking', await page.getByRole('alert').filter({ hasText: 'obligatorias' }).isVisible().catch(() => false));
+  await fs.getByRole('combobox').selectOption('Comer mejor');
+  await fs.getByRole('radio', { name: 'Sí' }).first().check();
+  await page.locator('form .btn-primary').last().click();
+  await page.waitForTimeout(2500);
+  const after = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
+  ok('online answers saved', (after?.responses ?? 0) === (before?.responses ?? 0) + 1, `${before?.responses} -> ${after?.responses}`);
+  // Client record shows the answered questionnaire
+  const pc = (await api(`/customers?q=${encodeURIComponent('Paciente Cuestionario UI')}`, null, ntok)).items?.[0];
+  if (pc) {
+    await page.goto(`http://localhost:5173/customers/${pc.id}`);
+    await page.getByTestId('record-responses').waitFor({ timeout: 8000 }).catch(() => {});
+    await page.getByTestId('record-responses').getByRole('button').first().click().catch(() => {});
+    ok('record shows the answered questionnaire', ((await page.getByTestId('record-responses').textContent().catch(() => '')) ?? '').match(/Historia clínica nutricional[\s\S]*Comer mejor/) != null);
+  } else ok('questionnaire customer created', false);
+}
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));

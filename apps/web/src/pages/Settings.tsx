@@ -1,3 +1,4 @@
+import { FormsSection } from '../components/Forms';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageLookSection } from '../components/PageLook';
@@ -205,6 +206,7 @@ function BusinessSettings() {
     { id: 'payments', label: t('settings.tabs.payments') },
     ...(businessManager ? [{ id: 'promos', label: t('settings.tabs.promos') }] : []),
     { id: 'packages', label: t('settings.tabs.packages') },
+    { id: 'forms', label: t('settings.tabs.forms') },
     { id: 'reviews', label: t('settings.tabs.reviews') },
     ...(businessManager ? [{ id: 'locations', label: t('settings.tabs.locations') }] : []),
     { id: 'users', label: t('settings.tabs.users') },
@@ -426,6 +428,7 @@ function BusinessSettings() {
           <GiftCardsList />
         </div>
       )}
+      {tab === 'forms' && <FormsSection disabled={!businessManager} />}
       {tab === 'reviews' && <ReviewsSection />}
       {tab === 'account' && (
         <div className="grid items-start gap-6 lg:grid-cols-2">

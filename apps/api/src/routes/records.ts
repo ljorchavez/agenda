@@ -14,6 +14,7 @@ import { getScope, scopeSql } from '../lib/access.js';
 import { decryptSecret, encryptSecret } from '../lib/crypto.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { assertFeature, assertPhotoRoom } from '../lib/plan.js';
+import { listResponses } from '../lib/forms.js';
 import type { AppEnv } from '../middleware/auth.js';
 
 /**
@@ -39,7 +40,7 @@ const dec = (v: string | null) => {
 const TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 /** Owners and admins; team members only for customers they attended. 404 otherwise. */
-async function assertAccess(c: Context<AppEnv>, customerId: string) {
+export async function assertAccess(c: Context<AppEnv>, customerId: string) {
   const db = getDb();
   const tenantId = c.get('tenantId');
   const cu = await db.query.customers.findFirst({ where: and(eq(customers.id, customerId), eq(customers.tenantId, tenantId)) });
@@ -76,6 +77,7 @@ recordRoutes.get('/customers/:id/record', async (c) => {
     notes: notes.map((n) => ({ id: n.id, body: dec(n.bodyEnc) ?? '', appointmentId: n.appointmentId, authorName: n.authorName, createdAt: n.createdAt.toISOString() })),
     photos: photos.map((p) => ({ id: p.id, kind: p.kind, note: dec(p.noteEnc), appointmentId: p.appointmentId, sizeBytes: p.sizeBytes, createdAt: p.createdAt.toISOString() })),
     photosEnabled: Boolean(photoToken()),
+    responses: await listResponses(db, tenantId, { customerId }),
   };
   c.header('Cache-Control', 'private, no-store');
   return c.json(body);

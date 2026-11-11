@@ -1,3 +1,4 @@
+import { AppointmentForms } from '../components/Forms';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1323,6 +1324,8 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
           </p>
         </div>
       )}
+
+      <div className="mt-4"><AppointmentForms appointmentId={cur.id} /></div>
 
       {status === 'completed' && cur.customerPhone && (
         <a

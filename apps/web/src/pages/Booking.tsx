@@ -1,3 +1,4 @@
+import { FormFields, formsError, type FormValues } from '../components/Forms';
 import { PublicReviews, RatingBadge } from '../components/Reviews';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -253,6 +254,7 @@ function DayPicker({ days, value, onChange, badge }: { days: Date[]; value: stri
             key={v}
             type="button"
             onClick={() => onChange(v)}
+            data-testid="day"
             className={`min-w-16 rounded-lg border px-2 py-2 text-center text-sm ${value === v ? 'border-brand-600 bg-brand-50' : 'border-slate-200'}`}
           >
             <div className="text-xs capitalize text-slate-500">{format(d, 'EEE', { locale: dateLocale() })}</div>
@@ -283,6 +285,7 @@ function SlotGrid({ loading, slots, value, onChange, tz }: { loading: boolean; s
           key={s}
           type="button"
           onClick={() => onChange(s)}
+          data-testid="slot"
           className={`rounded-lg border py-2 text-sm ${value === s ? 'border-brand-600 bg-brand-700 text-white' : 'border-slate-200 hover:border-slate-400'}`}
         >
           {fmt.format(new Date(s))}
@@ -292,10 +295,16 @@ function SlotGrid({ loading, slots, value, onChange, tz }: { loading: boolean; s
   );
 }
 
+/** Online questionnaires for a booking type (null = the business has one implicit type: tables, spaces). */
+const formsFor = (business: PublicBusinessDto, serviceId: string | null) =>
+  (business.forms ?? []).filter((f) => !serviceId || f.serviceIds.includes(serviceId));
+
 type CouponCheck = { code: string; discountType: 'percent' | 'amount'; value: number };
 
-function CustomerForm({ onSubmit, pending, error, summary, cta, promo }: {
-  onSubmit: (f: { name: string; phone: string; email?: string; couponCode?: string }) => void;
+function CustomerForm({ onSubmit, pending, error, summary, cta, promo, forms = [] }: {
+  onSubmit: (f: { name: string; phone: string; email?: string; couponCode?: string; forms?: { formId: string; values: FormValues }[] }) => void;
+  /** Questionnaires the business asks for this booking type */
+  forms?: PublicFormDto[];
   pending: boolean;
   error: unknown;
   summary?: ReactNode;
@@ -312,8 +321,24 @@ function CustomerForm({ onSubmit, pending, error, summary, cta, promo }: {
     onSuccess: setCoupon,
   });
   const off = coupon && promo ? discountCents(promo.totalCents, coupon) : 0;
+  const [answers, setAnswers] = useState<Record<string, FormValues>>({});
+  const [formErr, setFormErr] = useState<string | null>(null);
   return (
-    <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, email: form.email || undefined, ...(coupon ? { couponCode: coupon.code } : {}) }); }}>
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const err = formsError(forms, answers);
+        setFormErr(err);
+        if (err) return;
+        onSubmit({
+          ...form,
+          email: form.email || undefined,
+          ...(coupon ? { couponCode: coupon.code } : {}),
+          ...(forms.length ? { forms: forms.map((f) => ({ formId: f.id, values: answers[f.id] ?? {} })) } : {}),
+        });
+      }}
+    >
       <h2 className="font-semibold">{t('booking.yourData')}</h2>
       {summary}
       {promo?.reward && promo.totalCents > 0 && (
@@ -340,6 +365,12 @@ function CustomerForm({ onSubmit, pending, error, summary, cta, promo }: {
           </div>
         )
       )}
+      {forms.map((f) => (
+        <div key={f.id} className="rounded-lg border border-slate-200 p-3">
+          <FormFields form={f} values={answers[f.id] ?? {}} onChange={(v) => setAnswers((a) => ({ ...a, [f.id]: v }))} prefix="bk" />
+        </div>
+      ))}
+      {formErr && <p className="text-sm text-rose-700" role="alert">{t(`forms.${formErr}`)}</p>}
       <button className="btn-primary w-full" disabled={pending}>{cta}</button>
       <ErrorText error={error} ns="booking" />
     </form>
@@ -518,6 +549,7 @@ function BookingFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
           error={error}
           cta={t(`kinds.${kind}.confirm`)}
           promo={{ slug: business.slug, totalCents: total, coupons: business.promos.coupons, reward: business.promos.reward }}
+          forms={formsFor(business, needsService ? serviceId : null)}
           summary={
             <p className="rounded-lg bg-slate-50 p-3 text-sm">
               {[
@@ -638,6 +670,7 @@ function ClassesFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
           error={error}
           cta={t(`kinds.${business.kind}.confirm`)}
           promo={{ slug: business.slug, totalCents: chosen.priceCents * spots, coupons: business.promos.coupons, reward: business.promos.reward }}
+          forms={formsFor(business, chosen.serviceId)}
           summary={chosen.priceCents > 0 && <p className="rounded-lg bg-slate-50 p-3 text-sm">{t('booking.total')}: <b>{money(chosen.priceCents * spots)}</b></p>}
           onSubmit={(f) => onBook({ classSessionId: chosen.id, spots, ...f })}
         />
