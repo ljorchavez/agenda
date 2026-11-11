@@ -276,9 +276,11 @@ await page.goto('http://localhost:5173/agenda');
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
 await page.locator('[role=listbox] button').first().click();
 if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
-await page.fill('#na-coupon', 'amigo50');
-await page.getByTestId('discount-preview').filter({ hasText: 'AMIGO50' }).waitFor({ timeout: 8000 }).catch(() => {});
-ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('AMIGO50'));
+const tmpCoupon = await api('/coupons', { code: 'PRUEBAUI30', discountType: 'percent', value: 30, maxUsesPerCustomer: null }, tok);
+await page.fill('#na-coupon', 'pruebaui30');
+await page.getByTestId('discount-preview').filter({ hasText: 'PRUEBAUI30' }).waitFor({ timeout: 8000 }).catch(() => {});
+ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('PRUEBAUI30'));
+if (tmpCoupon?.id) await api(`/coupons/${tmpCoupon.id}`, null, tok, 'DELETE');
 await page.keyboard.press('Escape');
 // ---- Packages, records, commissions, cash, reviews and calendar
 await page.goto('http://localhost:5173/settings?tab=packages');
