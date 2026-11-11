@@ -32,7 +32,7 @@ export function isWhatsAppConfigured(): boolean {
 /**
  * Sends the reminder template. The template (category "utility") must be approved in
  * Meta Business Manager with 4 body variables and 2 quick-reply buttons:
- *   "Hola {{1}}, te recordamos tu cita en {{2}} el {{3}} a las {{4}}."
+ *   "Hola {{1}}, te recordamos que tienes una cita en {{2}} el {{3}} a las {{4}}. …"
  *   [Confirmar] [Cancelar]
  * Button payloads come back in the webhook as CONFIRM:<appointmentId> / CANCEL:<appointmentId>.
  */
@@ -106,6 +106,18 @@ export function samePhone(a: string, b: string): boolean {
   return norm(a) !== '' && norm(a) === norm(b);
 }
 
+/**
+ * Demo businesses (slug "*-demo") are public and their customers' phones are made up, so they
+ * only message the numbers listed in WHATSAPP_TEST_TO (comma-separated). Real businesses always can.
+ */
+export function whatsappAllowedFor(slug: string, phone: string): boolean {
+  if (!slug.endsWith('-demo')) return true;
+  return (process.env.WHATSAPP_TEST_TO ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .some((x) => x !== '' && samePhone(x, phone));
+}
+
 /** Any approved template with text variables (and an optional URL button suffix). */
 export async function sendTemplate(p: { to: string; template: string; params: string[]; urlSuffix?: string }): Promise<SendResult> {
   const body = {
@@ -148,7 +160,7 @@ export const WHATSAPP_TEMPLATES = [
     name: process.env.WHATSAPP_REMINDER_TEMPLATE ?? 'appointment_reminder',
     category: 'UTILITY',
     components: [
-      { type: 'BODY', text: 'Hola {{1}}, te recordamos tu cita en {{2}} el {{3}} a las {{4}}.', example: { body_text: [['Ana', 'Consultorio Demo', 'jueves 12 de noviembre', '11:00']] } },
+      { type: 'BODY', text: 'Hola {{1}}, te recordamos que tienes una cita en {{2}} el {{3}} a las {{4}}. Usa los botones de abajo para confirmar tu asistencia o cancelar la cita. ¡Te esperamos!', example: { body_text: [['Ana', 'Consultorio Demo', 'jueves 12 de noviembre', '11:00']] } },
       { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'Confirmar' }, { type: 'QUICK_REPLY', text: 'Cancelar' }] },
     ],
   },
@@ -181,8 +193,9 @@ export async function ensureWhatsAppTemplates(): Promise<string> {
       headers: { ...auth, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: t.name, language: process.env.WHATSAPP_TEMPLATE_LANG ?? 'es_MX', category: t.category, components: t.components }),
     });
-    const json = (await res.json()) as { status?: string; error?: { message?: string } };
-    out.push(`${t.name}: ${res.ok ? `created (${json.status ?? 'PENDING'})` : `error ${json.error?.message ?? res.status}`}`);
+    const json = (await res.json()) as { status?: string; error?: { message?: string; error_user_title?: string; error_user_msg?: string } };
+    const why = [json.error?.message, json.error?.error_user_title, json.error?.error_user_msg].filter(Boolean).join(' · ');
+    out.push(`${t.name}: ${res.ok ? `created (${json.status ?? 'PENDING'})` : `error ${why || res.status}`}`);
   }
   return out.join('; ');
 }

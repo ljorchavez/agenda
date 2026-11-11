@@ -8,6 +8,7 @@ import { policy } from '../src/routes/manage.js';
 import { pickResource } from '../src/lib/resources.js';
 import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
+import { whatsappAllowedFor } from '../src/integrations/whatsapp.js';
 
 describe('slugify', () => {
   it('removes accents and spaces', () => {
@@ -188,5 +189,18 @@ describe('pickResource', () => {
     expect(KIND_CONFIG.classes.sessions).toBe(true);
     expect(KIND_CONFIG.rentals.durations).toBe(true);
     expect(KIND_CONFIG.reservations.keepResourceOnReschedule).toBe(false);
+  });
+});
+
+describe('whatsappAllowedFor', () => {
+  it('demo businesses only message the test numbers', () => {
+    const prev = process.env.WHATSAPP_TEST_TO;
+    process.env.WHATSAPP_TEST_TO = '+523120000001, +525500000002';
+    expect(whatsappAllowedFor('mi-negocio', '+523129999999')).toBe(true);
+    expect(whatsappAllowedFor('medico-demo', '+523129999999')).toBe(false);
+    expect(whatsappAllowedFor('medico-demo', '+5213120000001')).toBe(true);
+    delete process.env.WHATSAPP_TEST_TO;
+    expect(whatsappAllowedFor('medico-demo', '+523120000001')).toBe(false);
+    if (prev !== undefined) process.env.WHATSAPP_TEST_TO = prev;
   });
 });

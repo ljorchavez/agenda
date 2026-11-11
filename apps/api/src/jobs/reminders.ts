@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { getDb } from '../db/client.js';
 import { messageLogs } from '../db/schema.js';
-import { sendReminder } from '../integrations/whatsapp.js';
+import { sendReminder, whatsappAllowedFor } from '../integrations/whatsapp.js';
 import { notifyAppointment } from '../lib/notify.js';
 
 type DueRow = {
@@ -13,6 +13,7 @@ type DueRow = {
   customer_phone: string | null;
   customer_email: string | null;
   business_name: string;
+  slug: string;
   timezone: string;
   locale: string;
 };
@@ -50,12 +51,12 @@ export async function sendDueReminders(
     from due, customers c, tenants t
     where a.id = due.id and c.id = a.customer_id and t.id = a.tenant_id
     returning a.id, a.tenant_id, a.starts_at, c.name as customer_name, c.phone as customer_phone, c.email as customer_email,
-              t.name as business_name, t.timezone, t.locale`);
+              t.name as business_name, t.slug, t.timezone, t.locale`);
 
   let sent = 0;
   for (const r of due.rows) {
     const emailed = r.customer_email ? await notifyAppointment(r.id, 'reminder') : false;
-    if (!r.customer_phone) {
+    if (!r.customer_phone || !whatsappAllowedFor(r.slug, r.customer_phone)) {
       if (emailed) sent++;
       continue;
     }

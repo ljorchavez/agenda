@@ -9,7 +9,7 @@ import { getDb } from '../db/client.js';
 import { messageLogs } from '../db/schema.js';
 import { manageToken, portalToken } from './crypto.js';
 import { escapeHtml, sendEmail } from './email.js';
-import { isWhatsAppConfigured, sendTemplate, WHATSAPP_TEMPLATES } from '../integrations/whatsapp.js';
+import { isWhatsAppConfigured, sendTemplate, whatsappAllowedFor, WHATSAPP_TEMPLATES } from '../integrations/whatsapp.js';
 
 export type AppointmentEmail = 'booked' | 'rescheduled' | 'cancelled' | 'reminder';
 
@@ -167,7 +167,7 @@ export async function notifyAppointment(appointmentId: string, kind: Appointment
 
 /** WhatsApp confirmation (template with a button to the manage page), if the business turned it on. */
 async function whatsappConfirmation(r: Row) {
-  if (!r.customer_phone || !r.settings?.whatsappConfirmations || !isWhatsAppConfigured()) return;
+  if (!r.customer_phone || !r.settings?.whatsappConfirmations || !isWhatsAppConfigured() || !whatsappAllowedFor(r.slug, r.customer_phone)) return;
   const start = DateTime.fromJSDate(new Date(r.starts_at)).setZone(r.timezone).setLocale(r.locale === 'en' ? 'en' : 'es');
   const tpl = WHATSAPP_TEMPLATES[1]!.name;
   const res = await sendTemplate({
@@ -176,6 +176,7 @@ async function whatsappConfirmation(r: Row) {
     params: [r.customer_name.split(' ')[0] ?? r.customer_name, r.business_name, start.toFormat(r.locale === 'en' ? 'cccc, LLLL d' : "cccc d 'de' LLLL"), start.toFormat(r.locale === 'en' ? 'h:mm a' : 'HH:mm')],
     urlSuffix: manageToken(r.id),
   });
+  if (res.status === 'failed') console.warn('[whatsapp] confirmation failed:', res.error);
   await getDb()
     .insert(messageLogs)
     .values({ tenantId: r.tenant_id, appointmentId: r.id, template: tpl, toPhone: r.customer_phone, status: res.status, providerMessageId: res.providerMessageId ?? null, error: res.error ?? null })
