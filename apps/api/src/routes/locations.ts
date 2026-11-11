@@ -5,7 +5,7 @@ import { getDb } from '../db/client.js';
 import { locations } from '../db/schema.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { listLocations, planFor, toLocationDto } from '../lib/locations.js';
-import { assertCanAddLocation } from '../lib/plan.js';
+import { assertCanAddLocation, planOf } from '../lib/plan.js';
 import { requireBusinessManager, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -16,8 +16,9 @@ import { requireBusinessManager, type AppEnv } from '../middleware/auth.js';
 export const locationRoutes = new Hono<AppEnv>();
 
 locationRoutes.get('/locations', async (c) => {
-  const list = await listLocations(getDb(), c.get('tenantId'));
-  return c.json({ locations: list.map(toLocationDto), plan: planFor(list) });
+  const db = getDb();
+  const list = await listLocations(db, c.get('tenantId'));
+  return c.json({ locations: list.map(toLocationDto), plan: planFor(list, await planOf(db, c.get('tenantId'))) });
 });
 
 const clean = (input: ReturnType<typeof locationInputSchema.parse>) => ({
@@ -42,7 +43,7 @@ locationRoutes.post('/locations', requireBusinessManager, async (c) => {
     .values({ ...clean(input), tenantId: c.get('tenantId'), isPrimary: false })
     .returning();
   const list = await listLocations(db, c.get('tenantId'));
-  return c.json({ location: toLocationDto(row!), plan: planFor(list) }, 201);
+  return c.json({ location: toLocationDto(row!), plan: planFor(list, await planOf(db, c.get('tenantId'))) }, 201);
 });
 
 locationRoutes.put('/locations/:id', requireBusinessManager, async (c) => {
@@ -62,5 +63,5 @@ locationRoutes.put('/locations/:id', requireBusinessManager, async (c) => {
   }
   const [row] = await db.update(locations).set(clean(input)).where(eq(locations.id, id)).returning();
   const list = await listLocations(db, tenantId);
-  return c.json({ location: toLocationDto(row!), plan: planFor(list) });
+  return c.json({ location: toLocationDto(row!), plan: planFor(list, await planOf(db, c.get('tenantId'))) });
 });

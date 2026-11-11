@@ -1,5 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
-import { PLAN_INCLUDED_LOCATIONS, type BusinessHours, type LocationDto, type PlanDto, type PublicLocationDto } from '@agenda/shared';
+import { PLAN_LIMITS, type BusinessHours, type PlanId, type LocationDto, type PlanDto, type PublicLocationDto } from '@agenda/shared';
 import type { Db } from '../db/client.js';
 import { locations, type Location, type Tenant } from '../db/schema.js';
 import { AppError } from './errors.js';
@@ -66,12 +66,13 @@ export function toPublicLocation(tenant: Tenant, l: Location): PublicLocationDto
   };
 }
 
-export function planFor(list: Pick<Location, 'active'>[]): PlanDto {
+export function planFor(list: Pick<Location, 'active'>[], plan: PlanId): PlanDto {
   const activeLocations = list.filter((l) => l.active).length;
+  const included = PLAN_LIMITS[plan].includedLocations;
   return {
-    includedLocations: PLAN_INCLUDED_LOCATIONS,
+    includedLocations: included,
     activeLocations,
-    extraLocations: Math.max(0, activeLocations - PLAN_INCLUDED_LOCATIONS),
+    extraLocations: Math.max(0, activeLocations - included),
   };
 }
 

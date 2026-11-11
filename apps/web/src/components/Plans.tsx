@@ -12,7 +12,8 @@ function features(t: (k: string, o?: Record<string, unknown>) => string, plan: P
   const l = PLAN_LIMITS[plan];
   return [
     t('plans.oneBusiness'),
-    t('plans.oneLocation'),
+    l.includedLocations > 1 ? t('plans.locationsIncluded', { count: l.includedLocations }) : t('plans.oneLocation'),
+    ...(l.maxResources != null ? [t('plans.oneAgenda')] : []),
     l.maxCustomers == null ? t('plans.unlimitedCustomers') : t('plans.maxCustomers', { count: l.maxCustomers }),
     l.maxBookingsPerMonth == null ? t('plans.unlimitedBookings') : t('plans.maxBookings', { count: l.maxBookingsPerMonth }),
     l.extraLocations ? t('plans.extrasAllowed') : t('plans.noExtras'),
@@ -20,6 +21,7 @@ function features(t: (k: string, o?: Record<string, unknown>) => string, plan: P
     ...(l.packages ? [t('plans.packagesIncluded')] : []),
     ...(l.records ? [t('plans.recordsIncluded', { gb: l.recordPhotosMb >= 1024 ? Math.round(l.recordPhotosMb / 1024) : l.recordPhotosMb / 1024 })] : []),
     ...(l.cash ? [t('plans.cashIncluded')] : []),
+    ...(l.prioritySupport ? [t('plans.prioritySupport')] : []),
   ];
 }
 
@@ -27,7 +29,7 @@ function features(t: (k: string, o?: Record<string, unknown>) => string, plan: P
 export function PlanCards({ current, onPick, busy }: { current?: PlanId; onPick: (p: PlanId) => void; busy?: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="grid gap-3 md:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {PLANS.map((p) => {
         const l = PLAN_LIMITS[p];
         const available = SELECTABLE_PLANS.includes(p);
@@ -45,12 +47,12 @@ export function PlanCards({ current, onPick, busy }: { current?: PlanId; onPick:
             <div className="mt-2 text-2xl font-bold text-slate-900">
               {l.priceCents == null ? t('plans.soon') : l.priceCents === 0 ? t('plans.freePrice') : (
                 <>
-                  {money(l.priceCents)} <span className="text-sm font-normal text-slate-500">{t('plans.perMonth')}</span>
+                  {money(l.priceCents)} <span className="text-sm font-normal text-slate-500">{t('plans.plusIva')} {t('plans.perMonth')}</span>
                 </>
               )}
             </div>
             <ul className="mt-3 flex-1 space-y-1.5 text-sm text-slate-700">
-              {(available ? features(t, p) : [t('plans.premiumSoon')]).map((f) => (
+              {features(t, p).map((f) => (
                 <li key={f} className="flex gap-2"><span className="text-brand-700">✓</span>{f}</li>
               ))}
             </ul>
@@ -123,7 +125,7 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
               <div className="text-xs text-slate-500">{t('plans.yourPlan')}</div>
               <div className="font-semibold">{t(`plans.${p.plan}`)}</div>
               <div className="text-xs text-slate-500">
-                {p.monthlyTotalCents == null ? t('plans.soon') : p.monthlyTotalCents === 0 ? t('plans.freePrice') : `${money(p.monthlyTotalCents)} ${t('plans.perMonth')}`}
+                {p.monthlyTotalCents == null ? t('plans.soon') : p.monthlyTotalCents === 0 ? t('plans.freePrice') : `${money(p.monthlyTotalCents)} ${t('plans.plusIva')} ${t('plans.perMonth')}`}
               </div>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
@@ -136,10 +138,15 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <div className="text-xs text-slate-500">{t('plans.locations')}</div>
-              {meter(p.usage.activeLocations, p.limits.extraLocations ? null : 1)}
+              {meter(p.usage.activeLocations, p.limits.extraLocations ? null : p.limits.includedLocations)}
               {p.extraLocations > 0 && <div className="text-xs text-slate-500">{t('plans.extraLocationsN', { count: p.extraLocations })}</div>}
             </div>
           </div>
+          {p.limits.maxResources != null && (
+            <p className="text-xs text-slate-500" data-testid="resource-usage">
+              {t('plans.agendasUsed', { used: p.usage.activeResources, max: p.limits.maxResources })}
+            </p>
+          )}
           {p.limits.records && (
             <p className="text-xs text-slate-500" data-testid="photo-usage">
               {t('plans.photoUsage', { used: p.usage.recordPhotosMb, total: p.limits.recordPhotosMb >= 1024 ? `${p.limits.recordPhotosMb / 1024} GB` : `${p.limits.recordPhotosMb} MB` })}

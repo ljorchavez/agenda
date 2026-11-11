@@ -6,6 +6,9 @@ import './i18n';
 import './index.css';
 import { App } from './App';
 import { AuthProvider } from './lib/auth';
+import { registerServiceWorker } from './components/InstallApp';
+
+registerServiceWorker();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: true } },

@@ -26,6 +26,7 @@ import { couponRoutes } from './routes/coupons.js';
 import { uploadRoutes } from './routes/uploads.js';
 import { saleRoutes } from './routes/sales.js';
 import { formRoutes } from './routes/forms.js';
+import { shareRoutes } from './routes/share.js';
 import { recordRoutes } from './routes/records.js';
 import { cashRoutes } from './routes/cash.js';
 import { publicReviewRoutes, reviewRoutes } from './routes/reviews.js';
@@ -69,6 +70,7 @@ export function createApp() {
   app.route('/', webhookRoutes);
   app.route('/', publicReviewRoutes);
   app.route('/', publicCalendarRoutes);
+  app.route('/', shareRoutes);
   app.route('/', passwordRoutes);
   app.route('/', authRoutes); // register/login are public; the rest apply requireAuth per route
 

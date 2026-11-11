@@ -538,13 +538,27 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('directory has a pin per barbershop location', d.entries.filter((e) => e.slug === 'barberia-demo').length === 2);
 }
 
+// ---- Link preview and installable app
+{
+  const page = await fetch(`${BASE}/b/barberia-demo`);
+  const html = await page.text();
+  check('business link has its own preview (og tags)', page.status === 200 && /og:title" content="[^"]*Barber/i.test(html) && /og:image" content="https:/.test(html), html.slice(0, 200));
+  check('preview page still loads the app', html.includes('<div id="root">'));
+  const man = await fetch(`${BASE}/manifest.webmanifest`);
+  const mj = await man.json().catch(() => null);
+  check('app manifest with icons', man.status === 200 && mj?.display === 'standalone' && mj?.icons?.length >= 2);
+  check('service worker served', (await fetch(`${BASE}/sw.js`)).status === 200);
+}
+
 // ---- Plans
 {
   const owner = await asDemo('barberia-demo');
   const p = await call('GET', '/api/tenant/plan', null, owner.token);
   check('plan info for the business', p.status === 200 && p.body.plan === 'premium' && p.body.usage.activeLocations === 2 && p.body.billingConnected === false, p.text.slice(0, 200));
   check('plan is part of the session', owner.tenant?.plan === 'premium');
-  check('premium is not selectable yet', (await call('PUT', '/api/tenant/plan', { plan: 'premium' }, owner.token)).status === 422);
+  check('premium includes 2 locations at $799', p.body.limits?.includedLocations === 2 && p.body.limits?.priceCents === 79900 && p.body.extraLocations === 0, JSON.stringify(p.body.limits ?? null).slice(0, 200));
+  const ind = await call('PUT', '/api/tenant/plan', { plan: 'individual' }, owner.token);
+  check('individual plan refused for a business that outgrew it', ind.status === 402 && /plan_limit_(locations|resources)/.test(ind.body?.error ?? ''), ind.text.slice(0, 200));
   // Sign-up limits (local runs only: creates a new account)
   if (process.env.E2E_SIGNUP) {
     const email = `free-${Date.now()}@test.mx`;

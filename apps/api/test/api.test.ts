@@ -1376,6 +1376,73 @@ d('API (integration)', () => {
     expect((await call('GET', `/customers/${appt.customerId}/record`, undefined, tok)).body.responses[0].formName).toBe('Historia clínica');
   });
 
+  it('"any available": least used, cheapest free or favorites, as the business chooses', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Canchas Regla', businessType: 'barbershop', name: 'Dueño Regla', email: 'regla@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const slug = reg.tenant.slug;
+    const svc = (await call('POST', '/services', { name: 'Turno', durationMin: 60, priceCents: 40000 }, tok)).body;
+    const cara = (await call('POST', '/resources', { name: 'A Central', pricePerHourCents: 55000, serviceIds: [svc.id] }, tok)).body;
+    await call('POST', '/resources', { name: 'B Norte', pricePerHourCents: 45000, serviceIds: [svc.id] }, tok);
+    await call('POST', '/resources', { name: 'C Sur', pricePerHourCents: 45000, serviceIds: [svc.id] }, tok);
+    const setRule = async (assignment: unknown) => {
+      const me = (await call('GET', '/auth/me', undefined, tok)).body;
+      const r = await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, assignment } }, tok);
+      expect(r.status).toBe(200);
+    };
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 3 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const slots = (await call('GET', `/public/${slug}/availability?serviceId=${svc.id}&date=${day.toISODate()}`)).body.slots as string[];
+    const book = async (i: number) => (await call('POST', `/public/${slug}/bookings`, { serviceId: svc.id, resourceId: null, startsAt: slots[i], name: `Cliente ${i}`, phone: `55666600${10 + i}` })).body;
+    // Default (least used, then name): A Central
+    expect((await book(0)).resourceName).toBe('A Central');
+    await setRule({ strategy: 'cheapest', preferredIds: [] });
+    const cheap = await book(2);
+    expect(['B Norte', 'C Sur']).toContain(cheap.resourceName);
+    expect(cheap.priceCents).toBe(45000);
+    await setRule({ strategy: 'preferred', preferredIds: [cara.id] });
+    expect((await book(4)).resourceName).toBe('A Central');
+  });
+
+  it('link preview for a business page', async () => {
+    const res = await app.request('/api/page/b/negocio-a');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('og:title" content="Negocio a');
+    expect(html).toContain('og:image" content="');
+    expect(html).toContain('<div id="root">');
+    const none = await (await app.request('/api/page/b/no-existe')).text();
+    expect(none).not.toContain('og:url');
+  });
+
+  it('plans: Individual is one agenda; Premium includes two locations', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Plan Individual', businessType: 'psychology', name: 'Psic Uno', email: 'individual@test.mx', password: 'password123', plan: 'individual',
+    })).body;
+    const tok = reg.token;
+    expect(reg.tenant.plan).toBe('individual');
+    expect((await call('POST', '/resources', { name: 'Yo' }, tok)).status).toBe(201);
+    const second = await call('POST', '/resources', { name: 'Otra' }, tok);
+    expect(second.status).toBe(402);
+    expect(second.body.error).toBe('plan_limit_resources');
+    // Inactive ones don't count; reactivating does
+    const off = (await call('POST', '/resources', { name: 'Archivo', active: false }, tok));
+    expect(off.status).toBe(201);
+    expect((await call('PUT', `/resources/${off.body.id}`, { name: 'Archivo', active: true }, tok)).status).toBe(402);
+    expect((await call('POST', '/locations', { name: 'Segunda' }, tok)).status).toBe(402);
+    const info = (await call('GET', '/tenant/plan', undefined, tok)).body;
+    expect(info).toMatchObject({ plan: 'individual', monthlyTotalCents: 24900, usage: { activeResources: 1 } });
+    // Premium: second location included, third is an extra
+    expect((await call('PUT', '/tenant/plan', { plan: 'premium' }, tok)).status).toBe(200);
+    expect((await call('POST', '/resources', { name: 'Otra' }, tok)).status).toBe(201);
+    expect((await call('POST', '/locations', { name: 'Segunda' }, tok)).body.plan).toMatchObject({ includedLocations: 2, extraLocations: 0 });
+    expect((await call('GET', '/tenant/plan', undefined, tok)).body.monthlyTotalCents).toBe(79900);
+    expect((await call('POST', '/locations', { name: 'Tercera' }, tok)).body.plan.extraLocations).toBe(1);
+    // Back to Individual is refused while it has more than one agenda/location
+    expect((await call('PUT', '/tenant/plan', { plan: 'individual' }, tok)).status).toBe(402);
+  });
+
   it('verified reviews and calendar links', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Reseñas Prueba', businessType: 'barbershop', name: 'Dueño Reseñas', email: 'resenas@test.mx', password: 'password123',

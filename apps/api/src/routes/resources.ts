@@ -6,6 +6,7 @@ import { appointments, memberships, resources, services } from '../db/schema.js'
 import { notFound } from '../lib/errors.js';
 import { guardRow, locationForWrite } from '../lib/locations.js';
 import { toResourceDto } from '../lib/mappers.js';
+import { assertCanAddResource } from '../lib/plan.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -60,6 +61,7 @@ resourceRoutes.post('/resources', requireManager, async (c) => {
   const locationId = (await locationForWrite(db, c, input.locationId, { create: true }))!;
   const row = await db.transaction(async (tx) => {
     await tx.execute(sql`select id from tenants where id = ${tenantId} for update`);
+    if (input.active) await assertCanAddResource(tx, tenantId);
     const before = await tx
       .select({ id: resources.id })
       .from(resources)
@@ -97,6 +99,7 @@ resourceRoutes.put('/resources/:id', requireManager, async (c) => {
   const current = await db.query.resources.findFirst({ where: and(eq(resources.id, id), eq(resources.tenantId, tenantId)) });
   if (!current) throw notFound('resource');
   const locationId = await locationForWrite(db, c, input.locationId, { current: current.locationId });
+  if (!current.active && input.active) await assertCanAddResource(db, tenantId);
   if (input.userId) {
     await db.update(resources).set({ userId: null }).where(and(eq(resources.tenantId, tenantId), eq(resources.userId, input.userId), ne(resources.id, id)));
   }

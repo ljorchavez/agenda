@@ -1,3 +1,4 @@
+import { InstallAppBanner } from './InstallApp';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isManager, kindConfig, type BusinessKind } from '@agenda/shared';
@@ -134,6 +135,7 @@ export function Layout() {
 
       <main className="px-4 pb-24 pt-6 md:ml-60 md:px-8 md:pb-10">
         <div className="mx-auto max-w-6xl">
+          <InstallAppBanner />
           <Outlet />
         </div>
       </main>

@@ -19,6 +19,8 @@ rm -rf "$OUT"
 mkdir -p "$OUT/static" "$OUT/functions/api.func"
 cp -r apps/web/dist/. "$OUT/static/"
 cp apps/api/dist-vercel/index.mjs "$OUT/functions/api.func/index.mjs"
+# App page with link-preview tags filled in per business (/b/<slug>, routes/share.ts)
+cp apps/web/dist/index.html "$OUT/functions/api.func/app.html"
 
 cat > "$OUT/functions/api.func/.vc-config.json" <<'JSON'
 {
@@ -35,6 +37,7 @@ cat > "$OUT/config.json" <<'JSON'
   "version": 3,
   "routes": [
     { "src": "^/api/(.*)$", "dest": "/api?__path=$1" },
+    { "src": "^/b/([^/]+)/?$", "dest": "/api?__path=page/b/$1" },
     { "handle": "filesystem" },
     { "src": "^/(.*)$", "dest": "/index.html" }
   ],

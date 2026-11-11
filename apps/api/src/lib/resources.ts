@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { eligibleResources, intervalsOnWeekday, RESOURCE_COLORS, reservationSettingsOf, type BusinessKind, type HoursBreak } from '@agenda/shared';
+import { assignmentSettingsOf, eligibleResources, intervalsOnWeekday, RESOURCE_COLORS, reservationSettingsOf, type AssignmentSettings, type BusinessKind, type HoursBreak } from '@agenda/shared';
 import type { Db } from '../db/client.js';
 import { resources, services, tenants, type Resource, type Service, type Tenant } from '../db/schema.js';
 import { AppError } from './errors.js';
@@ -19,7 +19,7 @@ export type Interval = { s: Date; e: Date };
  * spreading bookings between resources.
  */
 export type Busy = Interval & { rid: string | null; soft?: boolean };
-export type ResourceLite = Pick<Resource, 'id' | 'name' | 'serviceIds' | 'capacity'>;
+export type ResourceLite = Pick<Resource, 'id' | 'name' | 'serviceIds' | 'capacity'> & { pricePerHourCents?: number | null };
 export type Need = { serviceId?: string | null; partySize?: number | null };
 
 const overlaps = (b: Interval, start: Date, end: Date) => b.s < end && b.e > start;
@@ -40,13 +40,27 @@ export async function activeResources(db: Pick<Db, 'select'>, tenantId: string, 
  * Order: smallest capacity that fits (best table for the party), then the least busy (spreads the
  * work), then by name. Bookings without a resource use up one resource each.
  */
-export function pickResource<T extends ResourceLite>(list: T[], busy: Busy[], start: Date, end: Date): T | null {
+/**
+ * Free resource for [start, end). Default: tightest capacity, then least used that day. The
+ * business can choose (Configuración → Reservas) to give the cheapest one or its favorites first.
+ */
+export function pickResource<T extends ResourceLite>(list: T[], busy: Busy[], start: Date, end: Date, rule?: AssignmentSettings): T | null {
   const free = list.filter((r) => !busy.some((b) => b.rid === r.id && overlaps(b, start, end)));
   const unassigned = busy.filter((b) => b.rid === null && overlaps(b, start, end)).length;
   if (free.length <= unassigned) return null;
   const load = (id: string) => busy.filter((b) => b.rid === id && !b.soft).length;
   const cap = (r: T) => r.capacity ?? Number.MAX_SAFE_INTEGER;
-  return [...free].sort((a, b) => cap(a) - cap(b) || load(a.id) - load(b.id) || byName(a, b))[0]!;
+  const base = (a: T, b: T) => cap(a) - cap(b) || load(a.id) - load(b.id) || byName(a, b);
+  let first: (a: T, b: T) => number = () => 0;
+  if (rule?.strategy === 'cheapest') first = (a, b) => (a.pricePerHourCents ?? 0) - (b.pricePerHourCents ?? 0);
+  if (rule?.strategy === 'preferred') {
+    const rank = (r: T) => {
+      const i = rule.preferredIds.indexOf(r.id);
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    first = (a, b) => rank(a) - rank(b);
+  }
+  return [...free].sort((a, b) => first(a, b) || base(a, b))[0]!;
 }
 
 /**
@@ -104,7 +118,7 @@ export async function assignResource(
     if (!pickResource([r], busy, start, end)) throw new AppError(409, 'resource_busy', 'Busy, blocked or off at that time');
     return r;
   }
-  const chosen = pickResource(eligibleResources(list, opts), busy, start, end);
+  const chosen = pickResource(eligibleResources(list, opts), busy, start, end, await assignmentRule(db, tenantId));
   if (!chosen) throw new AppError(409, 'no_resource_available', 'Nothing available at that time');
   return chosen;
 }
@@ -152,6 +166,12 @@ export function starterResources(kind: BusinessKind, type: string): { name: stri
     return [{ name: 'Estudio A', color: '#2563eb', pricePerHourCents: 0 }];
   }
   return [];
+}
+
+/** How "Cualquiera disponible" picks among free resources (tenant setting). */
+export async function assignmentRule(db: Pick<Db, 'select'>, tenantId: string): Promise<AssignmentSettings> {
+  const [t] = await db.select({ settings: tenants.settings }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+  return assignmentSettingsOf(t?.settings as { assignment?: AssignmentSettings } | undefined);
 }
 
 export async function tenantTimezone(db: Pick<Db, 'select'>, tenantId: string): Promise<string> {

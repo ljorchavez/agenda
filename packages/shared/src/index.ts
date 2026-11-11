@@ -426,7 +426,20 @@ export const tenantSettingsSchema = z.object({
       durations: z.array(z.number().int().min(15).max(720)).min(1).max(8),
     })
     .optional(),
+  /** Who gets a booking made with "Cualquiera disponible" */
+  assignment: z
+    .object({
+      strategy: z.enum(['least_used', 'cheapest', 'preferred']),
+      /** For 'preferred': people/spaces in order of preference (the rest go after, least used first) */
+      preferredIds: z.array(z.string().uuid()).max(200).default([]),
+    })
+    .optional(),
 });
+export type AssignmentSettings = { strategy: 'least_used' | 'cheapest' | 'preferred'; preferredIds: string[] };
+export const ASSIGNMENT_STRATEGIES = ['least_used', 'cheapest', 'preferred'] as const;
+export function assignmentSettingsOf(settings: { assignment?: Partial<AssignmentSettings> } | null | undefined): AssignmentSettings {
+  return { strategy: settings?.assignment?.strategy ?? 'least_used', preferredIds: settings?.assignment?.preferredIds ?? [] };
+}
 export type TenantSettings = z.infer<typeof tenantSettingsSchema>;
 export type ReservationSettings = NonNullable<TenantSettings['reservations']>;
 export const DEFAULT_RESERVATION_SETTINGS: ReservationSettings = { durationMin: 90, maxPartySize: 8 };
@@ -472,7 +485,7 @@ export const registerSchema = z.object({
   phone: phoneSchema.optional(),
   locale: z.enum(LOCALES).default('es'),
   /** Plan chosen before creating the account */
-  plan: z.enum(['free', 'standard']).default('free'),
+  plan: z.lazy(() => z.enum(PLANS)).default('free'),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
@@ -591,10 +604,10 @@ export const PLAN_INCLUDED_LOCATIONS = 1;
 // ---------- Subscription plans ----------
 // Each business has its own plan. Prices are provisional and live only here.
 
-export const PLANS = ['free', 'standard', 'premium'] as const;
+export const PLANS = ['free', 'individual', 'standard', 'premium'] as const;
 export type PlanId = (typeof PLANS)[number];
-/** Plans a customer can pick today (Premium is coming soon). */
-export const SELECTABLE_PLANS: readonly PlanId[] = ['free', 'standard'];
+/** Plans a customer can pick today. */
+export const SELECTABLE_PLANS: readonly PlanId[] = ['free', 'individual', 'standard', 'premium'];
 
 export interface PlanLimits {
   /** null = unlimited */
@@ -605,8 +618,14 @@ export interface PlanLimits {
   extraLocations: boolean;
   /** Can be one of several businesses of the same owner */
   extraBusinesses: boolean;
-  /** Monthly price in cents (MXN, IVA incluido); null = to be defined */
+  /** Monthly price in cents (MXN, before IVA: shown "+ IVA"); null = to be defined */
   priceCents: number | null;
+  /** Locations included in the price (extra active ones are an add-on when allowed) */
+  includedLocations: number;
+  /** Active people/spaces/tables per business; null = unlimited */
+  maxResources: number | null;
+  /** Support answered first */
+  prioritySupport: boolean;
   /** Packages, memberships and gift cards */
   packages: boolean;
   /** Client record (allergies, notes, photos) */
@@ -619,16 +638,20 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   // Reviews and the calendar link are in every plan.
-  free: { maxCustomers: 5, maxBookingsPerMonth: null, extraLocations: false, extraBusinesses: false, priceCents: 0, packages: false, records: false, cash: false, recordPhotosMb: 0 },
-  standard: { maxCustomers: null, maxBookingsPerMonth: 500, extraLocations: true, extraBusinesses: true, priceCents: 39_900, packages: true, records: true, cash: true, recordPhotosMb: 1024 },
-  premium: { maxCustomers: null, maxBookingsPerMonth: null, extraLocations: true, extraBusinesses: true, priceCents: null, packages: true, records: true, cash: true, recordPhotosMb: 10240 },
+  free: { maxCustomers: 5, maxBookingsPerMonth: null, extraLocations: false, extraBusinesses: false, priceCents: 0, includedLocations: 1, maxResources: null, prioritySupport: false, packages: false, records: false, cash: false, recordPhotosMb: 0 },
+  // One professional (or one court/room): everything in Estándar for a single agenda.
+  individual: { maxCustomers: null, maxBookingsPerMonth: 500, extraLocations: false, extraBusinesses: true, priceCents: 24_900, includedLocations: 1, maxResources: 1, prioritySupport: false, packages: true, records: true, cash: true, recordPhotosMb: 1024 },
+  standard: { maxCustomers: null, maxBookingsPerMonth: 500, extraLocations: true, extraBusinesses: true, priceCents: 39_900, includedLocations: 1, maxResources: null, prioritySupport: false, packages: true, records: true, cash: true, recordPhotosMb: 1024 },
+  premium: { maxCustomers: null, maxBookingsPerMonth: null, extraLocations: true, extraBusinesses: true, priceCents: 79_900, includedLocations: 2, maxResources: null, prioritySupport: true, packages: true, records: true, cash: true, recordPhotosMb: 10240 },
 };
 
-/** Add-ons, per month (MXN, IVA incluido). */
+/** Add-ons, per month (MXN, + IVA). */
 export const ADDON_PRICES = { extraLocationCents: 19_900, extraBusinessCents: 29_900 } as const;
 
 export interface PlanUsage {
   customers: number;
+  /** Active people/spaces/tables */
+  activeResources: number;
   bookingsThisMonth: number;
   activeLocations: number;
   /** Record photos stored, in MB */

@@ -748,7 +748,8 @@
     "already_reviewed": "This visit already has a review.",
     "review_not_yet": "You can rate once your visit is over.",
     "form_required": "Answer the required questions (*).",
-    "form_invalid": "Check your answers."
+    "form_invalid": "Check your answers.",
+    "plan_limit_resources": "Your plan includes a single agenda (1 professional or space). Switch to Standard to add more."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -897,7 +898,6 @@
     "freePrice": "$0",
     "perMonth": "/ month",
     "soon": "Coming soon",
-    "premiumSoon": "Advanced features for larger businesses. Coming soon.",
     "oneBusiness": "1 business",
     "oneLocation": "1 location",
     "maxCustomers_one": "Up to {{count}} customer",
@@ -912,7 +912,7 @@
     "current": "Your current plan",
     "change": "change",
     "changePlan": "Change plan",
-    "extras": "Add-ons: each extra location {{location}} / month and each extra business {{business}} / month. Prices include VAT.",
+    "extras": "Extras: each additional location {{location}} / month and each additional business {{business}} / month. Prices + VAT.",
     "billingSoon": "Automatic card billing is coming soon; until then plan changes have no charge.",
     "section": "Plan and usage",
     "yourPlan": "Your plan",
@@ -924,12 +924,19 @@
     "extraLocationsN_one": "{{count}} extra location",
     "extraLocationsN_other": "{{count}} extra locations",
     "extraBusinessNote": "This business is billed as an additional business of your account.",
-    "newBusinessNote": "Each additional business costs {{price}} a month and includes everything in Standard.",
+    "newBusinessNote": "Each additional business costs {{price}} + VAT a month and includes everything in Standard.",
     "reviewsCalendar": "Verified reviews and calendar link",
     "packagesIncluded": "Packages, memberships and gift cards",
     "recordsIncluded": "Client records with photos ({{gb}} GB)",
     "cashIncluded": "Commissions and cash closing",
-    "photoUsage": "Record photos: {{used}} MB of {{total}}"
+    "photoUsage": "Record photos: {{used}} MB of {{total}}",
+    "individual": "Individual",
+    "plusIva": "+ VAT",
+    "locationsIncluded_one": "{{count}} location included",
+    "locationsIncluded_other": "{{count}} locations included",
+    "oneAgenda": "1 professional or space (a single agenda)",
+    "prioritySupport": "Priority support on WhatsApp",
+    "agendasUsed": "Active agendas (people or spaces): {{used}} of {{max}}"
   },
   "categories": {
     "health": "Health",
@@ -1299,5 +1306,20 @@
     "form_required": "Answer the required questions (*).",
     "form_invalid": "Check your answers.",
     "choice_needs_options": "Option questions need at least 2 options."
+  },
+  "assignment": {
+    "title": "When the customer picks \"Any available\"",
+    "help": "Which {{what}} gets the booking when the customer doesn't choose one.",
+    "least_used": "The one with fewest bookings that day",
+    "least_usedHelp": "Spreads the work evenly.",
+    "cheapest": "The cheapest one that is free",
+    "cheapestHelp": "So the customer pays the \"from\" price they saw.",
+    "preferred": "My favorites, in this order",
+    "preferredHelp": "Uses the first free one on your list; sort it with the arrows."
+  },
+  "install": {
+    "title": "Install Agenda on your phone",
+    "button": "Install",
+    "ios": "In Safari tap Share (□↑) and then \"Add to Home Screen\"."
   }
 }

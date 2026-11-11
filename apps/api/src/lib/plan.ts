@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { ADDON_PRICES, PLAN_INCLUDED_LOCATIONS, PLAN_LIMITS, type PlanId, type PlanInfoDto, type PlanUsage } from '@agenda/shared';
+import { ADDON_PRICES, PLAN_LIMITS, type PlanId, type PlanInfoDto, type PlanUsage } from '@agenda/shared';
 import type { Db } from '../db/client.js';
 import { memberships, tenants } from '../db/schema.js';
 import { AppError } from './errors.js';
@@ -13,9 +13,10 @@ type Q = Pick<Db, 'execute'>;
 const num = (v: unknown) => Number(v ?? 0);
 
 export async function planUsage(db: Q, tenantId: string): Promise<PlanUsage> {
-  const res = await db.execute<{ customers: string; bookings: string; locations: string; photo_bytes: string }>(sql`
+  const res = await db.execute<{ customers: string; resources: string; bookings: string; locations: string; photo_bytes: string }>(sql`
     select
       (select count(*) from customers where tenant_id = ${tenantId}) as customers,
+      (select count(*) from resources where tenant_id = ${tenantId} and active) as resources,
       (select count(*) from appointments where tenant_id = ${tenantId}
          and created_at >= date_trunc('month', now())) as bookings,
       (select count(*) from locations where tenant_id = ${tenantId} and active) as locations,
@@ -23,13 +24,14 @@ export async function planUsage(db: Q, tenantId: string): Promise<PlanUsage> {
   const r = res.rows[0];
   return {
     customers: num(r?.customers),
+    activeResources: num(r?.resources),
     bookingsThisMonth: num(r?.bookings),
     activeLocations: num(r?.locations),
     recordPhotosMb: Math.round((num(r?.photo_bytes) / (1024 * 1024)) * 10) / 10,
   };
 }
 
-const planOf = async (db: Q, tenantId: string): Promise<PlanId> => {
+export const planOf = async (db: Q, tenantId: string): Promise<PlanId> => {
   const res = await db.execute<{ plan: PlanId }>(sql`select plan from tenants where id = ${tenantId}`);
   return res.rows[0]?.plan ?? 'free';
 };
@@ -70,9 +72,19 @@ export async function assertCanAddBooking(db: Q, tenantId: string) {
 
 /** 402 when the plan doesn't allow another active location. */
 export async function assertCanAddLocation(db: Q, tenantId: string) {
-  if (PLAN_LIMITS[await planOf(db, tenantId)].extraLocations) return;
-  if ((await planUsage(db, tenantId)).activeLocations >= PLAN_INCLUDED_LOCATIONS) {
+  const limits = PLAN_LIMITS[await planOf(db, tenantId)];
+  if (limits.extraLocations) return;
+  if ((await planUsage(db, tenantId)).activeLocations >= limits.includedLocations) {
     throw new AppError(402, 'plan_limit_locations', 'This plan includes one location');
+  }
+}
+
+/** 402 when the plan doesn't allow another active person/space/table (Individual: one). */
+export async function assertCanAddResource(db: Q, tenantId: string) {
+  const limit = PLAN_LIMITS[await planOf(db, tenantId)].maxResources;
+  if (limit == null) return;
+  if ((await planUsage(db, tenantId)).activeResources >= limit) {
+    throw new AppError(402, 'plan_limit_resources', `This plan includes ${limit} agenda`);
   }
 }
 
@@ -102,7 +114,7 @@ export async function planInfo(db: Q, tenantId: string, billingConnected: boolea
   const plan = await planOf(db, tenantId);
   const limits = PLAN_LIMITS[plan];
   const usage = await planUsage(db, tenantId);
-  const extraLocations = Math.max(0, usage.activeLocations - PLAN_INCLUDED_LOCATIONS);
+  const extraLocations = Math.max(0, usage.activeLocations - limits.includedLocations);
   const extraBusiness = plan !== 'free' && (await isExtraBusiness(db, tenantId));
   const base = extraBusiness ? ADDON_PRICES.extraBusinessCents : limits.priceCents;
   return {
@@ -123,7 +135,10 @@ export async function assertFitsPlan(db: Q, tenantId: string, plan: PlanId) {
   if (limits.maxCustomers != null && usage.customers > limits.maxCustomers) {
     throw new AppError(402, 'plan_limit_customers', `This plan includes up to ${limits.maxCustomers} customers`);
   }
-  if (!limits.extraLocations && usage.activeLocations > PLAN_INCLUDED_LOCATIONS) {
+  if (!limits.extraLocations && usage.activeLocations > limits.includedLocations) {
     throw new AppError(402, 'plan_limit_locations', 'This plan includes one location');
+  }
+  if (limits.maxResources != null && usage.activeResources > limits.maxResources) {
+    throw new AppError(402, 'plan_limit_resources', `This plan includes ${limits.maxResources} agenda`);
   }
 }

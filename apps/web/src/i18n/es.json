@@ -748,7 +748,8 @@
     "already_reviewed": "Esta visita ya tiene reseña.",
     "review_not_yet": "Podrás calificar cuando termine tu visita.",
     "form_required": "Contesta las preguntas obligatorias (*).",
-    "form_invalid": "Revisa tus respuestas."
+    "form_invalid": "Revisa tus respuestas.",
+    "plan_limit_resources": "Tu plan incluye una sola agenda (1 profesional o espacio). Cambia a Estándar para agregar más."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -897,7 +898,6 @@
     "freePrice": "$0",
     "perMonth": "/ mes",
     "soon": "Próximamente",
-    "premiumSoon": "Funciones avanzadas para negocios grandes. Muy pronto.",
     "oneBusiness": "1 negocio",
     "oneLocation": "1 sucursal",
     "maxCustomers_one": "Hasta {{count}} cliente",
@@ -912,7 +912,7 @@
     "current": "Tu plan actual",
     "change": "cambiar",
     "changePlan": "Cambiar plan",
-    "extras": "Extras: cada sucursal adicional {{location}} / mes y cada negocio adicional {{business}} / mes. Precios con IVA incluido.",
+    "extras": "Extras: cada sucursal adicional {{location}} / mes y cada negocio adicional {{business}} / mes. Precios + IVA.",
     "billingSoon": "El cobro automático con tarjeta se activará pronto; mientras tanto el cambio de plan no tiene cargo.",
     "section": "Plan y uso",
     "yourPlan": "Tu plan",
@@ -924,12 +924,19 @@
     "extraLocationsN_one": "{{count}} sucursal extra",
     "extraLocationsN_other": "{{count}} sucursales extra",
     "extraBusinessNote": "Este negocio se cobra como negocio adicional de tu cuenta.",
-    "newBusinessNote": "Cada negocio adicional cuesta {{price}} al mes e incluye lo del plan Estándar.",
+    "newBusinessNote": "Cada negocio adicional cuesta {{price}} + IVA al mes e incluye lo del plan Estándar.",
     "reviewsCalendar": "Reseñas verificadas y enlace de calendario",
     "packagesIncluded": "Paquetes, membresías y tarjetas de regalo",
     "recordsIncluded": "Expediente del cliente con fotos ({{gb}} GB)",
     "cashIncluded": "Comisiones y corte de caja",
-    "photoUsage": "Fotos de expediente: {{used}} MB de {{total}}"
+    "photoUsage": "Fotos de expediente: {{used}} MB de {{total}}",
+    "individual": "Individual",
+    "plusIva": "+ IVA",
+    "locationsIncluded_one": "{{count}} sucursal incluida",
+    "locationsIncluded_other": "{{count}} sucursales incluidas",
+    "oneAgenda": "1 profesional o espacio (una sola agenda)",
+    "prioritySupport": "Soporte prioritario por WhatsApp",
+    "agendasUsed": "Agendas activas (personas o espacios): {{used}} de {{max}}"
   },
   "categories": {
     "health": "Salud",
@@ -1299,5 +1306,20 @@
     "form_required": "Contesta las preguntas obligatorias (*).",
     "form_invalid": "Revisa tus respuestas.",
     "choice_needs_options": "Las preguntas de opciones necesitan al menos 2 opciones."
+  },
+  "assignment": {
+    "title": "Cuando el cliente elige \"Cualquiera disponible\"",
+    "help": "Qué {{what}} recibe la reserva si el cliente no elige uno.",
+    "least_used": "El que tenga menos reservas ese día",
+    "least_usedHelp": "Reparte el trabajo parejo.",
+    "cheapest": "El más barato que esté libre",
+    "cheapestHelp": "Así el cliente paga el precio \"desde\" que vio.",
+    "preferred": "Mis favoritos, en este orden",
+    "preferredHelp": "Usa el primero libre de tu lista; acomódala con las flechas."
+  },
+  "install": {
+    "title": "Instala Agenda en tu celular",
+    "button": "Instalar",
+    "ios": "En Safari toca Compartir (□↑) y luego \"Agregar a inicio\"."
   }
 }

@@ -323,6 +323,17 @@ export function AgendaPage() {
   // Classes are scheduled by managers; bookings by anyone.
   const canCreate = !cfg.sessions || manager;
   const newAt = (at: Date, locationId?: string, resourceId?: string) => setCreating({ at, locationId: locationId ?? loc, resourceId });
+  // Home-screen shortcut "Nueva cita" (/agenda?new=1) opens the form once.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('new') !== '1' || !canCreate) return;
+    q.delete('new');
+    window.history.replaceState(null, '', `${window.location.pathname}${q.toString() ? `?${q}` : ''}`);
+    const at = new Date();
+    at.setMinutes(at.getMinutes() < 30 ? 30 : 60, 0, 0);
+    setCreating({ at, locationId: loc });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   let columns: CalColumn[];
   if (view === 'day' && byResource) {

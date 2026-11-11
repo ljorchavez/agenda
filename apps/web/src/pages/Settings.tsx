@@ -1,4 +1,5 @@
 import { FormsSection } from '../components/Forms';
+import { AssignmentSettingsSection } from '../components/Assignment';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageLookSection } from '../components/PageLook';
@@ -10,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   assignableRoles,
+  assignmentSettingsOf,
   BUSINESS_TYPES,
   isManager,
   isValidClabe,
@@ -161,6 +163,7 @@ function BusinessSettings() {
     reservations: reservationSettingsOf(tenant!.settings),
     rentals: rentalSettingsOf(tenant!.settings),
     page: pageSettingsOf(tenant!.settings),
+    assignment: assignmentSettingsOf(tenant!.settings),
   });
   const kind = tenant?.kind ?? 'appointments';
   const isRentals = kindConfig(kind).durations;
@@ -361,6 +364,10 @@ function BusinessSettings() {
                 })}
               </div>
             </>
+          )}
+
+          {!isRestaurant && !kindConfig(kind).sessions && (
+            <AssignmentSettingsSection kind={kind} disabled={!canEdit} value={assignmentSettingsOf(settings)} onChange={(v) => setSettings((x) => ({ ...x, assignment: v }))} />
           )}
 
           <h2 className="pt-2 font-semibold">{t('settings.selfService')}</h2>
