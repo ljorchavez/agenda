@@ -822,7 +822,6 @@ export const publicClassBookingSchema = z.object({
   email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
   notes: z.string().max(1000).optional(),
   couponCode: z.string().trim().max(30).optional(),
-  forms: z.lazy(() => z.array(formAnswersSchema).max(10)).optional(),
 });
 export type PublicClassBookingInput = z.infer<typeof publicClassBookingSchema>;
 
@@ -1103,7 +1102,6 @@ export const publicBookingSchema = z.object({
   notes: z.string().max(1000).optional(),
   couponCode: z.string().trim().max(30).optional(),
   /** Answers to the questionnaires of the chosen service */
-  forms: z.lazy(() => z.array(formAnswersSchema).max(10)).optional(),
 });
 export type PublicBookingInput = z.infer<typeof publicBookingSchema>;
 
@@ -1389,8 +1387,6 @@ export interface PublicBusinessDto {
   page: PageSettings & { gallery: string[] };
   /** Verified reviews: average, count and the latest ones */
   reviews: ReviewSummaryDto;
-  /** Questionnaires asked when booking online (per service) */
-  forms: PublicFormDto[];
   /** Promotions customers can see: coupon box and the loyalty reward */
   promos: { coupons: boolean; reward: Pick<RewardSettings, 'everyVisits' | 'discountType' | 'value'> | null };
 }
@@ -1715,9 +1711,8 @@ export const formInputSchema = z
     name: z.string().trim().min(2).max(100),
     description: z.string().trim().max(500).nullable().optional(),
     fields: z.array(formFieldSchema).min(1).max(40),
-    /** Booking types (services) it is asked on; a form can be on several */
+    /** Booking types (services) it is filled on; a form can be on several */
     serviceIds: z.array(z.string().uuid()).max(200).default([]),
-    askOnline: z.boolean().default(true),
     active: z.boolean().default(true),
   })
   .refine((f) => f.fields.every((x) => !['choice', 'multi'].includes(x.type) || x.options.length >= 2), { path: ['fields'], message: 'choice_needs_options' })
@@ -1729,11 +1724,10 @@ export interface FormDto {
   description: string | null;
   fields: FormField[];
   serviceIds: string[];
-  askOnline: boolean;
   active: boolean;
   responses: number;
 }
-/** What the booking page needs to ask */
+/** A form's questions (to fill it in a booking) */
 export interface PublicFormDto {
   id: string;
   name: string;

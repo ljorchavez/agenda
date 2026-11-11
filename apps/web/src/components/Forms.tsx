@@ -34,7 +34,7 @@ export function answerText(t: (k: string) => string, a: Pick<FormAnswerDto, 'typ
   return String(v);
 }
 
-/** Inputs for a form's questions (booking page, appointment modal). */
+/** Inputs for a form's questions (filled by the team in the appointment). */
 export function FormFields({ form, values, onChange, prefix }: { form: PublicFormDto; values: FormValues; onChange: (v: FormValues) => void; prefix: string }) {
   const { t } = useTranslation();
   const set = (id: string, v: FormAnswerValue) => onChange({ ...values, [id]: v });
@@ -182,6 +182,7 @@ export function AppointmentForms({ appointmentId }: { appointmentId: string }) {
   });
   const [editing, setEditing] = useState<string | null>(null);
   const [values, setValues] = useState<FormValues>({});
+  const [localErr, setLocalErr] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (formId: string) => api(`/appointments/${appointmentId}/forms`, { method: 'POST', body: { formId, values } }),
     onSuccess: () => {
@@ -196,8 +197,18 @@ export function AppointmentForms({ appointmentId }: { appointmentId: string }) {
       <h3 className="label">{t('forms.title')}</h3>
       {list.data.map(({ form, response }) =>
         editing === form.id ? (
-          <form key={form.id} className="space-y-3 rounded-lg border border-slate-200 p-3" onSubmit={(e) => { e.preventDefault(); save.mutate(form.id); }}>
+          <form
+            key={form.id}
+            className="space-y-3 rounded-lg border border-slate-200 p-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const err = formsError([form], { [form.id]: values });
+              setLocalErr(err);
+              if (!err) save.mutate(form.id);
+            }}
+          >
             <FormFields form={form} values={values} onChange={setValues} prefix="appt" />
+            {localErr && <p className="text-sm text-rose-700" role="alert">{t(`forms.${localErr}`)}</p>}
             <ErrorText error={save.error} ns="forms" />
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-secondary" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
@@ -216,7 +227,11 @@ export function AppointmentForms({ appointmentId }: { appointmentId: string }) {
                 )}
               </span>
               {form.fields.length > 0 && (
-                <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => { setValues(valuesFrom(response)); setEditing(form.id); }}>
+                <button
+                  type="button"
+                  className={response ? 'text-xs text-brand-700 hover:underline' : 'btn-primary !px-3 !py-1 text-xs'}
+                  onClick={() => { setValues(valuesFrom(response)); setLocalErr(null); setEditing(form.id); }}
+                >
                   {response ? t('common.edit') : t('forms.fill')}
                 </button>
               )}
@@ -240,12 +255,12 @@ export function AppointmentForms({ appointmentId }: { appointmentId: string }) {
 
 // ---------- Builder (Configuración → Cuestionarios) ----------
 
-type Draft = { id?: string; name: string; description: string; fields: (FormField & { optionsText: string })[]; serviceIds: string[]; askOnline: boolean; active: boolean };
+type Draft = { id?: string; name: string; description: string; fields: (FormField & { optionsText: string })[]; serviceIds: string[]; active: boolean };
 
 const toDraft = (f?: FormDto): Draft =>
   f
-    ? { id: f.id, name: f.name, description: f.description ?? '', fields: f.fields.map((x) => ({ ...x, optionsText: x.options.join('\n') })), serviceIds: f.serviceIds, askOnline: f.askOnline, active: f.active }
-    : { name: '', description: '', fields: [{ id: newId(), label: '', type: 'text', required: false, options: [], help: null, optionsText: '' }], serviceIds: [], askOnline: true, active: true };
+    ? { id: f.id, name: f.name, description: f.description ?? '', fields: f.fields.map((x) => ({ ...x, optionsText: x.options.join('\n') })), serviceIds: f.serviceIds, active: f.active }
+    : { name: '', description: '', fields: [{ id: newId(), label: '', type: 'text', required: false, options: [], help: null, optionsText: '' }], serviceIds: [], active: true };
 
 export function FormsSection({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
@@ -271,7 +286,6 @@ export function FormsSection({ disabled }: { disabled: boolean }) {
             options: hasOptions(f.type) ? optionsText.split('\n').map((x) => x.trim()).filter(Boolean) : [],
           })),
           serviceIds: d.serviceIds,
-          askOnline: d.askOnline,
           active: d.active,
         },
       }),
@@ -305,7 +319,6 @@ export function FormsSection({ disabled }: { disabled: boolean }) {
                 <div className="font-medium">{f.name}</div>
                 <div className="text-xs text-slate-500">
                   {t('forms.questions', { count: f.fields.length })} · {f.serviceIds.length ? f.serviceIds.map(svcName).filter(Boolean).join(', ') : t('forms.noServices')}
-                  {f.askOnline ? ` · ${t('forms.online')}` : ` · ${t('forms.teamOnly')}`}
                   {f.responses > 0 && ` · ${t('forms.responses', { count: f.responses })}`}
                 </div>
               </div>
@@ -381,10 +394,6 @@ export function FormsSection({ disabled }: { disabled: boolean }) {
             <p className="mt-1 text-xs text-slate-500">{t('forms.servicesHelp')}</p>
           </fieldset>
           <div className="flex flex-wrap gap-4 text-sm">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={draft.askOnline} onChange={(e) => setDraft({ ...draft, askOnline: e.target.checked })} />
-              {t('forms.askOnline')}
-            </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
               {t('forms.active')}

@@ -209,12 +209,13 @@ mismo precio) y mostrar el precio final antes de confirmar si solo queda uno má
 ## 11b. Cuestionarios por tipo de cita (hecho, migración 0012)
 
 - Configuración → **Cuestionarios**: cada negocio arma formularios (texto corto/largo, sí/no, una opción, varias opciones, número, fecha; obligatoria o no). Son opcionales.
-- Un cuestionario se marca en **varios tipos de cita** (se reutiliza). Opción "Pedirlo al reservar en línea"; si no, solo lo llena el equipo.
-- Al reservar en línea se piden las preguntas del servicio elegido; las obligatorias se validan (422 `form_required`).
-- En la cita, el equipo ve las respuestas o llena/corrige el cuestionario. Todo queda en el **expediente** del cliente (cifrado, mismos permisos que el expediente).
+- Un cuestionario se marca en **varios tipos de cita** (se reutiliza).
+- **Lo llena el negocio durante la cita** (en la ventana de la cita: "Llenar"). La reserva en línea NO pregunta nada, para que reservar siga siendo rápido.
+- Las respuestas quedan en el **expediente** del cliente (cifrado, mismos permisos que el expediente) y muestran quién las llenó.
 - Las respuestas guardan una copia de las preguntas: editar o borrar el cuestionario no cambia lo ya contestado.
 - Va con la función de expediente (plan Estándar y Premium).
 - Demo: nutrición "Historia clínica nutricional" (Consulta inicial y Plan alimenticio + bioimpedancia) y médico "Antecedentes médicos" (primera vez y medicina interna), con respuestas.
+- La columna `forms.ask_online` quedó sin uso (se ignora).
 
 ## 12. Competencia y pendientes
 

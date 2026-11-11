@@ -11,8 +11,8 @@ import { requireBusinessManager, type AppEnv } from '../middleware/auth.js';
 import { assertAccess } from './records.js';
 
 /**
- * Questionnaires per booking type: the business builds forms (reusable across several services),
- * the customer answers them when booking online or the team fills them in the booking. Answers are
+ * Questionnaires per booking type: the business builds forms (reusable across several services)
+ * and the team fills them during the appointment (booking online stays short). Answers are
  * part of the client record: encrypted and with the same access rules.
  */
 export const formRoutes = new Hono<AppEnv>();
@@ -40,7 +40,7 @@ formRoutes.post('/forms', requireBusinessManager, async (c) => {
   const input = formInputSchema.parse(await c.req.json());
   const [row] = await db
     .insert(forms)
-    .values({ tenantId, name: input.name, description: input.description ?? null, fields: input.fields, serviceIds: await validServices(tenantId, input.serviceIds), askOnline: input.askOnline, active: input.active })
+    .values({ tenantId, name: input.name, description: input.description ?? null, fields: input.fields, serviceIds: await validServices(tenantId, input.serviceIds), active: input.active })
     .returning();
   return c.json(toFormDto(row!, 0), 201);
 });
@@ -52,7 +52,7 @@ formRoutes.put('/forms/:id', requireBusinessManager, async (c) => {
   const input = formInputSchema.parse(await c.req.json());
   const [row] = await db
     .update(forms)
-    .set({ name: input.name, description: input.description ?? null, fields: input.fields, serviceIds: await validServices(tenantId, input.serviceIds), askOnline: input.askOnline, active: input.active, updatedAt: new Date() })
+    .set({ name: input.name, description: input.description ?? null, fields: input.fields, serviceIds: await validServices(tenantId, input.serviceIds), active: input.active, updatedAt: new Date() })
     .where(and(eq(forms.id, c.req.param('id')), eq(forms.tenantId, tenantId)))
     .returning();
   if (!row) throw notFound('form');

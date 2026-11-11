@@ -1141,8 +1141,8 @@ async function seedExtras() {
 }
 
 /**
- * Questionnaires: nutrition "Historia clínica nutricional" (initial consult, asked online) and the
- * doctor's "Antecedentes" (first-time consult), reused on a second booking type, with answers.
+ * Questionnaires filled by the team during the appointment: nutrition "Historia clínica nutricional"
+ * and the doctor's "Antecedentes médicos", each reused on two booking types, with answers.
  */
 async function seedForms() {
   const db = getDb();
@@ -1150,7 +1150,7 @@ async function seedForms() {
     {
       slug: 'nutricion-demo',
       name: 'Historia clínica nutricional',
-      description: 'Nos ayuda a preparar tu primera consulta. Tus respuestas son confidenciales.',
+      description: 'Se llena con el paciente en la primera consulta.',
       services: ['Consulta inicial', 'Plan alimenticio + bioimpedancia'],
       fields: [
         { id: 'objetivo', label: '¿Cuál es tu objetivo principal?', type: 'choice', required: true, options: ['Bajar de peso', 'Subir masa muscular', 'Rendimiento deportivo', 'Control de glucosa', 'Comer mejor'], help: null },
@@ -1169,7 +1169,7 @@ async function seedForms() {
     {
       slug: 'medico-demo',
       name: 'Antecedentes médicos',
-      description: 'Llénalo antes de tu consulta para aprovechar mejor el tiempo con el médico.',
+      description: 'Se llena con el paciente al inicio de la consulta.',
       services: ['Consulta de primera vez', 'Consulta de medicina interna'],
       fields: [
         { id: 'motivo', label: 'Motivo de la consulta', type: 'longtext', required: true, options: [], help: null },
@@ -1190,13 +1190,13 @@ async function seedForms() {
     if (!t) continue;
     const svc = (await db.select().from(services).where(eq(services.tenantId, t.id))).filter((s) => sp.services.includes(s.name));
     if (!svc.length) continue;
-    const [form] = await db.insert(forms).values({ tenantId: t.id, name: sp.name, description: sp.description, fields: sp.fields, serviceIds: svc.map((s) => s.id), askOnline: true }).returning();
+    const [form] = await db.insert(forms).values({ tenantId: t.id, name: sp.name, description: sp.description, fields: sp.fields, serviceIds: svc.map((s) => s.id) }).returning();
     const res = await db.execute<{ id: string; customer_id: string }>(sql`
       select distinct on (a.customer_id) a.id, a.customer_id from appointments a
       where a.tenant_id = ${t.id} and a.service_id = ${svc.find((x) => x.name === sp.services[0])?.id ?? svc[0]!.id} and a.status in ('completed', 'scheduled', 'confirmed')
       order by a.customer_id, a.starts_at desc limit 6`);
     for (const [i, a] of res.rows.entries()) {
-      await saveResponse(db, { tenantId: t.id, customerId: a.customer_id, appointmentId: a.id, form: form!, values: sp.answers[i % sp.answers.length]!, source: i % 3 === 2 ? 'staff' : 'customer', authorName: i % 3 === 2 ? DEMO_OWNER.name : null });
+      await saveResponse(db, { tenantId: t.id, customerId: a.customer_id, appointmentId: a.id, form: form!, values: sp.answers[i % sp.answers.length]!, source: 'staff', authorName: DEMO_OWNER.name });
     }
   }
 }

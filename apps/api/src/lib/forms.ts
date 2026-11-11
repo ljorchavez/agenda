@@ -1,6 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
 import {
-  PLAN_LIMITS,
   checkFormAnswers,
   type FormAnswerDto,
   type FormAnswerValue,
@@ -9,22 +8,14 @@ import {
   type PublicFormDto,
 } from '@agenda/shared';
 import type { Db } from '../db/client.js';
-import { formResponses, forms, tenants, type Form } from '../db/schema.js';
+import { formResponses, forms, type Form } from '../db/schema.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { AppError } from './errors.js';
 
-type Q = Pick<Db, 'execute' | 'query' | 'select'>;
+type Q = Pick<Db, 'select'>;
 
 export const toPublicForm = (f: Form): PublicFormDto => ({ id: f.id, name: f.name, description: f.description, fields: f.fields, serviceIds: f.serviceIds });
-export const toFormDto = (f: Form, responses: number): FormDto => ({ ...toPublicForm(f), askOnline: f.askOnline, active: f.active, responses });
-
-/** Questionnaires shown on the booking page (only when the plan includes client records). */
-export async function onlineForms(db: Q, tenantId: string): Promise<PublicFormDto[]> {
-  const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { plan: true } });
-  if (!t || !PLAN_LIMITS[t.plan].records) return [];
-  const rows = await db.select().from(forms).where(and(eq(forms.tenantId, tenantId), eq(forms.active, true), eq(forms.askOnline, true)));
-  return rows.filter((f) => f.serviceIds.length > 0).map(toPublicForm);
-}
+export const toFormDto = (f: Form, responses: number): FormDto => ({ ...toPublicForm(f), active: f.active, responses });
 
 /** Active forms attached to a service. */
 export async function formsForService(db: Q, tenantId: string, serviceId: string): Promise<Form[]> {
@@ -41,7 +32,7 @@ export async function saveResponse(
     appointmentId: string | null;
     form: Form;
     values: Record<string, FormAnswerValue>;
-    source: 'customer' | 'staff';
+    source: 'staff';
     authorId?: string | null;
     authorName?: string | null;
   },
@@ -105,32 +96,6 @@ export async function listResponses(db: Pick<Db, 'execute'>, tenantId: string, w
       createdAt: new Date(r.created_at).toISOString(),
     };
   });
-}
-
-/**
- * Answers sent with an online booking: only forms asked online for that service; a form with
- * required questions must be answered. No-op when the plan doesn't include client records.
- */
-export async function saveBookingAnswers(
-  db: Db,
-  tenantId: string,
-  appt: { id: string; customerId: string; serviceId: string },
-  sent: { formId: string; values: Record<string, FormAnswerValue> }[] | undefined,
-  /** Tables/spaces: the customer doesn't pick a service, so every online form applies */
-  anyService = false,
-) {
-  const online = (await onlineForms(db, tenantId)).filter((f) => anyService || f.serviceIds.includes(appt.serviceId));
-  if (!online.length) return;
-  const ids = new Set(online.map((f) => f.id));
-  const all = (await db.select().from(forms).where(eq(forms.tenantId, tenantId))).filter((f) => ids.has(f.id));
-  for (const f of all) {
-    const answer = sent?.find((s) => s.formId === f.id);
-    if (!answer) {
-      if (f.fields.some((x) => x.required)) throw new AppError(422, 'form_required', 'Answer the required questions');
-      continue;
-    }
-    await saveResponse(db, { tenantId, customerId: appt.customerId, appointmentId: appt.id, form: f, values: answer.values, source: 'customer' });
-  }
 }
 
 export const responseCounts = async (db: Pick<Db, 'execute'>, tenantId: string) => {

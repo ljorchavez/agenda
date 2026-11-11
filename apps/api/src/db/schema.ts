@@ -588,7 +588,7 @@ export const forms = pgTable('forms', {
   description: text('description'),
   fields: jsonb('fields').$type<FormField[]>().notNull().default([]),
   serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
-  /** Also asked to the customer when booking online */
+  /** Unused: questionnaires are filled by the team during the appointment */
   askOnline: boolean('ask_online').notNull().default(true),
   active: boolean('active').notNull().default(true),
   ...timestamps,

@@ -329,26 +329,40 @@ if (toReview) {
   const made = (await api('/forms', null, ntok)).find((f) => f.name === 'Cuestionario UI');
   ok('builder saves a questionnaire with options and a booking type', made?.fields?.length === 2 && made.fields[1].options.join() === 'Correr,Nadar' && made.serviceIds.length === 1, JSON.stringify(made ?? null).slice(0, 200));
   if (made) await api(`/forms/${made.id}`, null, ntok, 'DELETE');
-  // Booking page asks it for "Consulta inicial"
-  const before = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
+  // Booking page stays short: no questionnaire
   await page.goto('http://localhost:5173/b/nutricion-demo');
-  await page.getByRole('button', { name: /Consulta inicial/ }).first().click();
-  await page.getByTestId('day').nth(4).click();
-  await page.getByTestId('slot').first().waitFor({ timeout: 8000 }).catch(() => {});
-  await page.getByTestId('slot').first().click();
+  await page.getByRole('button', { name: /Consulta inicial/ }).first().waitFor({ timeout: 8000 }).catch(() => {});
+  ok('booking page asks no questionnaire', ((await page.content()) ?? '').includes('objetivo principal') === false);
+  // The team fills it in the appointment
+  const svcs = await api('/services', null, ntok);
+  const ini = svcs.find((x) => x.name === 'Consulta inicial');
+  const pcNew = await api('/customers', { name: 'Paciente Cuestionario UI', phone: '5516160001' }, ntok);
+  const when = new Date(Date.now() + 864e5); when.setUTCHours(17, 0, 0, 0);
+  await api('/appointments', { customerId: pcNew.id, serviceId: ini.id, startsAt: when.toISOString(), allowOverlap: true }, ntok);
+  const before = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
+  await page.goto('http://localhost:5173/agenda');
+  await page.waitForSelector('[data-testid=calendar-event]', { timeout: 8000 }).catch(() => {});
+  let found = false;
+  for (let week = 0; week < 2 && !found; week++) {
+    if (week) { await page.getByRole('button', { name: 'Siguiente' }).click(); await page.waitForTimeout(800); }
+    const ev = page.locator('[data-testid=calendar-event][aria-label*="Paciente Cuestionario UI"]').first();
+    if (await ev.count()) { await ev.click(); found = true; }
+  }
+  await page.getByTestId('appointment-forms').waitFor({ timeout: 8000 }).catch(() => {});
+  ok('appointment shows the pending questionnaire', ((await page.getByTestId('appointment-forms').textContent().catch(() => '')) ?? '').includes('pendiente'));
+  await page.getByTestId('appointment-forms').getByRole('button', { name: 'Llenar' }).click().catch(() => {});
   const fs = page.getByTestId(`form-${before?.id}`);
   await fs.waitFor({ timeout: 6000 }).catch(() => {});
-  ok('booking page asks the questionnaire for that booking type', ((await fs.textContent().catch(() => '')) ?? '').includes('objetivo principal'));
-  await page.getByPlaceholder('Nombre', { exact: true }).fill('Paciente Cuestionario UI');
-  await page.getByPlaceholder('WhatsApp', { exact: true }).fill('5516160001');
-  await page.locator('form .btn-primary').last().click();
-  ok('required questions are enforced before booking', await page.getByRole('alert').filter({ hasText: 'obligatorias' }).isVisible().catch(() => false));
-  await fs.getByRole('combobox').selectOption('Comer mejor');
-  await fs.getByRole('radio', { name: 'Sí' }).first().check();
-  await page.locator('form .btn-primary').last().click();
-  await page.waitForTimeout(2500);
+  await page.getByTestId('appointment-forms').getByRole('button', { name: 'Guardar' }).click().catch(() => {});
+  ok('required questions enforced in the appointment', await page.getByTestId('appointment-forms').getByRole('alert').isVisible().catch(() => false));
+  await fs.getByRole('combobox').selectOption('Comer mejor').catch(() => {});
+  await fs.getByRole('radio', { name: 'Sí' }).first().check().catch(() => {});
+  await page.getByTestId('appointment-forms').getByRole('button', { name: 'Guardar' }).click().catch(() => {});
+  await page.getByTestId('appointment-forms').filter({ hasText: 'Comer mejor' }).waitFor({ timeout: 6000 }).catch(() => {});
+  ok('team saves the answers in the appointment', ((await page.getByTestId('appointment-forms').textContent().catch(() => '')) ?? '').includes('Comer mejor'));
   const after = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
-  ok('online answers saved', (after?.responses ?? 0) === (before?.responses ?? 0) + 1, `${before?.responses} -> ${after?.responses}`);
+  ok('answers counted', (after?.responses ?? 0) === (before?.responses ?? 0) + 1, `${before?.responses} -> ${after?.responses}`);
+  await page.keyboard.press('Escape');
   // Client record shows the answered questionnaire
   const pc = (await api(`/customers?q=${encodeURIComponent('Paciente Cuestionario UI')}`, null, ntok)).items?.[0];
   if (pc) {

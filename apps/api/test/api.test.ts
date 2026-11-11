@@ -1294,7 +1294,7 @@ d('API (integration)', () => {
     expect(up.status).toBe(502);
   });
 
-  it('questionnaires: reusable per booking type, answered online or by the team, kept in the record', async () => {
+  it('questionnaires: reusable per booking type, filled by the team in the appointment, kept in the record', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Cuestionario Prueba', businessType: 'nutrition', name: 'Dra Forms', email: 'forms@test.mx', password: 'password123',
     })).body;
@@ -1315,38 +1315,42 @@ d('API (integration)', () => {
     // Plan gate and validation
     await call('PUT', '/tenant/plan', { plan: 'free' }, tok);
     expect((await call('POST', '/forms', body, tok)).status).toBe(402);
-    expect((await call('GET', '/public/' + slug)).body.forms).toEqual([]);
     await call('PUT', '/tenant/plan', { plan: 'standard' }, tok);
     expect((await call('POST', '/forms', { ...body, fields: [{ id: 'xxxx', label: 'X', type: 'choice', options: ['solo'] }] }, tok)).status).toBe(422);
     const f = (await call('POST', '/forms', body, tok));
     expect(f.status).toBe(201);
     expect(f.body.serviceIds).toEqual([s1.id, s2.id]);
-    const pub = (await call('GET', '/public/' + slug)).body;
-    expect(pub.forms).toHaveLength(1);
 
+    // Booking online stays short: no questions on the public page, booking works without answers
+    const pub = (await call('GET', '/public/' + slug)).body;
+    expect(pub.forms).toBeUndefined();
     let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 });
     while (day.weekday === 7) day = day.plus({ days: 1 });
     const slots = (await call('GET', `/public/${slug}/availability?serviceId=${s2.id}&date=${day.toISODate()}`)).body.slots;
-    // Reused on a second booking type; required answers are enforced and nothing is booked without them
-    const missing = await call('POST', `/public/${slug}/bookings`, { serviceId: s2.id, startsAt: slots[0], name: 'Paciente Forms', phone: '5577770001' });
-    expect(missing.status).toBe(422);
-    expect(missing.body.error).toBe('form_required');
-    const bad = await call('POST', `/public/${slug}/bookings`, { serviceId: s2.id, startsAt: slots[0], name: 'Paciente Forms', phone: '5577770001', forms: [{ formId: f.body.id, values: { objetivo: 'Otro' } }] });
-    expect(bad.body.error).toBe('form_invalid');
-    const ok = await call('POST', `/public/${slug}/bookings`, { serviceId: s2.id, startsAt: slots[0], name: 'Paciente Forms', phone: '5577770001', forms: [{ formId: f.body.id, values: { objetivo: 'Bajar', deporte: true, comidas: ['Desayuno', 'Cena'] } }] });
-    expect(ok.status).toBe(201);
-    // A booking type without the form doesn't ask it
-    expect((await call('POST', `/public/${slug}/bookings`, { serviceId: s3.id, startsAt: slots[2], name: 'Otro Paciente', phone: '5577770002' })).status).toBe(201);
+    expect((await call('POST', `/public/${slug}/bookings`, { serviceId: s2.id, startsAt: slots[0], name: 'Paciente Forms', phone: '5577770001' })).status).toBe(201);
 
     const appts = (await call('GET', `/appointments?from=${encodeURIComponent(day.startOf('day').toISO()!)}&to=${encodeURIComponent(day.endOf('day').toISO()!)}`, undefined, tok)).body;
     const appt = appts.find((a: { customerName: string }) => a.customerName === 'Paciente Forms');
-    const af = (await call('GET', `/appointments/${appt.id}/forms`, undefined, tok)).body;
-    expect(af[0].response).toMatchObject({ source: 'customer', formName: 'Historia clínica' });
-    expect(af[0].response.answers.map((a: { value: unknown }) => a.value)).toEqual(['Bajar', true, ['Desayuno', 'Cena']]);
-    // The team corrects it: same response, now by staff
-    const fixed = await call('POST', `/appointments/${appt.id}/forms`, { formId: f.body.id, values: { objetivo: 'Subir' } }, tok);
-    expect(fixed.status).toBe(201);
-    expect(fixed.body).toMatchObject({ source: 'staff', authorName: 'Dra Forms' });
+    // Reused on a second booking type: shows up pending in the appointment
+    let af = (await call('GET', `/appointments/${appt.id}/forms`, undefined, tok)).body;
+    expect(af).toHaveLength(1);
+    expect(af[0]).toMatchObject({ form: { name: 'Historia clínica' }, response: null });
+    // A booking type without the form has none
+    const cu3 = (await call('POST', '/customers', { name: 'Otro Paciente', phone: '5577770002' }, tok)).body;
+    const a3 = (await call('POST', '/appointments', { customerId: cu3.id, serviceId: s3.id, startsAt: DateTime.now().plus({ days: 4 }).toISO(), allowOverlap: true }, tok)).body;
+    expect((await call('GET', `/appointments/${a3.id}/forms`, undefined, tok)).body).toEqual([]);
+
+    // The team fills it: required answers enforced, choices validated
+    expect((await call('POST', `/appointments/${appt.id}/forms`, { formId: f.body.id, values: { deporte: true } }, tok)).body.error).toBe('form_required');
+    expect((await call('POST', `/appointments/${appt.id}/forms`, { formId: f.body.id, values: { objetivo: 'Otro' } }, tok)).body.error).toBe('form_invalid');
+    const filled = await call('POST', `/appointments/${appt.id}/forms`, { formId: f.body.id, values: { objetivo: 'Bajar', deporte: true, comidas: ['Desayuno', 'Cena'] } }, tok);
+    expect(filled.status).toBe(201);
+    expect(filled.body).toMatchObject({ source: 'staff', authorName: 'Dra Forms' });
+    expect(filled.body.answers.map((a: { value: unknown }) => a.value)).toEqual(['Bajar', true, ['Desayuno', 'Cena']]);
+    // Correcting it keeps one response
+    expect((await call('POST', `/appointments/${appt.id}/forms`, { formId: f.body.id, values: { objetivo: 'Subir' } }, tok)).status).toBe(201);
+    af = (await call('GET', `/appointments/${appt.id}/forms`, undefined, tok)).body;
+    expect(af[0].response.answers[0].value).toBe('Subir');
     const rec = (await call('GET', `/customers/${appt.customerId}/record`, undefined, tok)).body;
     expect(rec.responses).toHaveLength(1);
     expect(rec.responses[0]).toMatchObject({ formName: 'Historia clínica', serviceName: 'Bioimpedancia' });
@@ -1370,7 +1374,6 @@ d('API (integration)', () => {
     expect((await call('GET', '/forms', undefined, tok)).body[0].responses).toBe(1);
     expect((await call('DELETE', `/forms/${f.body.id}`, undefined, tok)).status).toBe(204);
     expect((await call('GET', `/customers/${appt.customerId}/record`, undefined, tok)).body.responses[0].formName).toBe('Historia clínica');
-    expect((await call('GET', '/public/' + slug)).body.forms).toEqual([]);
   });
 
   it('verified reviews and calendar links', async () => {
