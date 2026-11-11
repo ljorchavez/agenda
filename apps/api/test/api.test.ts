@@ -1186,6 +1186,7 @@ d('API (integration)', () => {
     const cust = (await call('POST', '/customers', { name: 'Cliente Paquete', phone: '5588880021' }, tok)).body;
 
     // Free plan: no packages, records or cash
+    await call('PUT', '/tenant/plan', { plan: 'free' }, tok);
     expect((await call('POST', '/offerings', { kind: 'package', name: '5 cortes', priceCents: 80000, sessions: 5, validityDays: 60, serviceIds: [svc.id] }, tok)).status).toBe(402);
     expect((await call('GET', '/cash/summary?day=2026-11-01', undefined, tok)).status).toBe(402);
     expect((await call('PUT', '/tenant/plan', { plan: 'standard' }, tok)).status).toBe(200);
@@ -1263,6 +1264,7 @@ d('API (integration)', () => {
     })).body;
     const tok = reg.token;
     const cust = (await call('POST', '/customers', { name: 'Paciente Exp', phone: '5588880031' }, tok)).body;
+    await call('PUT', '/tenant/plan', { plan: 'free' }, tok);
     expect((await call('GET', `/customers/${cust.id}/record`, undefined, tok)).status).toBe(402);
     await call('PUT', '/tenant/plan', { plan: 'standard' }, tok);
     expect((await call('PUT', `/customers/${cust.id}/record`, { allergies: 'Penicilina', conditions: 'Hipotiroidismo; levotiroxina', consent: true }, tok)).status).toBe(200);
