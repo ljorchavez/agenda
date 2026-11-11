@@ -513,7 +513,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   const owner = await asDemo('barberia-demo');
   const locs = await call('GET', '/api/locations', null, owner.token);
   const pol = locs.body?.locations?.find((l) => l.name === 'Guadalajara Chapultepec');
-  check('locations + plan (1 included, 1 extra)', locs.status === 200 && !!pol && locs.body.plan.extraLocations === 1, locs.text.slice(0, 200));
+  check('locations + plan (Premium: 2 included, no extra)', locs.status === 200 && !!pol && locs.body.plan.includedLocations === 2 && locs.body.plan.extraLocations === 0, locs.text.slice(0, 200));
   const day = mxDay(10);
   const pub = (await call('GET', '/api/public/barberia-demo')).body;
   const rafa = pub.resources.find((p) => p.locationId === pol?.id);
