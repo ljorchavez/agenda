@@ -9,6 +9,8 @@ import { api } from '../lib/api';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
 import { CustomerFormModal } from './Customers';
 import { StarRating } from '../components/Rating';
+import { CustomerPlansSection } from '../components/Sales';
+import { RecordSection } from '../components/Record';
 
 interface Detail extends CustomerWithStats {
   appointments: {
@@ -144,6 +146,11 @@ export function CustomerDetailPage() {
             {data.payments.length === 0 && <li className="py-2 text-slate-500">{t('common.none')}</li>}
           </ul>
         </section>
+      </div>
+
+      <div className="mt-6 grid items-start gap-6 lg:grid-cols-2">
+        <CustomerPlansSection customerId={id} />
+        <RecordSection customerId={id} />
       </div>
 
       {manager && (

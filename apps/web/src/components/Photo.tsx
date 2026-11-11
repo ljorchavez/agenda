@@ -21,7 +21,7 @@ export function Avatar({ name, color, photoUrl, size = 40 }: { name: string; col
 }
 
 /** Shrinks a picture in the browser (longest side 800 px, JPEG) so uploads are small and fast. */
-async function shrink(file: File, maxSide = 800): Promise<Blob> {
+export async function shrink(file: File, maxSide = 800): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');

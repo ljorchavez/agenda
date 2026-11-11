@@ -1,3 +1,4 @@
+import { PublicReviews, RatingBadge } from '../components/Reviews';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -168,6 +169,7 @@ function ProfileHeader({ business, subtitle, mapsUrl, locationLine }: { business
           </span>
         </div>
         <h1 className="mt-1 text-2xl font-bold text-slate-900">{business.name}</h1>
+        <RatingBadge average={business.reviews.average} count={business.reviews.count} />
         {locationLine}
         <p className="text-slate-600">{subtitle}</p>
         {business.description && <p className="mt-2 text-sm text-slate-700">{business.description}</p>}
@@ -201,6 +203,7 @@ function ProfileHeader({ business, subtitle, mapsUrl, locationLine }: { business
           </div>
         )}
       </div>
+      <div className="px-4 pb-5 sm:px-6"><PublicReviews summary={business.reviews} /></div>
       {zoom && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setZoom(null)} role="dialog" aria-label={t('page.photo')}>
           <img src={zoom} alt="" className="max-h-full max-w-full rounded-lg" />
@@ -673,6 +676,13 @@ function Success({ business, result, onAnother }: { business: PublicBusinessDto;
         <p className="mt-1 text-sm font-medium text-emerald-700" data-testid="booking-discount">
           {result.discountReason === 'reward' ? '🎁 ' + t('promos.rewardApplied') : '🏷️ ' + t('promos.couponApplied')}: −{money(result.discountCents)}
         </p>
+      )}
+      {result.plans.length > 0 && (
+        <ul className="mt-3 space-y-1 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900" data-testid="booking-plans">
+          {result.plans.map((p) => (
+            <li key={p.name}>🎟️ {p.sessionsLeft == null ? t('sales.publicUnlimited', { name: p.name }) : t('sales.publicLeft', { count: p.sessionsLeft, name: p.name })}</li>
+          ))}
+        </ul>
       )}
       {result.deposit && <DepositBox deposit={result.deposit} />}
       <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-sm">

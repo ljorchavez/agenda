@@ -1,3 +1,4 @@
+import { RatingBadge } from '../components/Reviews';
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -255,6 +256,7 @@ export function DirectoryPage() {
                               {t(`businessTypes.${e.businessType}`)}
                             </span>
                             <h2 className="mt-0.5 truncate font-semibold text-slate-900">{e.name}</h2>
+                            <RatingBadge average={e.ratingAverage} count={e.ratingCount} />
                             {e.locationName && <div className="truncate text-xs font-medium text-brand-700">⌂ {e.locationName}</div>}
                             <p className="truncate text-sm text-slate-500">{[e.neighborhood, e.city].filter(Boolean).join(', ')}</p>
                           </div>

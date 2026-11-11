@@ -1,3 +1,4 @@
+import { ReviewPage } from './pages/Review';
 import type { ReactElement } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -49,6 +50,7 @@ export function App() {
       <Route path="/b/:slug" element={<BookingPage />} />
       {/* Private link for a customer to reschedule/cancel their appointment */}
       <Route path="/c/:token" element={<ManagePage />} />
+      <Route path="/r/:token" element={<ReviewPage />} />
       {/* The business back office */}
       <Route
         element={

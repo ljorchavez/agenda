@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageLookSection } from '../components/PageLook';
+import { GiftCardsList, OfferingsSection } from '../components/Sales';
+import { ReviewsSection } from '../components/Reviews';
+import { CalendarLinksSection } from '../components/CalendarLinks';
 import { CouponsSection, RewardsSection } from '../components/Promotions';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -51,6 +54,7 @@ function MemberSettings() {
       <PageHeader title={t('settings.title')} />
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <AccountSection />
+        <CalendarLinksSection />
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.business')}</h2>
           <div className="text-sm text-slate-700">{tenant?.name}</div>
@@ -200,6 +204,8 @@ function BusinessSettings() {
     { id: 'booking', label: t('settings.tabs.booking') },
     { id: 'payments', label: t('settings.tabs.payments') },
     ...(businessManager ? [{ id: 'promos', label: t('settings.tabs.promos') }] : []),
+    { id: 'packages', label: t('settings.tabs.packages') },
+    { id: 'reviews', label: t('settings.tabs.reviews') },
     ...(businessManager ? [{ id: 'locations', label: t('settings.tabs.locations') }] : []),
     { id: 'users', label: t('settings.tabs.users') },
     ...(businessManager ? [{ id: 'plan', label: t('settings.tabs.plan') }] : []),
@@ -414,12 +420,20 @@ function BusinessSettings() {
       {tab === 'locations' && <LocationsSection editable={businessManager} />}
       {tab === 'users' && <UsersSection kind={kind} />}
       {tab === 'plan' && <PlanSection canChange={isOwner} />}
+      {tab === 'packages' && (
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          <OfferingsSection disabled={!businessManager} />
+          <GiftCardsList />
+        </div>
+      )}
+      {tab === 'reviews' && <ReviewsSection />}
       {tab === 'account' && (
         <div className="grid items-start gap-6 lg:grid-cols-2">
           <AccountSection />
           <section className="card space-y-4">
             <LanguageSelect />
           </section>
+          <CalendarLinksSection />
         </div>
       )}
     </>

@@ -16,6 +16,10 @@ function features(t: (k: string, o?: Record<string, unknown>) => string, plan: P
     l.maxCustomers == null ? t('plans.unlimitedCustomers') : t('plans.maxCustomers', { count: l.maxCustomers }),
     l.maxBookingsPerMonth == null ? t('plans.unlimitedBookings') : t('plans.maxBookings', { count: l.maxBookingsPerMonth }),
     l.extraLocations ? t('plans.extrasAllowed') : t('plans.noExtras'),
+    t('plans.reviewsCalendar'),
+    ...(l.packages ? [t('plans.packagesIncluded')] : []),
+    ...(l.records ? [t('plans.recordsIncluded', { gb: l.recordPhotosMb >= 1024 ? Math.round(l.recordPhotosMb / 1024) : l.recordPhotosMb / 1024 })] : []),
+    ...(l.cash ? [t('plans.cashIncluded')] : []),
   ];
 }
 
@@ -136,6 +140,11 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
               {p.extraLocations > 0 && <div className="text-xs text-slate-500">{t('plans.extraLocationsN', { count: p.extraLocations })}</div>}
             </div>
           </div>
+          {p.limits.records && (
+            <p className="text-xs text-slate-500" data-testid="photo-usage">
+              {t('plans.photoUsage', { used: p.usage.recordPhotosMb, total: p.limits.recordPhotosMb >= 1024 ? `${p.limits.recordPhotosMb / 1024} GB` : `${p.limits.recordPhotosMb} MB` })}
+            </p>
+          )}
           {p.extraBusiness && <p className="text-xs text-slate-500">{t('plans.extraBusinessNote')}</p>}
           {!p.billingConnected && <p className="text-xs text-slate-500">{t('plans.billingSoon')}</p>}
           {changing && (

@@ -14,6 +14,8 @@ import {
   type PaymentDto,
 } from '@agenda/shared';
 import { Empty, ErrorText, Loading, Modal, PageHeader, usePaged } from '../components/ui';
+import { CashTab, CommissionsTab } from '../components/Cash';
+import { useAccess } from '../lib/auth';
 import { COLLECTION_PILL, PAYMENT_PILL, PAYMENT_PILL_TEXT } from '../lib/status';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -253,25 +255,28 @@ function MovementsTab() {
 export function PaymentsPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'movements' ? 'movements' : 'bookings';
-  const tabBtn = (k: 'bookings' | 'movements') =>
+  const { manager, scoped } = useAccess();
+  type Tab = 'bookings' | 'movements' | 'commissions' | 'cash';
+  const tabs: Tab[] = ['bookings', 'movements', ...(manager || scoped ? (['commissions'] as Tab[]) : []), ...(manager ? (['cash'] as Tab[]) : [])];
+  const asked = params.get('tab') as Tab | null;
+  const tab: Tab = asked && tabs.includes(asked) ? asked : 'bookings';
+  const tabBtn = (k: Tab) =>
     `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
   return (
     <>
       <PageHeader
         title={t('payments.title')}
         actions={
-          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
-            <button type="button" role="tab" aria-selected={tab === 'bookings'} className={tabBtn('bookings')} onClick={() => setParams({})}>
-              {t('payments.tabs.bookings')}
-            </button>
-            <button type="button" role="tab" aria-selected={tab === 'movements'} className={tabBtn('movements')} onClick={() => setParams({ tab: 'movements' })}>
-              {t('payments.tabs.movements')}
-            </button>
+          <div className="inline-flex flex-wrap rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
+            {tabs.map((k) => (
+              <button key={k} type="button" role="tab" aria-selected={tab === k} className={tabBtn(k)} onClick={() => setParams(k === 'bookings' ? {} : { tab: k })}>
+                {t(`payments.tabs.${k}`)}
+              </button>
+            ))}
           </div>
         }
       />
-      {tab === 'bookings' ? <CollectionsTab /> : <MovementsTab />}
+      {tab === 'bookings' ? <CollectionsTab /> : tab === 'movements' ? <MovementsTab /> : tab === 'commissions' ? <CommissionsTab /> : <CashTab />}
     </>
   );
 }

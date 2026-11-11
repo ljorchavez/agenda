@@ -114,6 +114,20 @@ export function ManagePage() {
             </div>
           </div>
 
+          {q.data.plans.length > 0 && (
+            <ul className="space-y-1 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900" data-testid="manage-plans">
+              {q.data.plans.map((p) => (
+                <li key={p.name}>🎟️ {p.sessionsLeft == null ? t('sales.publicUnlimited', { name: p.name }) : t('sales.publicLeft', { count: p.sessionsLeft, name: p.name })}{p.expiresOn ? ` · ${t('sales.expires', { date: p.expiresOn })}` : ''}</li>
+              ))}
+            </ul>
+          )}
+
+          {q.data.reviewPath && (
+            <a href={q.data.reviewPath} className="block rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-sm font-medium text-amber-900 hover:bg-amber-100" data-testid="review-link">
+              ⭐ {q.data.reviewed ? t('reviews.seeYours') : t('reviews.leave')}
+            </a>
+          )}
+
           {q.data.reason && q.data.reason !== 'not_active' && q.data.reason !== 'past' && (
             <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
               {t(`manage.reason.${q.data.reason}`, { hours: q.data.minHoursNotice })}

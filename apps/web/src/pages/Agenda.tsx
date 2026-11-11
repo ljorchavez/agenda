@@ -20,6 +20,8 @@ import {
   type ClassSessionDto,
   type CustomerDto,
   type DiscountPreviewDto,
+  type PlanChoiceDto,
+  PLAN_LIMITS,
   type PaymentDto,
   type ResourceDto,
   type TimeBlockDto,
@@ -895,6 +897,46 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
   );
 }
 
+/** After "Asistió": take the session from a package/membership, or charge normally. */
+function PlanUse({ appt, onChanged }: { appt: AppointmentDto; onChanged: () => Promise<void> }) {
+  const { t } = useTranslation();
+  const q = useQuery({
+    queryKey: ['appt-plans', appt.id, appt.status],
+    queryFn: () => api<{ choices: PlanChoiceDto[]; usedPlanId: string | null; usedPlanName: string | null }>(`/appointments/${appt.id}/plans`),
+  });
+  const [pick, setPick] = useState('');
+  const use = useMutation({
+    mutationFn: (planId: string | null) => api(`/appointments/${appt.id}/use-plan`, { method: 'POST', body: { planId } }),
+    onSuccess: async () => {
+      await q.refetch();
+      await onChanged();
+    },
+  });
+  const d = q.data;
+  if (!d || (!d.usedPlanId && !d.choices.length)) return null;
+  return (
+    <div className="mt-3 border-t border-slate-200 pt-3 text-center" data-testid="plan-use">
+      {d.usedPlanId ? (
+        <p className="text-sm text-emerald-800">
+          🎟️ {t('sales.takenFrom', { name: d.usedPlanName })}{' '}
+          <button type="button" className="text-xs text-slate-600 underline" onClick={() => use.mutate(null)}>{t('sales.chargeNormally')}</button>
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="text-sm">🎟️ {t('sales.hasPlan')}</span>
+          <select className="input !w-auto !py-1.5" value={pick || d.choices[0]!.id} onChange={(e) => setPick(e.target.value)} aria-label={t('sales.whichPlan')}>
+            {d.choices.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} · {c.sessionsLeft == null ? t('sales.unlimited') : t('sales.left', { count: c.sessionsLeft })}</option>
+            ))}
+          </select>
+          <button type="button" className="btn-primary !py-1.5" disabled={use.isPending} onClick={() => use.mutate(pick || d.choices[0]!.id)}>{t('sales.takeSession')}</button>
+        </div>
+      )}
+      <ErrorText error={use.error} ns="sales" />
+    </div>
+  );
+}
+
 function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -967,7 +1009,9 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const [when, setWhen] = useState(toLocalInput(new Date(appt.startsAt)));
   // Party size / bill / payment
   const [party, setParty] = useState(String(appt.partySize ?? 2));
-  const [method, setMethod] = useState<'cash' | 'card' | 'transfer'>(offline[0]!);
+  const [method, setMethod] = useState<'cash' | 'card' | 'transfer' | 'gift_card'>(offline[0]!);
+  const [giftCode, setGiftCode] = useState('');
+  const packagesOn = PLAN_LIMITS[tenant!.plan].packages;
   const [amount, setAmount] = useState('');
   const recordPay = useMutation({
     mutationFn: async () => {
@@ -979,7 +1023,12 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
       }
       const cents = withParty && cur.priceCents === 0 ? price - cur.paidCents : toCents(amount);
       if (cents > 0) {
-        await api('/payments', { method: 'POST', body: { customerId: cur.customerId, appointmentId: cur.id, amountCents: cents, method } });
+        if (method === 'gift_card') {
+          // Takes it from the gift card balance
+          await api('/gift-cards/redeem', { method: 'POST', body: { code: giftCode.trim(), appointmentId: cur.id, amountCents: cents } });
+        } else {
+          await api('/payments', { method: 'POST', body: { customerId: cur.customerId, appointmentId: cur.id, amountCents: cents, method } });
+        }
       }
     },
     onSuccess: async () => {
@@ -1158,11 +1207,12 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <div><div className="text-slate-500">{t('agenda.paid')}</div><div className="font-semibold text-emerald-700">{money(cur.paidCents)}</div></div>
             <div><div className="text-slate-500">{t('agenda.outstanding')}</div><div className="font-semibold text-amber-700">{money(outstanding)}</div></div>
           </div>
-          {cur.discountCents > 0 && (
+          {cur.discountCents > 0 && cur.discountReason !== 'package' && (
             <p className="mt-2 text-center text-xs text-emerald-800" data-testid="appt-discount">
               {cur.discountReason === 'reward' ? `🎁 ${t('promos.rewardApplied')}` : `🏷️ ${t('promos.couponApplied')}${cur.couponCode ? ` ${cur.couponCode}` : ''}`}: −{money(cur.discountCents)}
             </p>
           )}
+          {packagesOn && status === 'completed' && <PlanUse appt={cur} onChanged={async () => { refresh(); await reload(); }} />}
           {editing === 'pay' ? (
             <form
               className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-slate-200 pt-3"
@@ -1185,7 +1235,11 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
               />
               <select id="am-method" className="input !w-auto !py-1.5" value={method} onChange={(e) => setMethod(e.target.value as typeof method)} aria-label={t('agenda.paymentMethod')}>
                 {offline.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
+                {packagesOn && <option value="gift_card">{t('methods.gift_card')}</option>}
               </select>
+              {method === 'gift_card' && (
+                <input id="am-gift" required minLength={4} className="input w-32 !py-1.5 font-mono uppercase" placeholder={t('sales.giftCode')} value={giftCode} onChange={(e) => setGiftCode(e.target.value)} />
+              )}
               <button className="btn-primary !py-1.5" disabled={recordPay.isPending}>{t('agenda.recordPayment')}</button>
               <button type="button" className="btn-secondary !py-1.5" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
               <ErrorText error={recordPay.error} ns="agenda" />
@@ -1268,6 +1322,18 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             {noteState === 'error' && <span className="text-rose-700">{t('agenda.notesError')}</span>}
           </p>
         </div>
+      )}
+
+      {status === 'completed' && cur.customerPhone && (
+        <a
+          className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-emerald-700 hover:underline"
+          data-testid="ask-review"
+          target="_blank"
+          rel="noreferrer"
+          href={`https://wa.me/${cur.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(t('reviews.askMessage', { name: cur.customerName.split(' ')[0], business: tenant!.name, url: `${window.location.origin}${cur.managePath.replace('/c/', '/r/')}` }))}`}
+        >
+          ⭐ {t('reviews.askWhatsapp')}
+        </a>
       )}
 
       {open && (selfService.rescheduleEnabled || selfService.cancelEnabled) && (
