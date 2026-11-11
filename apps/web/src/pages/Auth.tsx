@@ -6,7 +6,8 @@ import { BUSINESS_TYPES, SELECTABLE_PLANS, type AuthResponse, type BusinessType,
 import { LanguageSwitch } from '../components/Layout';
 import { PlanCards, PlanExtras } from '../components/Plans';
 import { ErrorText, Modal } from '../components/ui';
-import { api } from '../lib/api';
+import { GoogleButton, googleSignup } from '../components/GoogleButton';
+import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 /** Sign-in form; lives in a floating window over the home page. */
@@ -26,6 +27,24 @@ export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?
     },
   });
 
+  const google = useMutation({
+    mutationFn: (credential: string) => api<AuthResponse>('/auth/google', { method: 'POST', body: { credential } }),
+    onSuccess: (res) => {
+      setSession(res);
+      onDone?.();
+      navigate('/agenda');
+    },
+    onError: (err, credential) => {
+      // New person: continue to sign-up with the Google email already filled in.
+      if (err instanceof ApiError && err.code === 'google_no_account') {
+        const d = (err.details ?? {}) as { email?: string; name?: string | null };
+        googleSignup.set({ credential, email: d.email ?? '', name: d.name ?? null });
+        onDone?.();
+        navigate('/registro');
+      }
+    },
+  });
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     login.mutate();
@@ -33,6 +52,8 @@ export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <GoogleButton onCredential={(c) => google.mutate(c)} />
+      {!(google.error instanceof ApiError && google.error.code === 'google_no_account') && <ErrorText error={google.error} ns="auth" />}
       <div>
         <label className="label" htmlFor="email">{t('auth.email')}</label>
         <input id="email" type="email" required autoFocus autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -181,13 +202,24 @@ export function RegisterPage() {
   const [form, setForm] = useState({
     businessName: '',
     businessType: 'nutrition' as BusinessType,
-    name: '',
+    name: googleSignup.get()?.name ?? '',
     phone: '',
     email: '',
     password: '',
   });
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
+  // Signed in with Google: email from Google, no password to make up.
+  const [g, setG] = useState(googleSignup.get);
+  const takeGoogle = (credential: string) => {
+    const b64 = credential.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as { email?: string; name?: string };
+    const v = { credential, email: payload.email ?? '', name: payload.name ?? null };
+    googleSignup.set(v);
+    setG(v);
+    setForm((f) => ({ ...f, name: f.name || v.name || '' }));
+  };
 
   const register = useMutation({
     mutationFn: () =>
@@ -195,12 +227,14 @@ export function RegisterPage() {
         method: 'POST',
         body: {
           ...form,
+          ...(g ? { email: g.email, password: undefined, googleCredential: g.credential, name: form.name || g.name || '' } : {}),
           phone: form.phone || undefined,
           plan,
           locale: i18n.language.startsWith('en') ? 'en' : 'es',
         },
       }),
     onSuccess: (res) => {
+      googleSignup.clear();
       setSession(res);
       navigate('/services');
     },
@@ -263,15 +297,25 @@ export function RegisterPage() {
                   <input id="r-phone" type="tel" className="input" value={form.phone} onChange={set('phone')} />
                 </div>
               </div>
-              <div>
-                <label className="label" htmlFor="r-email">{t('auth.email')}</label>
-                <input id="r-email" type="email" required autoComplete="email" className="input" value={form.email} onChange={set('email')} />
-              </div>
-              <div>
-                <label className="label" htmlFor="r-pass">{t('auth.password')}</label>
-                <input id="r-pass" type="password" required minLength={8} autoComplete="new-password" className="input" value={form.password} onChange={set('password')} />
-                <p className="mt-1 text-xs text-slate-500">{t('auth.passwordHint')}</p>
-              </div>
+              {g ? (
+                <p className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3 text-sm" data-testid="google-signup">
+                  <span>✓ {t('auth.withGoogle', { email: g.email })}</span>
+                  <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => { googleSignup.clear(); setG(null); }}>{t('plans.change')}</button>
+                </p>
+              ) : (
+                <>
+                  <GoogleButton text="signup_with" onCredential={takeGoogle} />
+                  <div>
+                    <label className="label" htmlFor="r-email">{t('auth.email')}</label>
+                    <input id="r-email" type="email" required autoComplete="email" className="input" value={form.email} onChange={set('email')} />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="r-pass">{t('auth.password')}</label>
+                    <input id="r-pass" type="password" required minLength={8} autoComplete="new-password" className="input" value={form.password} onChange={set('password')} />
+                    <p className="mt-1 text-xs text-slate-500">{t('auth.passwordHint')}</p>
+                  </div>
+                </>
+              )}
               {plan !== 'free' && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">{t('plans.billingSoon')}</p>}
               <ErrorText error={register.error} ns="auth" />
               <button className="btn-primary w-full" disabled={register.isPending}>

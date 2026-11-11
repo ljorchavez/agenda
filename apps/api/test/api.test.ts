@@ -1405,6 +1405,31 @@ d('API (integration)', () => {
     expect((await book(4)).resourceName).toBe('A Central');
   });
 
+  it('sign in and sign up with Google (verified email only)', async () => {
+    const { setGoogleVerifier } = await import('../src/lib/google.js');
+    setGoogleVerifier(async (cred) => {
+      if (cred === 'x'.repeat(20) + 'bad') throw new (await import('../src/lib/errors.js')).AppError(401, 'google_invalid');
+      return { email: cred.slice(20).toLowerCase(), name: 'Google Person' };
+    });
+    expect((await call('GET', '/config')).body).toHaveProperty('googleClientId');
+    // Existing account: same email logs in
+    const ok = await call('POST', '/auth/google', { credential: 'x'.repeat(20) + 'owner-a@test.mx' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.tenant.slug).toBe('negocio-a');
+    expect((await call('POST', '/auth/google', { credential: 'x'.repeat(20) + 'bad' })).status).toBe(401);
+    // New person: told to sign up, then signs up with the Google email (no password)
+    const none = await call('POST', '/auth/google', { credential: 'x'.repeat(20) + 'nuevo-google@test.mx' });
+    expect(none.status).toBe(404);
+    expect(none.body).toMatchObject({ error: 'google_no_account', details: { email: 'nuevo-google@test.mx' } });
+    const reg = await call('POST', '/auth/register', { businessName: 'Con Google', businessType: 'spa', name: 'Google Person', email: 'otro@test.mx', googleCredential: 'x'.repeat(20) + 'nuevo-google@test.mx' });
+    expect(reg.status).toBe(201);
+    expect(reg.body.user.email).toBe('nuevo-google@test.mx');
+    expect((await call('POST', '/auth/google', { credential: 'x'.repeat(20) + 'nuevo-google@test.mx' })).status).toBe(200);
+    // Without Google, a password is still required
+    expect((await call('POST', '/auth/register', { businessName: 'Sin Clave', businessType: 'spa', name: 'Sin Clave', email: 'sinclave@test.mx' })).status).toBe(422);
+    setGoogleVerifier(null);
+  });
+
   it('link preview for a business page', async () => {
     const res = await app.request('/api/page/b/negocio-a');
     expect(res.status).toBe(200);

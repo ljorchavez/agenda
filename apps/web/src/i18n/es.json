@@ -58,7 +58,11 @@
     "resetSave": "Guardar contraseña",
     "resetDone": "Listo, tu contraseña cambió. Por seguridad cerramos tus otras sesiones; inicia sesión de nuevo.",
     "invalid_reset_token": "Este enlace no es válido o ya venció. Pide uno nuevo desde \"¿Olvidaste tu contraseña?\".",
-    "too_many_attempts": "Demasiados intentos. Espera unos minutos y vuelve a intentar."
+    "too_many_attempts": "Demasiados intentos. Espera unos minutos y vuelve a intentar.",
+    "withGoogle": "Con tu cuenta de Google: {{email}}",
+    "google_invalid": "No pudimos validar tu cuenta de Google. Intenta otra vez.",
+    "google_not_configured": "El acceso con Google no está disponible.",
+    "google_unreachable": "No pudimos contactar a Google. Intenta otra vez."
   },
   "businessTypes": {
     "nutrition": "Nutrición",

@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { googleClientId, verifyGoogleCredential } from '../lib/google.js';
 import { Hono, type Context } from 'hono';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import {
@@ -15,6 +17,8 @@ import {
   PLAN_LIMITS,
   planChangeSchema,
   registerSchema,
+  googleLoginSchema,
+  type PublicConfigDto,
   SELECTABLE_PLANS,
   type PlanId,
   assignableRoles,
@@ -148,11 +152,14 @@ async function createBusiness(
 authRoutes.post('/auth/register', async (c) => {
   const input = registerSchema.parse(await c.req.json());
   const db = getDb();
+  // With Google the verified Google email is the login; a random password is kept (reset works).
+  if (input.googleCredential) input.email = (await verifyGoogleCredential(input.googleCredential)).email;
+  else if (!input.password) throw new AppError(422, 'validation_error', 'Password required');
 
   const existing = await db.query.users.findFirst({ where: eq(users.email, input.email) });
   if (existing) throw conflict('email_taken', 'Email already registered');
 
-  const passwordHash = await hashPassword(input.password);
+  const passwordHash = await hashPassword(input.password ?? randomBytes(24).toString('base64url'));
   const result = await db.transaction(async (tx) => {
     const tenant = await createBusiness(tx, input);
     const [user] = await tx.insert(users).values({ email: input.email, passwordHash, name: input.name }).returning();
@@ -174,6 +181,21 @@ authRoutes.post('/auth/login', async (c) => {
     throw new AppError(401, 'invalid_credentials', 'Invalid email or password');
   }
   await clearAttempts(db, [limits[0]!.key]);
+  const [last] = await businessesFor(db, user.id);
+  if (!last) throw new AppError(401, 'no_business', 'This login has no business');
+  return c.json(await issueSession(db, user, last.id));
+});
+
+/** Settings the app needs before login (no secrets). */
+authRoutes.get('/config', (c) => c.json({ googleClientId: googleClientId() } satisfies PublicConfigDto));
+
+/** "Continuar con Google" for an existing account (same email). New people go to sign-up. */
+authRoutes.post('/auth/google', async (c) => {
+  const { credential } = googleLoginSchema.parse(await c.req.json());
+  const db = getDb();
+  const g = await verifyGoogleCredential(credential);
+  const user = await db.query.users.findFirst({ where: eq(users.email, g.email) });
+  if (!user) throw new AppError(404, 'google_no_account', 'No account with this Google email yet', { email: g.email, name: g.name });
   const [last] = await businessesFor(db, user.id);
   if (!last) throw new AppError(401, 'no_business', 'This login has no business');
   return c.json(await issueSession(db, user, last.id));

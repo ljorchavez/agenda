@@ -481,7 +481,10 @@ export const registerSchema = z.object({
   businessType: z.enum(BUSINESS_TYPES),
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().toLowerCase().email(),
-  password: z.string().min(8).max(200),
+  /** Not needed when signing up with Google */
+  password: z.string().min(8).max(200).optional(),
+  /** Google ID token ("Continuar con Google"); its email wins over `email` */
+  googleCredential: z.string().min(20).max(4000).optional(),
   phone: phoneSchema.optional(),
   locale: z.enum(LOCALES).default('es'),
   /** Plan chosen before creating the account */
@@ -513,6 +516,13 @@ export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 });
+/** "Continuar con Google": the ID token from Google Identity Services */
+export const googleLoginSchema = z.object({ credential: z.string().min(20).max(4000) });
+/** Public settings the app needs before login */
+export interface PublicConfigDto {
+  /** Set when GOOGLE_CLIENT_ID is configured; otherwise the Google button is hidden */
+  googleClientId: string | null;
+}
 export type LoginInput = z.infer<typeof loginSchema>;
 
 /** "Forgot my password": always answers ok, whether or not the email has an account. */

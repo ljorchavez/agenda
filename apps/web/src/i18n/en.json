@@ -58,7 +58,11 @@
     "resetSave": "Save password",
     "resetDone": "Done, your password changed. For safety we signed out your other sessions; please sign in again.",
     "invalid_reset_token": "This link is invalid or has expired. Request a new one from \"Forgot your password?\".",
-    "too_many_attempts": "Too many attempts. Wait a few minutes and try again."
+    "too_many_attempts": "Too many attempts. Wait a few minutes and try again.",
+    "withGoogle": "With your Google account: {{email}}",
+    "google_invalid": "We couldn't verify your Google account. Try again.",
+    "google_not_configured": "Google sign-in is not available.",
+    "google_unreachable": "We couldn't reach Google. Try again."
   },
   "businessTypes": {
     "nutrition": "Nutrition",
