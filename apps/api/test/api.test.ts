@@ -1430,6 +1430,84 @@ d('API (integration)', () => {
     setGoogleVerifier(null);
   });
 
+  it('online sales: package and gift card paid with Mercado Pago, created once when paid', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Venta Linea', businessType: 'yoga', name: 'Dueña Venta', email: 'venta@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const slug = reg.tenant.slug;
+    const off = (await call('POST', '/offerings', { kind: 'package', name: 'Paquete 5 clases', priceCents: 50000, sessions: 5, validityDays: 30 }, tok)).body;
+    // Not selling online yet: no shop
+    expect((await call('GET', '/public/' + slug)).body.shop).toBeNull();
+    const me = (await call('GET', '/auth/me', undefined, tok)).body;
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, sales: { online: true, giftCardAmounts: [50000, 100000] } } }, tok);
+    // Still hidden until Mercado Pago is connected (money goes to the business)
+    expect((await call('GET', '/public/' + slug)).body.shop).toBeNull();
+    const { getDb } = await import('../src/db/client.js');
+    const { sql } = await import('drizzle-orm');
+    const { encryptSecret } = await import('../src/lib/crypto.js');
+    await getDb().execute(sql`update tenants set mp_access_token_enc = ${encryptSecret('TEST-MP-TOKEN')} where id = ${reg.tenant.id}`);
+    const shop = (await call('GET', '/public/' + slug)).body.shop;
+    expect(shop.offerings.map((o: { id: string }) => o.id)).toEqual([off.id]);
+    expect(shop.giftCardAmounts).toEqual([50000, 100000]);
+
+    // Mercado Pago, mocked: checkout links and payment status
+    const realFetch = globalThis.fetch;
+    const mpStatus = new Map<string, { status: string; ref: string }>();
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.startsWith('https://api.mercadopago.com')) return realFetch(input, init);
+      if (url.endsWith('/checkout/preferences')) {
+        const body = JSON.parse(String(init?.body));
+        sent.push({ url, body });
+        return new Response(JSON.stringify({ id: `pref-${sent.length}`, init_point: `https://mp.test/checkout/${sent.length}` }), { status: 201 });
+      }
+      const m = /\/v1\/payments\/(\w+)$/.exec(url);
+      const st = m ? mpStatus.get(m[1]!) : null;
+      if (st) return new Response(JSON.stringify({ status: st.status, external_reference: st.ref }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    try {
+      expect((await call('POST', `/public/${slug}/purchases`, { kind: 'gift_card', amountCents: 12345, name: 'Comprador', phone: '5544332211' })).body.error).toBe('gift_card_amount');
+      const buy = await call('POST', `/public/${slug}/purchases`, { kind: 'plan', offeringId: off.id, name: 'Comprador', phone: '5544332211', email: 'comprador@test.mx' });
+      expect(buy.status).toBe(201);
+      expect(buy.body.checkoutUrl).toBe('https://mp.test/checkout/1');
+      expect(sent[0]!.body).toMatchObject({ items: [{ unit_price: 500, currency_id: 'MXN' }] });
+      expect(String((sent[0]!.body.back_urls as { success: string }).success)).toContain(buy.body.purchasePath);
+      const ptoken = buy.body.purchasePath.slice('/compra/'.length);
+      expect((await call('GET', `/public/purchases/${ptoken}`)).body).toMatchObject({ status: 'pending', kind: 'plan', itemName: 'Paquete 5 clases', plan: null });
+      expect((await call('GET', '/public/purchases/' + ptoken.slice(0, -2) + 'xx')).status).toBe(404);
+
+      // Paid: the webhook creates the package once
+      const payId = (sent[0]!.body.external_reference as string);
+      mpStatus.set('901', { status: 'approved', ref: payId });
+      for (let i = 0; i < 2; i++) {
+        const w = await app.request(`/api/webhooks/mercadopago?tenant=${reg.tenant.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'payment', data: { id: '901' } }) });
+        expect(w.status).toBe(200);
+      }
+      const st = (await call('GET', `/public/purchases/${ptoken}`)).body;
+      expect(st).toMatchObject({ status: 'paid', plan: { sessionsLeft: 5 } });
+      const cust = (await call('GET', `/customers?q=Comprador`, undefined, tok)).body.items[0];
+      const plans = (await call('GET', `/customers/${cust.id}/plans`, undefined, tok)).body.plans;
+      expect(plans).toHaveLength(1);
+      expect(plans[0]).toMatchObject({ name: 'Paquete 5 clases', sessionsLeft: 5, status: 'active' });
+
+      // Gift card for someone else
+      const gift = await call('POST', `/public/${slug}/purchases`, { kind: 'gift_card', amountCents: 100000, recipientName: 'Mamá', name: 'Comprador', phone: '5544332211' });
+      expect(gift.status).toBe(201);
+      mpStatus.set('902', { status: 'approved', ref: sent[1]!.body.external_reference as string });
+      await app.request(`/api/webhooks/mercadopago?tenant=${reg.tenant.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'payment', data: { id: '902' } }) });
+      const gst = (await call('GET', `/public/purchases/${gift.body.purchasePath.slice(8)}`)).body;
+      expect(gst).toMatchObject({ status: 'paid', kind: 'gift_card', recipientName: 'Mamá' });
+      expect(gst.giftCardCode).toMatch(/^[A-Z0-9-]{6,}$/);
+      const cards = (await call('GET', '/gift-cards', undefined, tok)).body;
+      expect(cards.find((g: { code: string }) => g.code === gst.giftCardCode)).toMatchObject({ balanceCents: 100000, recipientName: 'Mamá' });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it('link preview for a business page', async () => {
     const res = await app.request('/api/page/b/negocio-a');
     expect(res.status).toBe(200);

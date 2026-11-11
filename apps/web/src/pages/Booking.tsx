@@ -1,4 +1,5 @@
 import { PublicReviews, RatingBadge } from '../components/Reviews';
+import { ShopSection } from '../components/Shop';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -121,6 +122,7 @@ export function BookingPage() {
             {kindConfig(business.kind).sessions ? <ClassesFlow {...flowProps} /> : <BookingFlow {...flowProps} />}
           </div>
         )}
+        {!book.isSuccess && <ShopSection business={full} />}
       </div>
     </div>
   );

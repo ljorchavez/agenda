@@ -1,4 +1,5 @@
 import { ReviewPage } from './pages/Review';
+import { PurchasePage } from './components/Shop';
 import type { ReactElement } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +52,7 @@ export function App() {
       {/* Private link for a customer to reschedule/cancel their appointment */}
       <Route path="/c/:token" element={<ManagePage />} />
       <Route path="/r/:token" element={<ReviewPage />} />
+      <Route path="/compra/:token" element={<PurchasePage />} />
       {/* The business back office */}
       <Route
         element={

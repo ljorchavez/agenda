@@ -538,6 +538,17 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('directory has a pin per barbershop location', d.entries.filter((e) => e.slug === 'barberia-demo').length === 2);
 }
 
+// ---- Online sales: hidden unless the business connected Mercado Pago and turned it on
+{
+  const pub = await call('GET', '/api/public/yoga-demo');
+  check('booking page carries the shop field', pub.status === 200 && 'shop' in (pub.body ?? {}), pub.text.slice(0, 120));
+  if (pub.body?.shop === null) {
+    const r = await call('POST', '/api/public/yoga-demo/purchases', { kind: 'gift_card', amountCents: 50000, name: 'QA Compra', phone: '5519190001' });
+    check('buying online refused while not selling online', r.status === 422 && r.body?.error === 'shop_closed', r.text.slice(0, 200));
+  }
+  check('bad purchase link -> 404', (await call('GET', '/api/public/purchases/x.y')).status === 404);
+}
+
 // ---- Link preview and installable app
 {
   const page = await fetch(`${BASE}/b/barberia-demo`);

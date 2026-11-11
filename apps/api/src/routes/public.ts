@@ -27,6 +27,7 @@ import { hasOverlap } from '../lib/appointments.js';
 import { findUsableCoupon, resolveDiscount } from '../lib/discounts.js';
 import { customerPlans as customerPlansOf } from '../lib/plans.js';
 import { reviewSummary } from './reviews.js';
+import { shopFor } from '../lib/online-sales.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
 import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
 import { activeResources, assignResource, closedRanges, defaultService, locationBlocks, pickResource, resourceBusy, type Need } from '../lib/resources.js';
@@ -42,7 +43,7 @@ import { apiBaseUrl, createOnlinePayment, tenantMpToken } from '../lib/online-pa
  */
 export const publicRoutes = new Hono();
 
-async function getTenantBySlug(slug: string): Promise<Tenant> {
+export async function getTenantBySlug(slug: string): Promise<Tenant> {
   const tenant = await getDb().query.tenants.findFirst({ where: eq(tenants.slug, slug) });
   if (!tenant || !tenant.settings.onlineBookingEnabled) throw notFound('business');
   return tenant;
@@ -103,6 +104,7 @@ publicRoutes.get('/public/:slug', async (c) => {
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
     page: pageSettingsOf(tenant.settings),
     reviews: await reviewSummary(getDb(), tenant.id, 5),
+    shop: await shopFor(getDb(), tenant),
     promos: (() => {
       const r = rewardSettingsOf(tenant.settings);
       return { coupons: couponsEnabled(tenant.settings), reward: r.enabled ? { everyVisits: r.everyVisits, discountType: r.discountType, value: r.value } : null };
@@ -309,7 +311,7 @@ publicRoutes.get('/public/:slug/classes', async (c) => {
   return c.json(list.map(toPublicSession));
 });
 
-async function findOrCreateCustomer(
+export async function findOrCreateCustomer(
   tx: Pick<Db, 'query' | 'insert' | 'execute'>,
   tenantId: string,
   input: { name: string; phone: string; email?: string },

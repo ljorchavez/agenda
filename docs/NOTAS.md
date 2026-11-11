@@ -226,6 +226,15 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
 - Demo: nutrición "Historia clínica nutricional" (Consulta inicial y Plan alimenticio + bioimpedancia) y médico "Antecedentes médicos" (primera vez y medicina interna), con respuestas.
 - La columna `forms.ask_online` quedó sin uso (se ignora).
 
+## 11c. Venta en línea de paquetes y tarjetas de regalo (hecho, migración 0013)
+- Configuración → Paquetes → **Vender en línea**: el cliente compra desde la página de reservas
+  (sección "Paquetes y tarjetas de regalo") y paga con el **Mercado Pago del negocio**.
+- Requiere tener Mercado Pago conectado y plan con paquetes. Montos de tarjeta de regalo: hasta 6.
+- Al confirmarse el pago (webhook) se crea solo el paquete/membresía o la tarjeta (una sola vez).
+  El cliente ve su código o su paquete en una liga privada `/compra/<token>`.
+- Cuenta como venta en reportes y en el corte de caja (forma de pago Mercado Pago).
+- Los negocios demo no tienen Mercado Pago, así que ahí no aparece la sección.
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México
@@ -245,8 +254,8 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
 ### Pendientes (en orden)
 1. ~~App instalable desde el navegador (PWA) e íconos~~ (hecho: aviso "Instala Agenda" en el
    celular, atajos "Nueva cita" y "Clientes", página sin conexión).
-2. Cobros: suscripción con tarjeta (falta proveedor). El anticipo al reservar ya está hecho;
-   falta vender paquetes y tarjetas de regalo en línea.
+2. Cobros: suscripción con tarjeta (falta proveedor). El anticipo al reservar y la venta en línea
+   de paquetes y tarjetas de regalo ya están hechos.
 3. Facturación CFDI: AgendaPro aún no la tiene; es nuestra mejor ventaja.
 4. Confianza: testimonios de negocios reales, dominio propio y soporte por WhatsApp.
 5. Sincronización completa con Google Calendar en los dos sentidos (OAuth):

@@ -9,6 +9,7 @@ import {
   verifyMercadoPagoSignature,
 } from '../integrations/mercadopago.js';
 import { verifyWhatsAppSignature, type WhatsAppWebhook } from '../integrations/whatsapp.js';
+import { fulfilPurchase } from '../lib/online-sales.js';
 
 /** Webhooks from WhatsApp (Meta) and Mercado Pago. Always verify signatures first. */
 export const webhookRoutes = new Hono();
@@ -125,6 +126,9 @@ webhookRoutes.post('/webhooks/mercadopago', async (c) => {
       ),
     )
     .returning();
+
+  // A paid online sale creates the package/membership or gift card (once).
+  if (payment?.purchase && status === 'paid') await fulfilPurchase(db, payment.id);
 
   // A paid deposit confirms the appointment.
   if (payment?.appointmentId && status === 'paid') {

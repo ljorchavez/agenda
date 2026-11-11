@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
+import type { OnlinePurchase } from '@agenda/shared';
 import { payments, type Tenant } from '../db/schema.js';
 import { createCardCheckout, createSpeiOrder } from '../integrations/mercadopago.js';
 import { decryptSecret } from './crypto.js';
@@ -19,6 +20,9 @@ export function apiBaseUrl(requestUrl: string): string {
   return process.env.PUBLIC_API_URL ?? `${new URL(requestUrl).origin}/api`;
 }
 
+/** The app's address (for links the customer opens). */
+export const appBaseUrl = (apiBase: string) => (process.env.APP_URL ?? apiBase.replace(/\/api$/, '')).replace(/\/$/, '');
+
 /**
  * Creates a pending payment and a Mercado Pago checkout (card) or SPEI order for it.
  * Money goes to the business's own Mercado Pago account.
@@ -27,7 +31,13 @@ export async function createOnlinePayment(
   db: Db,
   tenant: Tenant,
   p: {
-    appointmentId: string;
+    /** Deposit for a booking; null for an online sale (then `purchase` says what it buys) */
+    appointmentId: string | null;
+    purchase?: OnlinePurchase;
+    notes?: string;
+    locationId?: string | null;
+    /** Where Mercado Pago sends the buyer back (default: the booking page) */
+    backUrl?: string | ((paymentId: string) => string);
     customerId: string;
     customerEmail: string | null;
     title: string;
@@ -51,7 +61,9 @@ export async function createOnlinePayment(
       method: p.method,
       status: 'pending',
       provider: 'mercadopago',
-      notes: 'Anticipo',
+      notes: p.notes ?? 'Anticipo',
+      purchase: p.purchase ?? null,
+      locationId: p.locationId ?? null,
     })
     .returning();
 
@@ -62,7 +74,7 @@ export async function createOnlinePayment(
     payerEmail: p.customerEmail,
     // The tenant id lets the webhook query Mercado Pago with the right account's token.
     notificationUrl: `${p.apiBase}/webhooks/mercadopago?tenant=${tenant.id}`,
-    backUrl: `${process.env.APP_URL ?? p.apiBase.replace(/\/api$/, '')}/b/${tenant.slug}`,
+    backUrl: typeof p.backUrl === 'function' ? p.backUrl(pending!.id) : (p.backUrl ?? `${appBaseUrl(p.apiBase)}/b/${tenant.slug}`),
     accessToken,
   };
 

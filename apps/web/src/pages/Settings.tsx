@@ -1,5 +1,6 @@
 import { FormsSection } from '../components/Forms';
 import { AssignmentSettingsSection } from '../components/Assignment';
+import { OnlineSalesSection } from '../components/OnlineSales';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageLookSection } from '../components/PageLook';
@@ -12,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   assignableRoles,
   assignmentSettingsOf,
+  salesSettingsOf,
   BUSINESS_TYPES,
   isManager,
   isValidClabe,
@@ -164,6 +166,7 @@ function BusinessSettings() {
     rentals: rentalSettingsOf(tenant!.settings),
     page: pageSettingsOf(tenant!.settings),
     assignment: assignmentSettingsOf(tenant!.settings),
+    sales: salesSettingsOf(tenant!.settings),
   });
   const kind = tenant?.kind ?? 'appointments';
   const isRentals = kindConfig(kind).durations;
@@ -218,7 +221,7 @@ function BusinessSettings() {
   ];
   const tab = tabs.some((x) => x.id === params.get('tab')) ? params.get('tab')! : 'business';
   // Tabs that share one "Guardar" (business data, booking rules, payments)
-  const saveBar = canEdit && ['business', 'booking', 'payments', 'promos'].includes(tab) && (
+  const saveBar = canEdit && ['business', 'booking', 'payments', 'promos', 'packages'].includes(tab) && (
     <div className="flex items-center gap-3">
       <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
       {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
@@ -430,9 +433,15 @@ function BusinessSettings() {
       {tab === 'users' && <UsersSection kind={kind} />}
       {tab === 'plan' && <PlanSection canChange={isOwner} />}
       {tab === 'packages' && (
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          <OfferingsSection disabled={!businessManager} />
-          <GiftCardsList />
+        <div className="space-y-6">
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <OfferingsSection disabled={!businessManager} />
+            <div className="space-y-6">
+              <OnlineSalesSection disabled={!businessManager} value={salesSettingsOf(settings)} onChange={(v) => setSettings((x) => ({ ...x, sales: v }))} />
+              <GiftCardsList />
+            </div>
+          </div>
+          {businessManager && saveBar}
         </div>
       )}
       {tab === 'forms' && <FormsSection disabled={!businessManager} />}

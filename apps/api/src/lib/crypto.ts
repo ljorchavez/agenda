@@ -43,6 +43,18 @@ export function manageToken(appointmentId: string): string {
   return `${appointmentId}.${manageSig(appointmentId)}`;
 }
 
+/** Private link to an online purchase (/compra/<token>): <paymentId>.<hmac of "purchase:id">. */
+export function purchaseToken(paymentId: string): string {
+  return `${paymentId}.${manageSig(`purchase:${paymentId}`)}`;
+}
+export function verifyPurchaseToken(token: string): string | null {
+  const m = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{24})$/.exec(token);
+  if (!m) return null;
+  const expected = Buffer.from(manageSig(`purchase:${m[1]!}`));
+  const given = Buffer.from(m[2]!);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given) ? m[1]! : null;
+}
+
 /** Returns the appointment id if the token is authentic, otherwise null. */
 export function verifyManageToken(token: string): string | null {
   const m = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{24})$/.exec(token);

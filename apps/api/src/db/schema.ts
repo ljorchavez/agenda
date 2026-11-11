@@ -24,6 +24,7 @@ import {
   ROLES,
   type BusinessHours,
   type FormField,
+  type OnlinePurchase,
   type PlanId,
   type WorkHours,
   type TenantSettings,
@@ -363,6 +364,8 @@ export const payments = pgTable(
     soldGiftCardId: uuid('sold_gift_card_id'),
     /** Gift card used to pay (method 'gift_card') */
     giftCardId: uuid('gift_card_id'),
+    /** Online sale: what this payment buys; fulfilled when it is paid (lib/online-sales) */
+    purchase: jsonb('purchase').$type<OnlinePurchase | null>(),
     ...timestamps,
   },
   (t) => [

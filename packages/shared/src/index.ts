@@ -426,6 +426,14 @@ export const tenantSettingsSchema = z.object({
       durations: z.array(z.number().int().min(15).max(720)).min(1).max(8),
     })
     .optional(),
+  /** Selling packages, memberships and gift cards on the booking page (paid with the business's Mercado Pago) */
+  sales: z
+    .object({
+      online: z.boolean(),
+      /** Gift card amounts offered online, in cents (none = no gift cards online) */
+      giftCardAmounts: z.array(z.number().int().min(10_000).max(5_000_000)).max(6).default([]),
+    })
+    .optional(),
   /** Who gets a booking made with "Cualquiera disponible" */
   assignment: z
     .object({
@@ -435,6 +443,11 @@ export const tenantSettingsSchema = z.object({
     })
     .optional(),
 });
+export type SalesSettings = { online: boolean; giftCardAmounts: number[] };
+export const DEFAULT_GIFT_CARD_AMOUNTS = [50_000, 100_000, 150_000];
+export function salesSettingsOf(settings: { sales?: Partial<SalesSettings> } | null | undefined): SalesSettings {
+  return { online: settings?.sales?.online ?? false, giftCardAmounts: settings?.sales?.giftCardAmounts ?? DEFAULT_GIFT_CARD_AMOUNTS };
+}
 export type AssignmentSettings = { strategy: 'least_used' | 'cheapest' | 'preferred'; preferredIds: string[] };
 export const ASSIGNMENT_STRATEGIES = ['least_used', 'cheapest', 'preferred'] as const;
 export function assignmentSettingsOf(settings: { assignment?: Partial<AssignmentSettings> } | null | undefined): AssignmentSettings {
@@ -1422,6 +1435,8 @@ export interface PublicBusinessDto {
   reviews: ReviewSummaryDto;
   /** Promotions customers can see: coupon box and the loyalty reward */
   promos: { coupons: boolean; reward: Pick<RewardSettings, 'everyVisits' | 'discountType' | 'value'> | null };
+  /** Packages and gift cards for sale online (null = not selling online) */
+  shop: PublicShopDto | null;
 }
 
 /** A customer's active package/membership as shown to them */
@@ -1818,4 +1833,55 @@ export interface FormResponseDto {
 export interface AppointmentFormDto {
   form: PublicFormDto;
   response: FormResponseDto | null;
+}
+
+
+// ---------- Online sales (packages, memberships, gift cards on the booking page) ----------
+
+/** What a pending online payment buys; fulfilled when Mercado Pago confirms it. */
+export type OnlinePurchase =
+  | { kind: 'plan'; offeringId: string }
+  | { kind: 'gift_card'; amountCents: number; recipientName: string | null };
+
+export interface PublicOfferingDto {
+  id: string;
+  kind: 'package' | 'membership';
+  name: string;
+  priceCents: number;
+  sessions: number | null;
+  validityDays: number | null;
+  /** Names of the services it covers (empty = all) */
+  serviceNames: string[];
+}
+export interface PublicShopDto {
+  offerings: PublicOfferingDto[];
+  /** Gift card amounts in cents (empty = none) */
+  giftCardAmounts: number[];
+}
+
+export const publicPurchaseSchema = z
+  .object({
+    kind: z.enum(['plan', 'gift_card']),
+    offeringId: z.string().uuid().optional(),
+    amountCents: z.number().int().min(10_000).max(5_000_000).optional(),
+    recipientName: z.string().trim().max(120).nullable().optional(),
+    name: z.string().trim().min(2).max(120),
+    phone: phoneSchema,
+    email: z.string().trim().toLowerCase().email().optional().or(z.literal('').transform(() => undefined)),
+    method: z.enum(['mercadopago', 'spei']).default('mercadopago'),
+  })
+  .refine((p) => (p.kind === 'plan' ? Boolean(p.offeringId) : p.amountCents != null), { path: ['kind'], message: 'missing_item' });
+export type PublicPurchaseInput = z.infer<typeof publicPurchaseSchema>;
+
+export interface PurchaseStatusDto {
+  status: 'pending' | 'paid' | 'failed' | 'refunded';
+  kind: 'plan' | 'gift_card';
+  itemName: string;
+  amountCents: number;
+  businessName: string;
+  slug: string;
+  /** Once paid */
+  giftCardCode: string | null;
+  recipientName: string | null;
+  plan: { sessionsLeft: number | null; expiresOn: string | null } | null;
 }
