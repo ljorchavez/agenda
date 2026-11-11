@@ -30,7 +30,7 @@ pnpm db:seed                       # datos de ejemplo (opcional)
 pnpm dev                           # API en :3000 y web en :5173
 ```
 
-Abre http://localhost:5173 e inicia sesión con `demo@agenda.mx` / `demo1234`
+Abre http://localhost:5173 e inicia sesión con `demo@lugali.com` / `demo1234`
 (si corriste el seed) o crea una cuenta. Página pública de reservas del demo:
 http://localhost:5173/b/nutricion-demo
 

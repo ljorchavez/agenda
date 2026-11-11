@@ -17,6 +17,7 @@ import { verifyManageToken } from '../lib/crypto.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { activeResources, assignResource, locationBlocks } from '../lib/resources.js';
 import { computeClassSlots, computeSlots, publicPlans } from './public.js';
+import { notifyAppointment } from '../lib/notify.js';
 
 /**
  * Customer self-service via the private link /c/<token> (sent after booking or by the business).
@@ -234,6 +235,7 @@ manageRoutes.post('/public/manage/:token/reschedule', async (c) => {
       .returning({ id: appointments.id });
     if (res.length === 0) throw new AppError(422, 'reschedule_not_allowed');
   });
+  await notifyAppointment(l.appt.id, 'rescheduled');
   return c.json(toDto(await load(c.req.param('token'))));
 });
 
@@ -251,5 +253,6 @@ manageRoutes.post('/public/manage/:token/cancel', async (c) => {
         sql`${appointments.status} in ('scheduled', 'confirmed')`,
       ),
     );
+  await notifyAppointment(l.appt.id, 'cancelled');
   return c.json(toDto(await load(c.req.param('token'))));
 });

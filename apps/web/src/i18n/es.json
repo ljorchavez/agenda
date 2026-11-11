@@ -330,8 +330,8 @@
     "open": "Abre",
     "close": "Cierra",
     "slotMinutes": "Intervalo de reservas (min)",
-    "reminders": "Recordatorios por WhatsApp",
-    "remindersEnabled": "Enviar recordatorio automático",
+    "reminders": "Avisos al cliente",
+    "remindersEnabled": "Enviar recordatorio antes de la cita (correo y WhatsApp)",
     "reminderHoursBefore": "Horas antes de la cita",
     "onlineBooking": "Reservas en línea",
     "onlineBookingEnabled": "Permitir que tus clientes agenden solos",
@@ -403,7 +403,9 @@
     "changePassword": "Cambiar contraseña",
     "passwordChanged": "Contraseña cambiada",
     "reviewsPublic": "Mostrar reseñas en mi página y en el directorio",
-    "reviewsPublicHelp": "Se publican a partir de 3 reseñas. Si lo apagas, tus clientes pueden seguir calificando y solo tú las ves."
+    "reviewsPublicHelp": "Se publican a partir de 3 reseñas. Si lo apagas, tus clientes pueden seguir calificando y solo tú las ves.",
+    "emailConfirmations": "Enviar confirmación por correo al agendar, cambiar o cancelar",
+    "notifyHelp": "Se envían al correo del cliente, si lo tiene registrado."
   },
   "booking": {
     "chooseService": "Elige un servicio",

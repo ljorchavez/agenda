@@ -16,7 +16,7 @@ export function BusinessTypePicker({ value, onChange, disabled, id }: { value: B
   };
   return (
     <div className="space-y-2" id={id} data-testid="business-type-picker">
-      <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7" role="radiogroup" aria-label={t('auth.businessCategory')}>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('auth.businessCategory')}>
         {BUSINESS_CATEGORIES.map((c) => {
           const on = c === cat;
           return (
@@ -28,17 +28,17 @@ export function BusinessTypePicker({ value, onChange, disabled, id }: { value: B
               disabled={disabled}
               onClick={() => pickCat(c)}
               data-testid={`pick-category-${c}`}
-              className={`flex flex-col items-center gap-0.5 rounded-lg border px-1 py-1.5 text-xs font-medium disabled:opacity-60 ${on ? 'text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}`}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium disabled:opacity-60 ${on ? 'text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}`}
               style={on ? { background: CATEGORY_STYLE[c].color, borderColor: CATEGORY_STYLE[c].color } : undefined}
             >
-              <span className="text-lg leading-none" aria-hidden>{CATEGORY_STYLE[c].icon}</span>
-              <span className="truncate">{t(`categories.${c}`)}</span>
+              <span className="text-base leading-none" aria-hidden>{CATEGORY_STYLE[c].icon}</span>
+              {t(`categories.${c}`)}
             </button>
           );
         })}
       </div>
       {types.length > 1 && (
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('auth.businessType')}>
+        <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-2" role="radiogroup" aria-label={t('auth.businessType')}>
           {types.map((b) => (
             <button
               key={b}

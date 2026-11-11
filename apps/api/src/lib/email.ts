@@ -15,10 +15,11 @@ export const sentInTests: EmailMessage[] = [];
 
 const isProduction = () => process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production';
 
-export async function sendEmail(msg: EmailMessage): Promise<void> {
+/** True when the message was handed to the provider (or recorded, in tests). */
+export async function sendEmail(msg: EmailMessage): Promise<boolean> {
   if (process.env.NODE_ENV === 'test') {
     sentInTests.push(msg);
-    return;
+    return true;
   }
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
@@ -26,14 +27,20 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
     // Never print reset links in production logs.
     if (isProduction()) console.warn(`[email] RESEND_API_KEY/EMAIL_FROM not set; "${msg.subject}" was not sent`);
     else console.info(`[email] (not sent, no provider) to=${msg.to} subject=${msg.subject}\n${msg.text}`);
-    return;
+    return false;
   }
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html }),
-  });
-  if (!res.ok) console.error(`[email] Resend error ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html }),
+    });
+    if (!res.ok) console.error(`[email] Resend error ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    return res.ok;
+  } catch (err) {
+    console.error('[email] Resend unreachable', err);
+    return false;
+  }
 }
 
 export const escapeHtml = (s: string) =>

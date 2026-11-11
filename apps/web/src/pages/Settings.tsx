@@ -448,6 +448,11 @@ function BusinessSettings() {
             <input type="checkbox" disabled={!canEdit} checked={settings.remindersEnabled} onChange={(e) => setSettings({ ...settings, remindersEnabled: e.target.checked })} />
             {t('settings.remindersEnabled')}
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!canEdit} checked={settings.emailConfirmations !== false} onChange={(e) => setSettings({ ...settings, emailConfirmations: e.target.checked })} data-testid="email-confirmations" />
+            {t('settings.emailConfirmations')}
+          </label>
+          <p className="text-xs text-slate-500">{t('settings.notifyHelp')}</p>
           <div className="max-w-48">
             <label className="label">{t('settings.reminderHoursBefore')}</label>
             <input type="number" min={1} max={72} disabled={!canEdit} className="input" value={settings.reminderHoursBefore} onChange={(e) => setSettings({ ...settings, reminderHoursBefore: Number(e.target.value) })} />

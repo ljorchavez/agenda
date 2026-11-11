@@ -330,8 +330,8 @@
     "open": "Opens",
     "close": "Closes",
     "slotMinutes": "Booking interval (min)",
-    "reminders": "WhatsApp reminders",
-    "remindersEnabled": "Send automatic reminder",
+    "reminders": "Customer notices",
+    "remindersEnabled": "Send a reminder before the appointment (email and WhatsApp)",
     "reminderHoursBefore": "Hours before the appointment",
     "onlineBooking": "Online booking",
     "onlineBookingEnabled": "Let customers book by themselves",
@@ -403,7 +403,9 @@
     "changePassword": "Change password",
     "passwordChanged": "Password changed",
     "reviewsPublic": "Show reviews on my page and in the directory",
-    "reviewsPublicHelp": "They're published from 3 reviews on. If you turn it off, customers can still rate you and only you see them."
+    "reviewsPublicHelp": "They're published from 3 reviews on. If you turn it off, customers can still rate you and only you see them.",
+    "emailConfirmations": "Email a confirmation when a booking is made, moved or cancelled",
+    "notifyHelp": "Sent to the customer's email, if they have one."
   },
   "booking": {
     "chooseService": "Choose a service",

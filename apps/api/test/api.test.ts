@@ -180,6 +180,43 @@ d('API (integration)', () => {
     expect(second.processed).toBe(0);
   });
 
+  it('emails the customer: confirmation, change, cancellation and reminder', async () => {
+    const { sentInTests } = await import('../src/lib/email.js');
+    const { sendDueReminders } = await import('../src/jobs/reminders.js');
+    const svc = (await call('GET', '/services', undefined, a.token)).body[0];
+    const cust = await call('POST', '/customers', { name: 'Correo Cliente', phone: '5512340099', email: 'cliente@correo.mx' }, a.token);
+    const noMail = await call('POST', '/customers', { name: 'Sin Correo', phone: '5512340098' }, a.token);
+    const fake = await call('POST', '/customers', { name: 'Demo Falso', phone: '5512340097', email: 'x1@example.com' }, a.token);
+    sentInTests.length = 0;
+    const when = DateTime.now().plus({ days: 3 }).set({ hour: 11, minute: 0, second: 0, millisecond: 0 });
+    const appt = await call('POST', '/appointments', { customerId: cust.body.id, serviceId: svc.id, startsAt: when.toISO(), allowOverlap: true }, a.token);
+    expect(appt.status).toBe(201);
+    // No email address, or a reserved test domain: nothing is sent
+    await call('POST', '/appointments', { customerId: noMail.body.id, serviceId: svc.id, startsAt: when.toISO(), allowOverlap: true }, a.token);
+    await call('POST', '/appointments', { customerId: fake.body.id, serviceId: svc.id, startsAt: when.toISO(), allowOverlap: true }, a.token);
+    expect(sentInTests).toHaveLength(1);
+    expect(sentInTests[0]!.to).toBe('cliente@correo.mx');
+    expect(sentInTests[0]!.subject).toContain('Negocio a');
+    expect(sentInTests[0]!.text).toMatch(/\/c\/[A-Za-z0-9_.-]+/);
+    // Moved by the business, then cancelled
+    await call('PATCH', `/appointments/${appt.body.id}`, { startsAt: when.plus({ hours: 2 }).toISO(), allowOverlap: true }, a.token);
+    expect(sentInTests[1]!.subject).toMatch(/Cambió/);
+    await call('PATCH', `/appointments/${appt.body.id}`, { status: 'cancelled' }, a.token);
+    expect(sentInTests[2]!.subject).toMatch(/cancel/);
+    expect(sentInTests).toHaveLength(3);
+    // Business turns confirmations off: none sent
+    const me = (await call('GET', '/auth/me', undefined, a.token)).body.tenant.settings;
+    await call('PATCH', '/tenant', { settings: { ...me, emailConfirmations: false } }, a.token);
+    const soon = await call('POST', '/appointments', { customerId: cust.body.id, serviceId: svc.id, startsAt: DateTime.now().plus({ hours: 3 }).toISO(), allowOverlap: true }, a.token);
+    expect(sentInTests).toHaveLength(3);
+    // The reminder still goes out within the hours chosen (default 24)
+    await sendDueReminders(200, 0);
+    const reminder = sentInTests.find((m) => m.subject.startsWith('Recordatorio'));
+    expect(reminder?.to).toBe('cliente@correo.mx');
+    await call('PATCH', '/tenant', { settings: { ...me, emailConfirmations: true } }, a.token);
+    await call('DELETE', `/appointments/${soon.body.id}`, undefined, a.token);
+  });
+
   it('payment settings: defaults, validation, deposit on public booking', async () => {
     const me = await call('GET', '/auth/me', undefined, a.token);
     expect(me.body.tenant.settings.payments.deposit.enabled).toBe(false);
@@ -860,6 +897,7 @@ d('API (integration)', () => {
     const token = /token=([A-Za-z0-9_-]+)/.exec(sentInTests[0]!.text)![1]!;
     // Demo logins never get a reset email
     await call('POST', '/auth/forgot-password', { email: 'demo@agenda.mx' });
+    await call('POST', '/auth/forgot-password', { email: 'demo@lugali.com' });
     expect(sentInTests).toHaveLength(1);
 
     expect((await call('POST', '/auth/reset-password', { token: 'x'.repeat(43), password: 'nueva-clave-1' })).body.error).toBe('invalid_reset_token');

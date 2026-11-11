@@ -339,7 +339,7 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
               <OdontogramInput value={d.odontogram} readOnly />
             </div>
           )}
-          <ul className="space-y-2" data-testid="clinical-notes">
+          <ul className="-mr-2 max-h-[32rem] space-y-2 overflow-y-auto pr-2" data-testid="clinical-notes">
             {main.map((n) => (
               <li key={n.id} className="rounded-lg border border-slate-200 text-sm">
                 <button type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left" onClick={() => setViewing(viewing === n.id ? null : n.id)} aria-expanded={viewing === n.id}>

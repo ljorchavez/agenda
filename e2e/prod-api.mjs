@@ -53,17 +53,17 @@ r = await call('GET', '/api/does-not-exist');
 check('unknown API route -> 404 JSON', r.status === 404 && r.body?.error === 'not_found', r.status);
 
 // ---- Auth
-r = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'wrong' });
+r = await call('POST', '/api/auth/login', { email: 'demo@lugali.com', password: 'wrong' });
 check('login wrong password -> 401', r.status === 401 && r.body?.error === 'invalid_credentials', r.text);
 r = await call('POST', '/api/auth/login', { email: 'not-an-email', password: 'x' });
 check('login invalid email -> 422', r.status === 422, r.status);
-r = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+r = await call('POST', '/api/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
 check('demo login -> 200 + token', r.status === 200 && !!r.body?.token, r.text);
 const demoBusinesses = r.body?.businesses ?? [];
 check('demo owner sees every demo business', ['nutricion-demo', 'restaurante-demo', 'barberia-demo', 'yoga-demo', 'padel-demo'].every((x) => demoBusinesses.some((b) => b.slug === x && b.role === 'owner')), JSON.stringify(demoBusinesses.map((b) => b.slug)));
 /** Demo owner session opened on one business (business switcher). */
 async function asDemo(slug) {
-  const l = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const l = await call('POST', '/api/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const biz = (l.body?.businesses ?? []).find((b) => b.slug === slug);
   if (!biz) return { token: null, tenant: null };
   const sw = await call('POST', '/api/auth/switch', { tenantId: biz.id }, l.body.token);
@@ -71,7 +71,7 @@ async function asDemo(slug) {
 }
 /** Same, but returns the raw switch response ({ status, body, text }). */
 async function demoLogin(slug) {
-  const l = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const l = await call('POST', '/api/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const biz = (l.body?.businesses ?? []).find((b) => b.slug === slug);
   if (!biz) return { status: 404, body: null, text: `no demo business ${slug}` };
   return call('POST', '/api/auth/switch', { tenantId: biz.id }, l.body.token);
@@ -82,7 +82,7 @@ const token = r.body?.token;
 const tenant = r.body?.tenant;
 check('demo tenant slug', tenant?.slug === 'nutricion-demo', tenant?.slug);
 r = await call('POST', '/api/auth/register', {
-  businessName: 'Dup', businessType: 'other', name: 'Dup', email: 'demo@agenda.mx', password: 'password123',
+  businessName: 'Dup', businessType: 'other', name: 'Dup', email: 'demo@lugali.com', password: 'password123',
 });
 check('register duplicate email -> 409', r.status === 409 && r.body?.error === 'email_taken', r.text);
 r = await call('GET', '/api/customers');
@@ -90,7 +90,7 @@ check('private route without token -> 401', r.status === 401, r.status);
 r = await call('GET', '/api/customers', null, 'garbage.token.value');
 check('private route bad token -> 401', r.status === 401, r.status);
 r = await call('GET', '/api/auth/me', null, token);
-check('me -> user + tenant', r.status === 200 && r.body?.user?.email === 'demo@agenda.mx', r.text);
+check('me -> user + tenant', r.status === 200 && r.body?.user?.email === 'demo@lugali.com', r.text);
 
 // ---- Read endpoints with seeded data
 r = await call('GET', '/api/services', null, token);
@@ -475,8 +475,8 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
 {
   const login = async (email) => (await call('POST', '/api/auth/login', { email, password: 'demo1234' })).body;
   const owner = await asDemo('barberia-demo');
-  const admin = await login('recepcion@agenda.mx');
-  const memo = await login('memo@agenda.mx');
+  const admin = await login('recepcion@lugali.com');
+  const memo = await login('memo@lugali.com');
   check('demo logins have roles', owner?.user.role === 'owner' && admin?.user.role === 'admin' && memo?.user.role === 'staff' && !!memo.user.resourceId,
     JSON.stringify([owner?.user, admin?.user, memo?.user]));
   const from = new Date(Date.now() - 30 * 864e5).toISOString();
@@ -503,7 +503,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('colaborador dashboard works', dash.status === 200, dash.text.slice(0, 120));
   const rep = await call('GET', `/api/reports?from=2026-01-01&to=${mxDay(0)}`, null, memo.token);
   check('colaborador reports scoped', rep.status === 200, rep.text.slice(0, 120));
-  const diego = await login('diego@agenda.mx');
+  const diego = await login('diego@lugali.com');
   const ses = (await call('GET', `/api/class-sessions?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(to)}`, null, diego.token)).body ?? [];
   check('instructor sees only own classes', ses.length > 0 && ses.every((s) => s.resourceId === diego.user.resourceId), String(ses.length));
 }
@@ -522,7 +522,7 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('Guadalajara availability follows its own hours (11-21)', slots.length > 0 && slots.every((x) => hour(x) >= 11 && hour(x) < 21), slots.slice(0, 3).join(','));
   const bk = await call('POST', '/api/public/barberia-demo/bookings', { serviceId: pub.services[0].id, startsAt: slots[slots.length - 2], locationId: pol?.id, name: 'Sucursal QA', phone: '5518180001' });
   check('booking at Guadalajara goes to its barber', bk.status === 201 && bk.body.resourceName === rafa?.name, bk.text);
-  const gerente = (await call('POST', '/api/auth/login', { email: 'gerente@agenda.mx', password: 'demo1234' })).body;
+  const gerente = (await call('POST', '/api/auth/login', { email: 'gerente@lugali.com', password: 'demo1234' })).body;
   check('gerente limited to Guadalajara', gerente?.user?.role === 'admin' && gerente.user.locationId === pol?.id, JSON.stringify(gerente?.user));
   const from = new Date(Date.now() - 30 * 864e5).toISOString();
   const to = new Date(Date.now() + 30 * 864e5).toISOString();
@@ -714,13 +714,13 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   let last;
   for (let i = 0; i < 6; i++) last = await call('POST', '/api/auth/login', { email: ghost, password: `wrong-${i}` });
   check('6th wrong login in a row -> 429', last.status === 429 && last.body?.error === 'too_many_attempts', last.text);
-  const demo = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const demo = await call('POST', '/api/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   check('demo login unaffected by someone else being locked', demo.status === 200);
 }
 
 // ---- Expediente clínico (NOM-004 / NOM-013) on the health demos
 {
-  const login = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const login = await call('POST', '/api/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const slugs = ['medico-demo', 'dental-demo', 'psicologia-demo', 'fisioterapia-demo', 'nutricion-demo'];
   check('demo owner has the five health demos', slugs.every((s) => login.body?.businesses?.some((b) => b.slug === s)), JSON.stringify(login.body?.businesses?.map((b) => b.slug)));
   check('demo owner has a professional license', Boolean(login.body?.user?.professional?.license));

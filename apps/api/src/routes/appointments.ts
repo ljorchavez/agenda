@@ -17,6 +17,7 @@ import { getDb } from '../db/client.js';
 import { appointments, customers, memberships, payments, services, tenants, type Resource, type Service } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { hasOverlap, queryAppointments } from '../lib/appointments.js';
+import { notifyAppointment } from '../lib/notify.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { activeResources, assertNotBlocked, assignResource, defaultService, findResource } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
@@ -302,6 +303,7 @@ appointmentRoutes.post('/appointments', async (c) => {
     return inserted!;
   });
 
+  await notifyAppointment(row.id, 'booked');
   const [dto] = await queryAppointments(db, tenantId, sql`a.id = ${row.id}`);
   return c.json(dto, 201);
 });
@@ -429,6 +431,9 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
     }
   });
 
+  // Tell the customer when the business moves or cancels their booking.
+  if (nextStatus === 'cancelled' && current.status !== 'cancelled') await notifyAppointment(id, 'cancelled');
+  else if (timeChanged && ACTIVE.has(nextStatus)) await notifyAppointment(id, 'rescheduled');
   const [dto] = await queryAppointments(db, tenantId, sql`a.id = ${id}`);
   return c.json(dto);
 });

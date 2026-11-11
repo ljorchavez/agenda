@@ -104,8 +104,8 @@ Necesario:
 ---
 
 ## 5. Cuentas de prueba
-- Dueño demo: `demo@agenda.mx` / `demo1234`
-- Gerente (solo sucursal Guadalajara de la barbería): `gerente@agenda.mx` / `demo1234`
+- Dueño demo: `demo@lugali.com` / `demo1234`
+- Gerente (solo sucursal Guadalajara de la barbería): `gerente@lugali.com` / `demo1234`
 - Los datos demo se reinician solos cada madrugada (3:00 a. m. hora de CDMX) con el cron
   `/api/cron/reset-demo`; también a mano con `pnpm db:seed`. Solo toca los negocios demo.
 
@@ -126,7 +126,7 @@ Necesario:
 ## 7. Seguridad de acceso (hecho)
 - Contraseñas con hash bcrypt (no se pueden leer, solo comparar).
 - Recuperar contraseña por correo: enlace de un solo uso, vence en 1 hora; al cambiarla se cierran
-  todas las sesiones. Las cuentas demo (@agenda.mx) no se pueden recuperar.
+  todas las sesiones. Las cuentas demo (demo@lugali.com y su equipo) no se pueden recuperar.
 - Límite de intentos de inicio de sesión: 5 por persona+dispositivo, 30 por IP y 100 por correo
   cada 15 min; 3 correos de recuperación por hora.
 

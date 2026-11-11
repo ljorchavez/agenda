@@ -34,6 +34,7 @@ import { activeResources, assignResource, closedRanges, defaultService, location
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { hoursFor, listLocations, resolveLocation, toPublicLocation } from '../lib/locations.js';
 import { manageToken } from '../lib/crypto.js';
+import { notifyAppointment } from '../lib/notify.js';
 import { apiBaseUrl, createOnlinePayment, tenantMpToken } from '../lib/online-payments.js';
 
 /**
@@ -322,7 +323,7 @@ publicRoutes.get('/public/:slug/classes', async (c) => {
 });
 
 export async function findOrCreateCustomer(
-  tx: Pick<Db, 'query' | 'insert' | 'execute'>,
+  tx: Pick<Db, 'query' | 'insert' | 'update' | 'execute'>,
   tenantId: string,
   input: { name: string; phone: string; email?: string },
 ) {
@@ -330,7 +331,14 @@ export async function findOrCreateCustomer(
   const existing = await tx.query.customers.findFirst({
     where: and(eq(customers.tenantId, tenantId), eq(customers.phone, phone)),
   });
-  if (existing) return existing;
+  if (existing) {
+    // Keep the email they just gave so confirmations and reminders reach them.
+    if (input.email && !existing.email) {
+      const [updated] = await tx.update(customers).set({ email: input.email }).where(eq(customers.id, existing.id)).returning();
+      return updated ?? existing;
+    }
+    return existing;
+  }
   await assertCanAddCustomer(tx, tenantId);
   const [created] = await tx
     .insert(customers)
@@ -526,6 +534,7 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
 publicRoutes.post('/public/:slug/bookings', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
   const body = await c.req.json();
-  if (kindConfig(businessKind(tenant.businessType)).sessions) return c.json(await bookClass(c.req.url, tenant, body), 201);
-  return c.json(await bookResource(c.req.url, tenant, body), 201);
+  const booked = kindConfig(businessKind(tenant.businessType)).sessions ? await bookClass(c.req.url, tenant, body) : await bookResource(c.req.url, tenant, body);
+  await notifyAppointment(booked.id, 'booked');
+  return c.json(booked, 201);
 });

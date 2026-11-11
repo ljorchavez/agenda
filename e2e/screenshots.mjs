@@ -13,7 +13,7 @@ const api = async (path, body, token) => {
   const r = await fetch(`http://localhost:3000/api${path}`, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
   return r.json();
 };
-let s = await api('/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+let s = await api('/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
 const barber = s.businesses.find((b) => /Barber/i.test(b.name) && !/Güero/.test(b.name));
 s = await api('/auth/switch', { tenantId: barber.id }, s.token);
 const tok = s.token;

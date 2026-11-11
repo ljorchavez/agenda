@@ -16,7 +16,7 @@ async function openBusiness(page, name) {
   if (!page.url().startsWith(`${BASE}/`) || /\/(b|c|directorio|login)\b/.test(page.url())) await page.goto(`${BASE}/`);
   await page.waitForTimeout(500);
   if (page.url().endsWith('/login')) {
-    await page.fill('#email', 'demo@agenda.mx');
+    await page.fill('#email', 'demo@lugali.com');
     await page.fill('#password', 'demo1234');
     await page.click('button[type=submit], form button');
     await page.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
@@ -42,7 +42,7 @@ async function run(viewport, label) {
   page.on('console', (m) => m.type() === 'error' && errors.push(`${label} console: ${m.text()}`));
 
   await page.goto(`${BASE}/login`);
-  await page.fill('#email', 'demo@agenda.mx');
+  await page.fill('#email', 'demo@lugali.com');
   await page.fill('#password', 'demo1234');
   await page.click('button[type=submit], form button');
   await page.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
@@ -326,7 +326,7 @@ async function newKinds(viewport, label) {
     await page.getByRole('button', { name: 'Confirmar cita' }).click();
     await page.getByText('Tu cita está agendada').waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] booked with the chosen barber`, (await page.locator('.card').first().innerText().catch(() => '')).includes(barber), barber);
-    await backOffice(page, 'demo@agenda.mx', 'Barbería Demo');
+    await backOffice(page, 'demo@lugali.com', 'Barbería Demo');
     await page.goto(`${BASE}/resources`);
     await page.getByRole('heading', { name: 'Equipo' }).waitFor({ timeout: 15000 }).catch(() => {});
     await page.getByText(barber, { exact: true }).first().waitFor({ timeout: 15000 }).catch(() => {});
@@ -361,7 +361,7 @@ async function newKinds(viewport, label) {
   // Roles: colaborador sees only their agenda; admin manages users
   {
     const { ctx, page } = await open();
-    await backOffice(page, 'memo@agenda.mx');
+    await backOffice(page, 'memo@lugali.com');
     await page.goto(`${BASE}/agenda`);
     await page.getByText('Estás viendo solo tus citas').waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] colaborador agenda is personal`, await page.getByText('Estás viendo solo tus citas').isVisible().catch(() => false));
@@ -381,7 +381,7 @@ async function newKinds(viewport, label) {
   }
   {
     const { ctx, page } = await open();
-    await backOffice(page, 'recepcion@agenda.mx');
+    await backOffice(page, 'recepcion@lugali.com');
     await page.goto(`${BASE}/agenda`);
     await page.locator(PERSON_FILTER).waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] admin sees everyone's agenda`, await page.locator(PERSON_FILTER).isVisible().catch(() => false));
@@ -426,7 +426,7 @@ async function newKinds(viewport, label) {
     await page.getByRole('button', { name: 'Reservar lugar' }).click();
     await page.getByText('Tu lugar está reservado').waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] guest books a class spot`, await page.getByText('Tu lugar está reservado').isVisible());
-    await backOffice(page, 'demo@agenda.mx', 'Estudio Yoga Demo');
+    await backOffice(page, 'demo@lugali.com', 'Estudio Yoga Demo');
     await page.goto(`${BASE}/agenda`);
     await page.getByRole('heading', { name: 'Clases' }).waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] studio calendar is "Clases"`, await page.getByRole('heading', { name: 'Clases' }).isVisible().catch(() => false));
@@ -458,7 +458,7 @@ async function newKinds(viewport, label) {
     await page.getByRole('button', { name: 'Confirmar renta' }).click();
     await page.getByText('Tu espacio está reservado').waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] guest rents a court`, await page.getByText('Tu espacio está reservado').isVisible());
-    await backOffice(page, 'demo@agenda.mx', 'Pádel Club Demo');
+    await backOffice(page, 'demo@lugali.com', 'Pádel Club Demo');
     await page.goto(`${BASE}/resources`);
     await page.getByRole('heading', { name: 'Espacios' }).waitFor({ timeout: 15000 }).catch(() => {});
     check(`[${label}] club spaces page`, await page.getByRole('heading', { name: 'Espacios' }).isVisible().catch(() => false));

@@ -14,7 +14,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, locale: 'es-MX' });
 page.on('pageerror', (e) => { if (!/_leaflet_pos/.test(e.message)) errors.push(e.message); });
 await page.goto('http://localhost:5173/?login=1');
-await page.fill('#email', 'demo@agenda.mx');
+await page.fill('#email', 'demo@lugali.com');
 await page.fill('#password', 'demo1234');
 await page.locator('form .btn-primary').first().click();
 await page.waitForURL(/\/agenda/);
@@ -352,7 +352,7 @@ const premText = (await page.getByTestId('plan-premium').textContent().catch(() 
 ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && indText.includes('IVA') && premText.includes('799') && premText.includes('2 sucursales'), `${indText.slice(0, 80)} | ${premText.slice(0, 80)}`);
 // ---- Questionnaires (nutrition demo): builder, asked when booking online, answers in the record
 {
-  const login = await api('/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const login = await api('/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const nutri = login.businesses.find((b) => b.slug === 'nutricion-demo');
   const ntok = (await api('/auth/switch', { tenantId: nutri.id }, login.token)).token;
   await page.evaluate((t) => localStorage.setItem('agenda.token', t), ntok);
@@ -418,7 +418,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
 }
 // ---- Health giros: "Pacientes", giro picker by category, expediente clínico (NOM-004 / NOM-013)
 {
-  const login = await api('/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const login = await api('/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const as = async (slug) => (await api('/auth/switch', { tenantId: login.businesses.find((b) => b.slug === slug).id }, login.token)).token;
   const withRecord = async (t) => {
     const list = (await api('/customers?limit=200', null, t)).items;

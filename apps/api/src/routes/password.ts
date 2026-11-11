@@ -15,10 +15,11 @@ const RESET_TTL_MIN = 60;
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /**
- * Demo logins (@agenda.mx) can't be reset: that domain isn't ours, so a reset email could reach
- * a stranger. The nightly demo reset restores their password anyway.
+ * Demo logins can't be reset: they're shared, so a reset would lock everyone else out (and the
+ * old @agenda.mx domain isn't ours). The nightly demo reset restores their password anyway.
  */
-const isDemoEmail = (email: string) => email.endsWith('@agenda.mx');
+const DEMO_LOGINS = new Set(['demo', 'gerente', 'recepcion', 'memo', 'pedro', 'diego'].map((u) => `${u}@lugali.com`));
+const isDemoEmail = (email: string) => email.endsWith('@agenda.mx') || DEMO_LOGINS.has(email);
 
 const COPY = {
   es: {

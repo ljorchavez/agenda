@@ -1,6 +1,6 @@
 /**
  * Demo data. Run with `pnpm db:seed`, and reset every night by the `/api/cron/reset-demo` job.
- * One owner login (demo@agenda.mx / demo1234) for every demo business, switchable in the app:
+ * One owner login (demo@lugali.com / demo1234) for every demo business, switchable in the app:
  * nutrition clinic, restaurant, barbershop with two locations, yoga studio, padel club, medical practice,
  * dental clinic, psychologist and physiotherapy (health giros with clinical records).
  * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
@@ -44,9 +44,9 @@ const TZ = 'America/Mexico_City';
 type DemoUser = { tenantId: string; email: string; name: string; role: 'owner' | 'admin' | 'staff'; passwordHash: string; locationId?: string | null };
 
 /** One owner for every demo business, so a single session can show them all (business switcher). */
-export const DEMO_OWNER = { email: 'demo@agenda.mx', name: 'Jorge Chávez' };
-/** Old per-business owner logins, removed in favour of DEMO_OWNER. */
-const RETIRED_DEMO_LOGINS = ['barberia@agenda.mx', 'clases@agenda.mx', 'padel@agenda.mx', 'restaurante@agenda.mx'];
+export const DEMO_OWNER = { email: 'demo@lugali.com', name: 'Jorge Chávez' };
+/** Old demo logins (per-business owners, and the @agenda.mx ones before lugali.com), removed on reset. */
+const RETIRED_DEMO_LOGINS = ['demo@agenda.mx', 'barberia@agenda.mx', 'clases@agenda.mx', 'padel@agenda.mx', 'restaurante@agenda.mx'];
 let demoOwnerId = '';
 
 async function resetDemoOwner(db: ReturnType<typeof getDb>) {
@@ -125,7 +125,7 @@ export async function seedDemo() {
   const team = [
     demoOwner,
     ...(await addUsers(db, [
-      { tenantId, email: 'pedro@agenda.mx', name: 'Nut. Pedro Salas', role: 'staff', passwordHash: await hashPassword('demo1234') },
+      { tenantId, email: 'pedro@lugali.com', name: 'Nut. Pedro Salas', role: 'staff', passwordHash: await hashPassword('demo1234') },
     ])),
   ];
   const staffIds = team.map((u) => u.id);
@@ -224,7 +224,7 @@ export async function seedDemo() {
   console.log(
     `Seeded tenant "${tenant!.name}" with ${custs.length} customers, ${inserted.length} appointments, ${payValues} payments`,
   );
-  console.log('Login: demo@agenda.mx / demo1234 — public page: /b/nutricion-demo');
+  console.log('Login: demo@lugali.com / demo1234 — public page: /b/nutricion-demo');
 
   await seedRestaurant();
   await seedBarbershop();
@@ -568,9 +568,9 @@ async function seedBarbershop() {
     .returning();
   await addOwner(db, tenantId);
   const [, memoUser] = await addUsers(db, [
-    { tenantId, email: 'recepcion@agenda.mx', name: 'Karla (Recepción)', role: 'admin', passwordHash: pw },
-    { tenantId, email: 'memo@agenda.mx', name: 'Memo Hernández', role: 'staff', passwordHash: pw },
-    { tenantId, email: 'gerente@agenda.mx', name: 'Andrea (Gerente Guadalajara)', role: 'admin', passwordHash: pw, locationId: gdl!.id },
+    { tenantId, email: 'recepcion@lugali.com', name: 'Karla (Recepción)', role: 'admin', passwordHash: pw },
+    { tenantId, email: 'memo@lugali.com', name: 'Memo Hernández', role: 'staff', passwordHash: pw },
+    { tenantId, email: 'gerente@lugali.com', name: 'Andrea (Gerente Guadalajara)', role: 'admin', passwordHash: pw, locationId: gdl!.id },
   ]);
   const svc = await db
     .insert(services)
@@ -660,7 +660,7 @@ async function seedClasses() {
   const pw = await hashPassword('demo1234');
   await addOwner(db, tenantId);
   const [diegoUser] = await addUsers(db, [
-    { tenantId, email: 'diego@agenda.mx', name: 'Diego Ruiz', role: 'staff', passwordHash: pw },
+    { tenantId, email: 'diego@lugali.com', name: 'Diego Ruiz', role: 'staff', passwordHash: pw },
   ]);
   const [vinyasa, yin, pilates] = await db
     .insert(services)

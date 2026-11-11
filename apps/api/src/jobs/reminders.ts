@@ -3,21 +3,24 @@ import { DateTime } from 'luxon';
 import { getDb } from '../db/client.js';
 import { messageLogs } from '../db/schema.js';
 import { sendReminder } from '../integrations/whatsapp.js';
+import { notifyAppointment } from '../lib/notify.js';
 
 type DueRow = {
   id: string;
   tenant_id: string;
   starts_at: Date;
   customer_name: string;
-  customer_phone: string;
+  customer_phone: string | null;
+  customer_email: string | null;
   business_name: string;
   timezone: string;
   locale: string;
 };
 
 /**
- * Sends WhatsApp reminders for appointments starting within each tenant's
- * `reminderHoursBefore` window. Runs every 15 minutes (EventBridge in AWS).
+ * Sends reminders (WhatsApp when the customer has a phone and WhatsApp is set up, email when they
+ * have an email) for appointments starting within each tenant's `reminderHoursBefore` window.
+ * Runs every 15 minutes (GitHub Actions → /api/cron/reminders) plus a daily Vercel cron.
  *
  * Rows are claimed atomically (UPDATE ... FOR UPDATE SKIP LOCKED) so two concurrent
  * runs never send the same reminder twice.
@@ -35,7 +38,7 @@ export async function sendDueReminders(
       join customers c on c.id = a.customer_id
       where a.status in ('scheduled', 'confirmed')
         and a.reminder_sent_at is null
-        and c.phone is not null
+        and (c.phone is not null or c.email is not null)
         and (t.settings->>'remindersEnabled')::boolean = true
         and a.starts_at > now()
         and a.starts_at <= now() + (greatest((t.settings->>'reminderHoursBefore')::int, ${lookaheadHours}::int) * interval '1 hour')
@@ -46,11 +49,16 @@ export async function sendDueReminders(
     update appointments a set reminder_sent_at = now()
     from due, customers c, tenants t
     where a.id = due.id and c.id = a.customer_id and t.id = a.tenant_id
-    returning a.id, a.tenant_id, a.starts_at, c.name as customer_name, c.phone as customer_phone,
+    returning a.id, a.tenant_id, a.starts_at, c.name as customer_name, c.phone as customer_phone, c.email as customer_email,
               t.name as business_name, t.timezone, t.locale`);
 
   let sent = 0;
   for (const r of due.rows) {
+    const emailed = r.customer_email ? await notifyAppointment(r.id, 'reminder') : false;
+    if (!r.customer_phone) {
+      if (emailed) sent++;
+      continue;
+    }
     const start = DateTime.fromJSDate(new Date(r.starts_at)).setZone(r.timezone).setLocale(r.locale);
     const result = await sendReminder({
       to: r.customer_phone,
@@ -60,7 +68,7 @@ export async function sendDueReminders(
       time: start.toFormat(r.locale === 'en' ? 'h:mm a' : 'HH:mm'),
       appointmentId: r.id,
     });
-    if (result.status !== 'failed') sent++;
+    if (result.status !== 'failed' || emailed) sent++;
     await db.insert(messageLogs).values({
       tenantId: r.tenant_id,
       appointmentId: r.id,
@@ -70,8 +78,8 @@ export async function sendDueReminders(
       providerMessageId: result.providerMessageId ?? null,
       error: result.error ?? null,
     });
-    // On failure, re-arm so the next run retries.
-    if (result.status === 'failed') {
+    // WhatsApp failed and no email went out: re-arm so the next run retries.
+    if (result.status === 'failed' && !emailed) {
       await db.execute(sql`update appointments set reminder_sent_at = null where id = ${r.id}`);
     }
   }

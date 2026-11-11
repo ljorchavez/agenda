@@ -100,6 +100,13 @@ export function CustomerDetailPage() {
         {t('customers.since', { date: dateOnly(data.createdAt) })}
       </p>
 
+      {/* Health: the clinical record is what the doctor opens the patient for */}
+      {health && (
+        <div className="mb-6">
+          <ClinicalRecordSection customerId={id} />
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
         <Stat label={t('customers.visits')} value={String(data.visits)} />
         <Stat label={t('customers.totalSpent')} value={money(data.totalSpentCents)} />
@@ -126,8 +133,8 @@ export function CustomerDetailPage() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <section className="card lg:col-span-2">
-          <h2 className="mb-3 font-semibold">{t('customers.history')}</h2>
-          <ul className="divide-y divide-slate-100">
+          <h2 className="mb-3 font-semibold">{t('customers.history')} <span className="font-normal text-slate-400">({data.appointments.length})</span></h2>
+          <ul className="-mr-2 max-h-96 divide-y divide-slate-100 overflow-y-auto pr-2" data-testid="customer-history">
             {data.appointments.map((a) => (
               <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                 <div className="min-w-0">
@@ -146,8 +153,8 @@ export function CustomerDetailPage() {
           </ul>
         </section>
         <section className="card">
-          <h2 className="mb-3 font-semibold">{t('customers.payments')}</h2>
-          <ul className="divide-y divide-slate-100 text-sm">
+          <h2 className="mb-3 font-semibold">{t('customers.payments')} <span className="font-normal text-slate-400">({data.payments.length})</span></h2>
+          <ul className="-mr-2 max-h-96 divide-y divide-slate-100 overflow-y-auto pr-2 text-sm" data-testid="customer-payments">
             {data.payments.map((p) => (
               <li key={p.id} className="flex justify-between py-2">
                 <div>
@@ -161,12 +168,6 @@ export function CustomerDetailPage() {
           </ul>
         </section>
       </div>
-
-      {health && (
-        <div className="mt-6">
-          <ClinicalRecordSection customerId={id} />
-        </div>
-      )}
 
       <div className="mt-6 grid items-stretch gap-6 lg:grid-cols-2">
         <CustomerPlansSection customerId={id} />

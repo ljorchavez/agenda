@@ -52,9 +52,13 @@ export function createApp() {
     const secret = process.env.CRON_SECRET;
     return !!secret && auth === `Bearer ${secret}`;
   };
+  // Every 15 minutes from GitHub Actions (REMINDERS_SECRET) and daily from Vercel (CRON_SECRET),
+  // so each reminder goes out at the hours before the appointment the business chose.
   app.get('/cron/reminders', async (c) => {
-    if (!isCron(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
-    return c.json(await sendDueReminders());
+    const auth = c.req.header('authorization');
+    const gh = process.env.REMINDERS_SECRET;
+    if (!isCron(auth) && !(gh && auth === `Bearer ${gh}`)) return c.json({ error: 'unauthorized' }, 401);
+    return c.json(await sendDueReminders(200, 0));
   });
   // Nightly reset of the demo businesses so the demo always has upcoming appointments.
   app.get('/cron/reset-demo', async (c) => {

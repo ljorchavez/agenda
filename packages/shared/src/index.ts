@@ -409,8 +409,10 @@ export const tenantSettingsSchema = z.object({
   coupons: z.object({ enabled: z.boolean() }).optional(),
   hours: businessHoursSchema,
   remindersEnabled: z.boolean(),
-  /** Hours before the appointment to send the WhatsApp reminder */
+  /** Hours before the appointment to send the reminder (WhatsApp and email) */
   reminderHoursBefore: z.number().int().min(1).max(72),
+  /** Email the customer when a booking is made, moved or cancelled (default on) */
+  emailConfirmations: z.boolean().optional(),
   onlineBookingEnabled: z.boolean(),
   payments: paymentSettingsSchema.optional(),
   selfService: z

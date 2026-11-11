@@ -1,0 +1,18 @@
+# Sends due appointment reminders (email and WhatsApp) every 15 minutes.
+# Vercel's free plan only runs crons once a day; this keeps reminders on time for free.
+name: Recordatorios
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+jobs:
+  reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enviar recordatorios pendientes
+        env:
+          REMINDERS_SECRET: ${{ secrets.REMINDERS_SECRET }}
+        run: |
+          curl -fsS --max-time 120 -H "Authorization: Bearer $REMINDERS_SECRET" \
+            https://agenda-crm-rouge.vercel.app/api/cron/reminders
