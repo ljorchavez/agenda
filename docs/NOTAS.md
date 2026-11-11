@@ -286,6 +286,21 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
   llama `/api/cron/reminders` cada 15 min con un token OIDC de GitHub (sin secreto compartido).
 - Cuenta demo: demo@lugali.com / demo1234 (equipo demo también @lugali.com).
 
+## 11h. Expediente: catálogos, estudios, plantillas, receta y portal (migración 0016)
+- Buscador CIE-10 (lista de ~400 diagnósticos frecuentes en `packages/shared/src/catalogs.ts`;
+  se puede escribir cualquier código).
+- Catálogo de medicamentos genéricos y alerta si el paciente tiene registrada una alergia del grupo
+  (penicilinas, sulfas, AINEs, etc.).
+- Estudios (laboratorio, imagen, documentos; PDF o foto, 10 MB) en el expediente. Usan el store
+  privado: **falta conectar `agenda-expedientes` con el prefijo `EXPEDIENTES`**.
+- Plantillas propias del negocio (Configuración → Plantillas del expediente). El documento guarda una
+  copia de la plantilla. Nuevas plantillas de médico: consulta pediátrica y control prenatal
+  (SDG y FPP con la FUM). Gráfica de peso y talla.
+- Receta firmada: página pública de verificación `/receta/<token>` con QR; envío por correo o
+  WhatsApp.
+- Portal del paciente `/p/<slug>`: enlace mágico por correo (30 días); ve sus citas y solo lo que el
+  médico comparte (👁 Mostrar en el portal).
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México
