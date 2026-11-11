@@ -20,10 +20,7 @@ const swap: [RegExp, string][] = [
   [/\bcustomer\b/g, 'patient'],
 ];
 export function setPatientWords(on: boolean) {
-  if (patients === on) return;
   patients = on;
-  // Re-render translated text with the new word.
-  void i18n.changeLanguage(i18n.language);
 }
 
 void i18n

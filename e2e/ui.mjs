@@ -432,6 +432,8 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.evaluate((t) => localStorage.setItem('agenda.token', t), psy);
   await page.goto('http://localhost:5173/customers');
   await page.getByRole('heading', { name: 'Pacientes' }).waitFor({ timeout: 8000 }).catch(() => {});
+  await page.reload();
+  await page.getByRole('heading', { name: 'Pacientes' }).waitFor({ timeout: 8000 }).catch(() => {});
   ok('health giro says Pacientes', (await page.getByRole('heading', { name: 'Pacientes' }).count()) >= 1 && (await page.getByRole('link', { name: 'Pacientes' }).count()) >= 1);
   ok('archived patients toggle', (await page.getByTestId('show-archived').count()) === 1);
   await page.goto('http://localhost:5173/settings');
@@ -446,7 +448,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   if (found) {
     const { c } = found;
     await page.goto(`http://localhost:5173/customers/${c.id}`);
-    await page.getByTestId('clinical-record').waitFor({ timeout: 8000 }).catch(() => {});
+    await page.getByTestId('clinical-notes').waitFor({ timeout: 8000 }).catch(() => {});
     const before = (await api(`/customers/${c.id}/clinical`, null, psy)).notes.length;
     ok('record lists the documents', (await page.getByTestId('clinical-notes').locator('li').count()) >= 2);
     await page.getByTestId('clinical-notes').locator('li button').first().click();
@@ -478,7 +480,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   ok('dental demo: record follows NOM-013', dfound?.r.norm === 'NOM-013-SSA2-2015' && Boolean(dfound?.r.odontogram));
   if (dfound) {
     await page.goto(`http://localhost:5173/customers/${dfound.c.id}`);
-    await page.getByTestId('clinical-record').waitFor({ timeout: 8000 }).catch(() => {});
+    await page.getByTestId('clinical-record').filter({ hasText: 'Odontograma actual' }).waitFor({ timeout: 8000 }).catch(() => {});
     ok('dental record shows the current odontogram', ((await page.getByTestId('clinical-record').textContent().catch(() => '')) ?? '').includes('Odontograma actual'));
   }
 }

@@ -26,8 +26,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<TenantDto | null>(null);
   const [loading, setLoading] = useState(Boolean(tokenStore.get()));
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
-  // Health businesses talk about "pacientes"
-  useEffect(() => setPatientWords(Boolean(tenant && isHealthType(tenant.businessType))), [tenant?.businessType]);
+  // Health businesses talk about "pacientes". Set while rendering (not in an effect) so the
+  // children of this render, menu included, already use the right word.
+  setPatientWords(Boolean(tenant && isHealthType(tenant.businessType)));
 
   useEffect(() => {
     if (!tokenStore.get()) return;
