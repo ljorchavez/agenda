@@ -10,13 +10,13 @@ import {
   type ManageAppointmentDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, locations, resources, services, tenants, type Appointment, type Location, type Service, type Tenant } from '../db/schema.js';
+import { appointments, customers, locations, resources, reviews, services, tenants, type Appointment, type Location, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { verifyManageToken } from '../lib/crypto.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { activeResources, assignResource, locationBlocks } from '../lib/resources.js';
-import { computeClassSlots, computeSlots } from './public.js';
+import { computeClassSlots, computeSlots, publicPlans } from './public.js';
 
 /**
  * Customer self-service via the private link /c/<token> (sent after booking or by the business).
@@ -118,6 +118,9 @@ function toDto({ appt, tenant, service, customerName, resourceName, location }: 
     changeDeadline: p.reason === 'disabled' ? null : p.deadline.toISO(),
     minHoursNotice: p.ss.minHoursNotice,
     reason: p.reason,
+    reviewPath: null,
+    reviewed: false,
+    plans: [],
   };
 }
 
@@ -125,7 +128,17 @@ const stamp = (tenant: Tenant, what: string) =>
   `[${DateTime.now().setZone(tenant.timezone).toFormat('yyyy-MM-dd HH:mm')}] ${what}`;
 const appendNote = (notes: string | null, line: string) => (notes ? `${notes}\n${line}` : line);
 
-manageRoutes.get('/public/manage/:token', async (c) => c.json(toDto(await load(c.req.param('token')))));
+manageRoutes.get('/public/manage/:token', async (c) => {
+  const token = c.req.param('token');
+  const loaded = await load(token);
+  const reviewed = Boolean(await getDb().query.reviews.findFirst({ where: eq(reviews.appointmentId, loaded.appt.id) }));
+  return c.json({
+    ...toDto(loaded),
+    reviewPath: loaded.appt.status === 'completed' ? `/r/${token}` : null,
+    reviewed,
+    plans: await publicPlans(loaded.tenant, loaded.appt.customerId),
+  });
+});
 
 manageRoutes.get('/public/manage/:token/availability', async (c) => {
   const l = await load(c.req.param('token'));

@@ -135,7 +135,7 @@ export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 export const APPOINTMENT_SOURCES = ['staff', 'online'] as const;
 export type AppointmentSource = (typeof APPOINTMENT_SOURCES)[number];
 
-export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mercadopago', 'spei'] as const;
+export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mercadopago', 'spei', 'gift_card'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const PAYMENT_STATUSES = ['pending', 'paid', 'refunded', 'failed'] as const;
@@ -385,7 +385,7 @@ export interface CouponDto {
 /** What a booking would get off: the best of the reward and the coupon (they don't add up). */
 export interface DiscountPreviewDto {
   discountCents: number;
-  reason: 'reward' | 'coupon' | null;
+  reason: 'reward' | 'coupon' | 'package' | null;
   couponCode: string | null;
   /** Coupon typed but not valid: 'coupon_invalid' | 'coupon_expired' | 'coupon_used_up' */
   couponError: string | null;
@@ -569,6 +569,9 @@ export interface DirectoryEntryDto {
   /** One pin per location; null name when the business has a single location */
   locationId: string;
   locationName: string | null;
+  /** Verified reviews (hidden ones don't count) */
+  ratingAverage: number | null;
+  ratingCount: number;
 }
 
 export interface DirectoryDto {
@@ -604,12 +607,21 @@ export interface PlanLimits {
   extraBusinesses: boolean;
   /** Monthly price in cents (MXN, IVA incluido); null = to be defined */
   priceCents: number | null;
+  /** Packages, memberships and gift cards */
+  packages: boolean;
+  /** Client record (allergies, notes, photos) */
+  records: boolean;
+  /** Commissions and cash closings */
+  cash: boolean;
+  /** Storage for record photos, in MB (0 = no photos) */
+  recordPhotosMb: number;
 }
 
 export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
-  free: { maxCustomers: 5, maxBookingsPerMonth: null, extraLocations: false, extraBusinesses: false, priceCents: 0 },
-  standard: { maxCustomers: null, maxBookingsPerMonth: 500, extraLocations: true, extraBusinesses: true, priceCents: 39_900 },
-  premium: { maxCustomers: null, maxBookingsPerMonth: null, extraLocations: true, extraBusinesses: true, priceCents: null },
+  // Reviews and the calendar link are in every plan.
+  free: { maxCustomers: 5, maxBookingsPerMonth: null, extraLocations: false, extraBusinesses: false, priceCents: 0, packages: false, records: false, cash: false, recordPhotosMb: 0 },
+  standard: { maxCustomers: null, maxBookingsPerMonth: 500, extraLocations: true, extraBusinesses: true, priceCents: 39_900, packages: true, records: true, cash: true, recordPhotosMb: 1024 },
+  premium: { maxCustomers: null, maxBookingsPerMonth: null, extraLocations: true, extraBusinesses: true, priceCents: null, packages: true, records: true, cash: true, recordPhotosMb: 10240 },
 };
 
 /** Add-ons, per month (MXN, IVA incluido). */
@@ -619,6 +631,8 @@ export interface PlanUsage {
   customers: number;
   bookingsThisMonth: number;
   activeLocations: number;
+  /** Record photos stored, in MB */
+  recordPhotosMb: number;
 }
 
 export interface PlanInfoDto {
@@ -715,6 +729,9 @@ export const resourceInputSchema = z.object({
   /** Own working hours; null = the hours of its location */
   hours: workHoursSchema.nullable().optional(),
   photoUrl: photoUrlSchema.nullable().optional(),
+  /** Commission: general percent and per-service percents that replace it */
+  commissionPct: z.number().min(0).max(100).nullable().optional(),
+  commissionByService: z.record(z.string().uuid(), z.number().min(0).max(100)).optional(),
 });
 export type ResourceInput = z.infer<typeof resourceInputSchema>;
 
@@ -732,6 +749,8 @@ export interface ResourceDto {
   /** Own working hours; null = the hours of its location */
   hours: WorkHours | null;
   photoUrl: string | null;
+  commissionPct: number | null;
+  commissionByService: Record<string, number>;
 }
 
 // ---------- Group classes ----------
@@ -1160,7 +1179,7 @@ export interface ServiceDto {
 export interface AppointmentDto {
   /** Taken off the price already (priceCents is what's charged) */
   discountCents: number;
-  discountReason: 'reward' | 'coupon' | null;
+  discountReason: 'reward' | 'coupon' | 'package' | null;
   couponCode: string | null;
   locationId: string;
   id: string;
@@ -1327,6 +1346,11 @@ export interface ManageAppointmentDto {
   minHoursNotice: number;
   /** Why changes are not allowed, if they aren't */
   reason: null | 'disabled' | 'too_late' | 'not_active' | 'past';
+  /** Completed visit: link to leave (or see) the verified review */
+  reviewPath: string | null;
+  reviewed: boolean;
+  /** The customer's active packages/memberships */
+  plans: PublicPlanDto[];
 }
 
 export interface PublicBusinessDto {
@@ -1358,8 +1382,18 @@ export interface PublicBusinessDto {
   locations: PublicLocationDto[];
   /** Banner, profile picture, gallery, social links and notice */
   page: PageSettings & { gallery: string[] };
+  /** Verified reviews: average, count and the latest ones */
+  reviews: ReviewSummaryDto;
   /** Promotions customers can see: coupon box and the loyalty reward */
   promos: { coupons: boolean; reward: Pick<RewardSettings, 'everyVisits' | 'discountType' | 'value'> | null };
+}
+
+/** A customer's active package/membership as shown to them */
+export interface PublicPlanDto {
+  name: string;
+  /** null = unlimited */
+  sessionsLeft: number | null;
+  expiresOn: string | null;
 }
 
 export interface PublicBookingResult {
@@ -1374,7 +1408,9 @@ export interface PublicBookingResult {
   /** Total price of the booking (after any discount) */
   priceCents: number;
   discountCents: number;
-  discountReason: 'reward' | 'coupon' | null;
+  discountReason: 'reward' | 'coupon' | 'package' | null;
+  /** Packages/memberships the customer has active ("te quedan 3 clases") */
+  plans: PublicPlanDto[];
   /** Private path (/c/<token>) where the customer can reschedule or cancel */
   managePath: string;
   deposit: null | {
@@ -1392,3 +1428,259 @@ export interface ApiErrorBody {
   message?: string;
   details?: unknown;
 }
+
+
+// ---------- Packages, memberships and gift cards ----------
+
+export const offeringInputSchema = z
+  .object({
+    kind: z.enum(['package', 'membership']),
+    name: z.string().trim().min(2).max(80),
+    priceCents: z.number().int().min(0).max(100_000_000),
+    /** Package: sessions included. Membership: per month (null = unlimited) */
+    sessions: z.number().int().min(1).max(1000).nullable().optional(),
+    /** Package validity in days */
+    validityDays: z.number().int().min(1).max(1095).nullable().optional(),
+    serviceIds: z.array(z.string().uuid()).max(200).default([]),
+    active: z.boolean().default(true),
+  })
+  .refine((o) => o.kind !== 'package' || (o.sessions != null && o.validityDays != null), { path: ['sessions'], message: 'package_needs_sessions' });
+export type OfferingInput = z.infer<typeof offeringInputSchema>;
+export interface OfferingDto {
+  id: string;
+  kind: 'package' | 'membership';
+  name: string;
+  priceCents: number;
+  sessions: number | null;
+  validityDays: number | null;
+  serviceIds: string[];
+  active: boolean;
+  /** Customers with it active today */
+  activeCount: number;
+}
+
+/** Manual methods to take money for a sale (online sales come later). */
+export const SALE_METHODS = ['cash', 'card', 'transfer'] as const;
+export const planSaleSchema = z.object({
+  offeringId: z.string().uuid(),
+  method: z.enum(SALE_METHODS),
+  /** Price actually charged; defaults to the catalog price */
+  priceCents: z.number().int().min(0).optional(),
+  startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  locationId: z.string().uuid().optional(),
+});
+export interface PlanUseDto {
+  appointmentId: string;
+  startsAt: string;
+  serviceName: string;
+  sessions: number;
+}
+export interface CustomerPlanDto {
+  id: string;
+  kind: 'package' | 'membership';
+  name: string;
+  serviceIds: string[];
+  sessionsTotal: number | null;
+  sessionsUsed: number;
+  /** null = unlimited */
+  sessionsLeft: number | null;
+  priceCents: number;
+  startsOn: string;
+  expiresOn: string | null;
+  /** 'active' | 'used_up' | 'expired' | 'cancelled' */
+  status: 'active' | 'used_up' | 'expired' | 'cancelled';
+  uses: PlanUseDto[];
+}
+
+export const giftCardSaleSchema = z.object({
+  amountCents: z.number().int().min(100).max(10_000_000),
+  method: z.enum(SALE_METHODS),
+  /** Who buys it (the payment is theirs) */
+  customerId: z.string().uuid(),
+  recipientName: z.string().trim().max(120).nullable().optional(),
+  expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  locationId: z.string().uuid().optional(),
+});
+export interface GiftCardDto {
+  id: string;
+  code: string;
+  initialCents: number;
+  balanceCents: number;
+  customerId: string | null;
+  customerName: string | null;
+  recipientName: string | null;
+  expiresOn: string | null;
+  createdAt: string;
+}
+/** Pay (part of) a booking with a gift card balance. */
+export const giftCardRedeemSchema = z.object({
+  code: z.string().trim().min(4).max(20),
+  appointmentId: z.string().uuid(),
+  amountCents: z.number().int().min(1),
+});
+/** Plans a completed booking can take a session from ("cobrar normal" = none). */
+export interface PlanChoiceDto {
+  id: string;
+  name: string;
+  sessionsLeft: number | null;
+  expiresOn: string | null;
+}
+
+// ---------- Client record (expediente) ----------
+
+export const recordUpdateSchema = z.object({
+  allergies: z.string().trim().max(2000).nullable().optional(),
+  conditions: z.string().trim().max(2000).nullable().optional(),
+  /** Tick the customer's consent (stores date and who registered it) */
+  consent: z.boolean().optional(),
+});
+export const recordNoteSchema = z.object({
+  body: z.string().trim().min(1).max(4000),
+  appointmentId: z.string().uuid().nullable().optional(),
+});
+export interface RecordNoteDto {
+  id: string;
+  body: string;
+  appointmentId: string | null;
+  authorName: string | null;
+  createdAt: string;
+}
+export interface RecordPhotoDto {
+  id: string;
+  kind: 'before' | 'after' | 'other';
+  note: string | null;
+  appointmentId: string | null;
+  sizeBytes: number;
+  createdAt: string;
+}
+export interface CustomerRecordDto {
+  allergies: string | null;
+  conditions: string | null;
+  consentAt: string | null;
+  consentByName: string | null;
+  notes: RecordNoteDto[];
+  photos: RecordPhotoDto[];
+  /** Photos are set up on the server (private storage connected) */
+  photosEnabled: boolean;
+}
+export const RECORD_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+// ---------- Commissions and cash ----------
+
+export interface CommissionRowDto {
+  resourceId: string;
+  resourceName: string;
+  completed: number;
+  soldCents: number;
+  commissionCents: number;
+}
+export interface CommissionLineDto {
+  appointmentId: string;
+  resourceName: string;
+  startsAt: string;
+  serviceName: string;
+  customerName: string;
+  priceCents: number;
+  pct: number;
+  commissionCents: number;
+}
+export interface CommissionReportDto {
+  rows: CommissionRowDto[];
+  lines: CommissionLineDto[];
+}
+
+/** Methods shown in a cash closing (gift cards spend balance, not cash) */
+export const CASH_METHODS = ['cash', 'card', 'transfer', 'mercadopago', 'spei', 'gift_card'] as const;
+export interface CashSummaryDto {
+  day: string;
+  locationId: string;
+  /** Money taken for bookings, per method */
+  byMethod: Record<string, number>;
+  /** Sales of packages, memberships and gift cards (included in byMethod) */
+  salesCents: number;
+  salesByKind: { packages: number; memberships: number; giftCards: number };
+  expectedCashCents: number;
+  totalCents: number;
+}
+export const cashClosingSchema = z.object({
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  locationId: z.string().uuid(),
+  countedCashCents: z.number().int().min(0).max(1_000_000_000),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+export interface CashClosingDto {
+  id: string;
+  day: string;
+  locationId: string;
+  locationName: string;
+  byMethod: Record<string, number>;
+  salesCents: number;
+  expectedCashCents: number;
+  countedCashCents: number;
+  differenceCents: number;
+  notes: string | null;
+  closedByName: string | null;
+  createdAt: string;
+}
+
+// ---------- Reviews ----------
+
+export const reviewInputSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().trim().max(1000).nullable().optional(),
+});
+export const reviewModerationSchema = z.object({
+  reply: z.string().trim().max(1000).nullable().optional(),
+  hidden: z.boolean().optional(),
+});
+export interface ReviewDto {
+  id: string;
+  appointmentId: string;
+  authorName: string;
+  rating: number;
+  comment: string | null;
+  reply: string | null;
+  repliedAt: string | null;
+  hidden: boolean;
+  serviceName: string | null;
+  locationName: string | null;
+  createdAt: string;
+}
+/** Public: first name + initial only */
+export interface PublicReviewDto {
+  authorName: string;
+  rating: number;
+  comment: string | null;
+  reply: string | null;
+  createdAt: string;
+}
+export interface ReviewSummaryDto {
+  average: number | null;
+  count: number;
+  recent: PublicReviewDto[];
+}
+export interface ReviewRequestDto {
+  businessName: string;
+  serviceName: string;
+  startsAt: string;
+  /** Already reviewed (shows it read-only) */
+  review: PublicReviewDto | null;
+  /** The visit isn't completed yet */
+  notYet: boolean;
+}
+
+// ---------- Calendar subscription (iCal) ----------
+
+export interface CalendarFeedDto {
+  scope: 'business' | 'location' | 'resource';
+  locationId: string | null;
+  resourceId: string | null;
+  label: string;
+  /** https URL to the .ics (secret) */
+  url: string;
+}
+export const calendarFeedTargetSchema = z.object({
+  scope: z.enum(['business', 'location', 'resource']),
+  locationId: z.string().uuid().nullable().optional(),
+  resourceId: z.string().uuid().nullable().optional(),
+});

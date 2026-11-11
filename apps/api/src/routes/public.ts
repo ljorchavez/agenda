@@ -25,6 +25,8 @@ import { getDb, type Db } from '../db/client.js';
 import { appointments, customers, services, tenants, type Appointment, type Customer, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { findUsableCoupon, resolveDiscount } from '../lib/discounts.js';
+import { customerPlans as customerPlansOf } from '../lib/plans.js';
+import { reviewSummary } from './reviews.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
 import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
 import { activeResources, assignResource, closedRanges, defaultService, locationBlocks, pickResource, resourceBusy, type Need } from '../lib/resources.js';
@@ -100,6 +102,7 @@ publicRoutes.get('/public/:slug', async (c) => {
     rentalDurations: cfg.durations ? rentalSettingsOf(tenant.settings).durations : null,
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
     page: pageSettingsOf(tenant.settings),
+    reviews: await reviewSummary(getDb(), tenant.id, 5),
     promos: (() => {
       const r = rewardSettingsOf(tenant.settings);
       return { coupons: couponsEnabled(tenant.settings), reward: r.enabled ? { everyVisits: r.everyVisits, discountType: r.discountType, value: r.value } : null };
@@ -338,9 +341,18 @@ function result(tenant: Tenant, appt: Appointment, serviceName: string, resource
     priceCents: appt.priceCents,
     discountCents: appt.discountCents,
     discountReason: appt.discountReason ?? null,
+    plans: [],
     managePath: `/c/${manageToken(appt.id)}`,
     deposit: null,
   };
+}
+
+/** The customer's active packages/memberships, as shown to them ("te quedan 3 clases"). */
+export async function publicPlans(tenant: Tenant, customerId: string): Promise<PublicBookingResult['plans']> {
+  const today = DateTime.now().setZone(tenant.timezone).toISODate()!;
+  return (await customerPlansOf(getDb(), tenant.id, customerId, today))
+    .filter((p) => p.status === 'active')
+    .map((p) => ({ name: p.name, sessionsLeft: p.sessionsLeft, expiresOn: p.expiresOn }));
 }
 
 /** Optional deposit: pay online with the business's Mercado Pago, or by bank transfer. */
@@ -424,7 +436,7 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
     const res = session.resourceId ? await tx.query.resources.findFirst({ where: (r, { eq: e }) => e(r.id, session.resourceId!) }) : null;
     return { appt: row!, customer, serviceName: service.name, res };
   });
-  return attachDeposit(requestUrl, tenant, result(tenant, appt, serviceName, res?.name ?? null), appt, customer, serviceName);
+  return attachDeposit(requestUrl, tenant, { ...result(tenant, appt, serviceName, res?.name ?? null), plans: await publicPlans(tenant, customer.id) }, appt, customer, serviceName);
 }
 
 /** Any booking that isn't a class: a service, a table for a party or a space for a while. */
@@ -495,7 +507,7 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
     return { appt: row!, customer, resource };
   });
   const title = kindConfig(businessKind(tenant.businessType)).durations && resource ? `${resource.name} (${durationMin} min)` : service.name;
-  return attachDeposit(requestUrl, tenant, result(tenant, appt, service.name, resource?.name ?? null), appt, customer, title);
+  return attachDeposit(requestUrl, tenant, { ...result(tenant, appt, service.name, resource?.name ?? null), plans: await publicPlans(tenant, customer.id) }, appt, customer, title);
 }
 
 publicRoutes.post('/public/:slug/bookings', async (c) => {

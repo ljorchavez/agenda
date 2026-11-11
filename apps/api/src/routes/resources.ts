@@ -43,6 +43,8 @@ const values = (input: ResourceInput) => ({
   // Left out of the request = keep what's saved
   ...(input.hours !== undefined ? { hours: input.hours } : {}),
   ...(input.photoUrl !== undefined ? { photoUrl: input.photoUrl } : {}),
+  ...(input.commissionPct !== undefined ? { commissionPct: input.commissionPct == null ? null : String(input.commissionPct) } : {}),
+  ...(input.commissionByService !== undefined ? { commissionByService: input.commissionByService } : {}),
 });
 
 resourceRoutes.get('/resources', async (c) => {

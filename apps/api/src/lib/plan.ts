@@ -13,20 +13,42 @@ type Q = Pick<Db, 'execute'>;
 const num = (v: unknown) => Number(v ?? 0);
 
 export async function planUsage(db: Q, tenantId: string): Promise<PlanUsage> {
-  const res = await db.execute<{ customers: string; bookings: string; locations: string }>(sql`
+  const res = await db.execute<{ customers: string; bookings: string; locations: string; photo_bytes: string }>(sql`
     select
       (select count(*) from customers where tenant_id = ${tenantId}) as customers,
       (select count(*) from appointments where tenant_id = ${tenantId}
          and created_at >= date_trunc('month', now())) as bookings,
-      (select count(*) from locations where tenant_id = ${tenantId} and active) as locations`);
+      (select count(*) from locations where tenant_id = ${tenantId} and active) as locations,
+      (select coalesce(sum(size_bytes), 0) from record_photos where tenant_id = ${tenantId}) as photo_bytes`);
   const r = res.rows[0];
-  return { customers: num(r?.customers), bookingsThisMonth: num(r?.bookings), activeLocations: num(r?.locations) };
+  return {
+    customers: num(r?.customers),
+    bookingsThisMonth: num(r?.bookings),
+    activeLocations: num(r?.locations),
+    recordPhotosMb: Math.round((num(r?.photo_bytes) / (1024 * 1024)) * 10) / 10,
+  };
 }
 
 const planOf = async (db: Q, tenantId: string): Promise<PlanId> => {
   const res = await db.execute<{ plan: PlanId }>(sql`select plan from tenants where id = ${tenantId}`);
   return res.rows[0]?.plan ?? 'free';
 };
+
+/** 402 when the plan doesn't include a feature (packages, records, commissions and cash). */
+export async function assertFeature(db: Q, tenantId: string, feature: 'packages' | 'records' | 'cash') {
+  if (!PLAN_LIMITS[await planOf(db, tenantId)][feature]) {
+    throw new AppError(402, `plan_limit_${feature}`, `This plan doesn't include ${feature}`);
+  }
+}
+
+/** 402 when one more record photo of `bytes` doesn't fit the plan's storage. */
+export async function assertPhotoRoom(db: Q, tenantId: string, bytes: number) {
+  const mb = PLAN_LIMITS[await planOf(db, tenantId)].recordPhotosMb;
+  const used = (await planUsage(db, tenantId)).recordPhotosMb;
+  if (used + bytes / (1024 * 1024) > mb) {
+    throw new AppError(402, 'plan_limit_photos', `This plan includes ${mb} MB of record photos`);
+  }
+}
 
 /** 402 when one more customer doesn't fit the plan. */
 export async function assertCanAddCustomer(db: Q, tenantId: string) {

@@ -6,6 +6,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   smallint,
@@ -200,6 +201,9 @@ export const services = pgTable(
     priceCents: integer('price_cents').notNull().default(0),
     active: boolean('active').notNull().default(true),
     photoUrl: text('photo_url'),
+    /** Commission: general percent, replaced per service by commissionByService[serviceId] */
+    commissionPct: numeric('commission_pct', { precision: 5, scale: 2 }),
+    commissionByService: jsonb('commission_by_service').$type<Record<string, number>>().notNull().default({}),
     ...timestamps,
   },
   (t) => [index('services_tenant_idx').on(t.tenantId)],
@@ -315,7 +319,7 @@ export const appointments = pgTable(
     reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
     /** Discount already taken off priceCents ('reward' every N visits, or 'coupon') */
     discountCents: integer('discount_cents').notNull().default(0),
-    discountReason: text('discount_reason').$type<'reward' | 'coupon'>(),
+    discountReason: text('discount_reason').$type<'reward' | 'coupon' | 'package'>(),
     couponId: uuid('coupon_id').references(() => coupons.id, { onDelete: 'set null' }),
     ...timestamps,
   },
@@ -351,6 +355,13 @@ export const payments = pgTable(
     checkoutUrl: text('checkout_url'),
     paidAt: timestamp('paid_at', { withTimezone: true }),
     notes: text('notes'),
+    /** Where the money was taken (sales with no booking); else the booking's location */
+    locationId: uuid('location_id'),
+    /** Sale of a package/membership or of a gift card */
+    customerPlanId: uuid('customer_plan_id'),
+    soldGiftCardId: uuid('sold_gift_card_id'),
+    /** Gift card used to pay (method 'gift_card') */
+    giftCardId: uuid('gift_card_id'),
     ...timestamps,
   },
   (t) => [
@@ -417,3 +428,151 @@ export const timeBlocks = pgTable(
   (t) => [index('time_blocks_tenant_idx').on(t.tenantId, t.startsAt)],
 );
 export type TimeBlock = typeof timeBlocks.$inferSelect;
+
+// ---------- Packages, memberships and gift cards ----------
+
+/** What a business sells ahead: packages (N sessions within D days) and monthly memberships. */
+export const offerings = pgTable('offerings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  kind: text('kind').$type<'package' | 'membership'>().notNull(),
+  name: text('name').notNull(),
+  priceCents: integer('price_cents').notNull(),
+  /** Package: sessions included. Membership: sessions per month (null = unlimited) */
+  sessions: integer('sessions'),
+  /** Package validity in days (memberships last a month) */
+  validityDays: integer('validity_days'),
+  /** Services it covers; empty = all */
+  serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  ...timestamps,
+});
+export type Offering = typeof offerings.$inferSelect;
+
+/** A package or a month of membership sold to a customer. */
+export const customerPlans = pgTable('customer_plans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+  offeringId: uuid('offering_id').references(() => offerings.id, { onDelete: 'set null' }),
+  kind: text('kind').$type<'package' | 'membership'>().notNull(),
+  name: text('name').notNull(),
+  serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
+  /** null = unlimited */
+  sessionsTotal: integer('sessions_total'),
+  priceCents: integer('price_cents').notNull(),
+  startsOn: date('starts_on', { mode: 'string' }).notNull(),
+  expiresOn: date('expires_on', { mode: 'string' }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  locationId: uuid('location_id').references(() => locations.id, { onDelete: 'set null' }),
+  soldBy: uuid('sold_by'),
+  ...timestamps,
+});
+export type CustomerPlan = typeof customerPlans.$inferSelect;
+
+export const planUses = pgTable('plan_uses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerPlanId: uuid('customer_plan_id').notNull().references(() => customerPlans.id, { onDelete: 'cascade' }),
+  appointmentId: uuid('appointment_id').notNull().references(() => appointments.id, { onDelete: 'cascade' }),
+  sessions: integer('sessions').notNull().default(1),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const giftCards = pgTable('gift_cards', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  initialCents: integer('initial_cents').notNull(),
+  balanceCents: integer('balance_cents').notNull(),
+  customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
+  recipientName: text('recipient_name'),
+  expiresOn: date('expires_on', { mode: 'string' }),
+  locationId: uuid('location_id').references(() => locations.id, { onDelete: 'set null' }),
+  soldBy: uuid('sold_by'),
+  ...timestamps,
+});
+export type GiftCard = typeof giftCards.$inferSelect;
+
+// ---------- Client record ----------
+
+export const customerRecords = pgTable('customer_records', {
+  customerId: uuid('customer_id').primaryKey().references(() => customers.id, { onDelete: 'cascade' }),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  /** Encrypted with lib/crypto (encryptSecret) */
+  allergiesEnc: text('allergies_enc'),
+  conditionsEnc: text('conditions_enc'),
+  consentAt: timestamp('consent_at', { withTimezone: true }),
+  consentBy: uuid('consent_by'),
+  updatedBy: uuid('updated_by'),
+  ...timestamps,
+});
+
+export const recordNotes = pgTable('record_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+  appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
+  bodyEnc: text('body_enc').notNull(),
+  authorId: uuid('author_id'),
+  authorName: text('author_name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const recordPhotos = pgTable('record_photos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+  appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
+  kind: text('kind').$type<'before' | 'after' | 'other'>().notNull(),
+  noteEnc: text('note_enc'),
+  /** Random path in the private Blob store; never shown to customers */
+  blobPath: text('blob_path').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  contentType: text('content_type').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------- Cash, reviews, calendar ----------
+
+export const cashClosings = pgTable('cash_closings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  locationId: uuid('location_id').notNull().references(() => locations.id, { onDelete: 'cascade' }),
+  day: date('day', { mode: 'string' }).notNull(),
+  byMethod: jsonb('by_method').$type<Record<string, number>>().notNull(),
+  salesCents: integer('sales_cents').notNull().default(0),
+  expectedCashCents: integer('expected_cash_cents').notNull(),
+  countedCashCents: integer('counted_cash_cents').notNull(),
+  notes: text('notes'),
+  closedBy: uuid('closed_by'),
+  closedByName: text('closed_by_name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const reviews = pgTable('reviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  appointmentId: uuid('appointment_id').notNull().references(() => appointments.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
+  locationId: uuid('location_id').references(() => locations.id, { onDelete: 'set null' }),
+  authorName: text('author_name').notNull(),
+  rating: integer('rating').notNull(),
+  comment: text('comment'),
+  reply: text('reply'),
+  repliedAt: timestamp('replied_at', { withTimezone: true }),
+  hidden: boolean('hidden').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const calendarFeeds = pgTable('calendar_feeds', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  token: text('token').notNull(),
+  scope: text('scope').$type<'business' | 'location' | 'resource'>().notNull(),
+  locationId: uuid('location_id').references(() => locations.id, { onDelete: 'cascade' }),
+  resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

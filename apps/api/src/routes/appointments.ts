@@ -21,6 +21,7 @@ import { assertRoom, lockSession } from '../lib/classes.js';
 import { activeResources, assertNotBlocked, assignResource, defaultService, findResource } from '../lib/resources.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { resolveDiscount } from '../lib/discounts.js';
+import { setPlanUse } from '../lib/plans.js';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 
@@ -310,12 +311,18 @@ appointmentRoutes.patch('/appointments/:id', async (c) => {
   const id = c.req.param('id');
   const db = getDb();
 
-  const current = await db.query.appointments.findFirst({
+  let current = await db.query.appointments.findFirst({
     where: and(eq(appointments.id, id), eq(appointments.tenantId, tenantId)),
   });
   if (!current) throw notFound('appointment');
   const scope = await getScope(db, c);
   if (!inScope(scope, current)) throw notFound('appointment');
+  // Undoing "Asistió" gives back the package session it took (and its price).
+  if (current.status === 'completed' && input.status && input.status !== 'completed' && current.discountReason === 'package') {
+    const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
+    await db.transaction((tx) => setPlanUse(tx as unknown as Db, tenantId, current!, null, t!.timezone, c.get('userId')));
+    current = (await db.query.appointments.findFirst({ where: eq(appointments.id, id) }))!;
+  }
   if (scope.personal) {
     // Team members can't hand a booking to someone else.
     if (input.resourceId !== undefined && input.resourceId !== current.resourceId) throw forbiddenScope();

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { deleteCustomerPhotos } from './records.js';
 import { and, eq, sql } from 'drizzle-orm';
 import {
   customerInputSchema,
@@ -257,6 +258,8 @@ customerRoutes.put('/customers/:id', async (c) => {
 });
 
 customerRoutes.delete('/customers/:id', requireManager, async (c) => {
+  // Their record photos go too (private storage is outside the database).
+  await deleteCustomerPhotos(c.get('tenantId'), c.req.param('id'));
   const [row] = await getDb()
     .delete(customers)
     .where(and(eq(customers.id, c.req.param('id')), eq(customers.tenantId, c.get('tenantId'))))

@@ -26,6 +26,8 @@ directoryRoutes.get('/public-directory', async (c) => {
     online: boolean;
     hourly_from: number | string | null;
     service_from: number | string | null;
+    rating_avg: number | string | null;
+    rating_count: number | string | null;
     location_id: string;
     location_name: string;
     location_count: number | string;
@@ -50,7 +52,9 @@ directoryRoutes.get('/public-directory', async (c) => {
            (select min(r.price_per_hour_cents) from resources r
              where r.tenant_id = t.id and r.active and r.price_per_hour_cents > 0) as hourly_from,
            (select min(s.price_cents) from services s
-             where s.tenant_id = t.id and s.active and s.price_cents > 0) as service_from
+             where s.tenant_id = t.id and s.active and s.price_cents > 0) as service_from,
+           (select avg(rv.rating) from reviews rv where rv.tenant_id = t.id and not rv.hidden) as rating_avg,
+           (select count(*) from reviews rv where rv.tenant_id = t.id and not rv.hidden) as rating_count
     from pins p join tenants t on t.id = p.tenant_id
     where p.lat is not null and p.lng is not null and p.city is not null
     order by t.name, p.location_name
@@ -76,6 +80,8 @@ directoryRoutes.get('/public-directory', async (c) => {
       priceUnit: r.hourly_from != null ? ('hour' as const) : null,
       locationId: r.location_id,
       locationName: Number(r.location_count) > 1 ? r.location_name : null,
+      ratingAverage: r.rating_avg == null ? null : Math.round(Number(r.rating_avg) * 10) / 10,
+      ratingCount: Number(r.rating_count ?? 0),
     }));
 
   const byState = new Map<string, Set<string>>();

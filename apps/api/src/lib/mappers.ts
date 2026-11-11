@@ -25,6 +25,8 @@ export function toResourceDto(r: Resource): ResourceDto {
     locationId: r.locationId,
     hours: r.hours ?? null,
     photoUrl: r.photoUrl ?? null,
+    commissionPct: r.commissionPct == null ? null : Number(r.commissionPct),
+    commissionByService: r.commissionByService ?? {},
   };
 }
 
