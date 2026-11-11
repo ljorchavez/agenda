@@ -1002,7 +1002,7 @@ async function sellAndUse(tenantId: string, o: typeof offerings.$inferSelect, us
   for (const u of uses) byCustomer.set(u.customer_id, [...(byCustomer.get(u.customer_id) ?? []), u]);
   let sold = 0;
   for (const [customerId, list] of byCustomer) {
-    const first = DateTime.fromJSDate(list[list.length - 1]!.starts_at).setZone(TZ).minus({ days: 3 });
+    const first = DateTime.fromJSDate(new Date(list[list.length - 1]!.starts_at)).setZone(TZ).minus({ days: 3 });
     const expires = o.kind === 'membership' ? first.plus({ months: 1 }).minus({ days: 1 }) : first.plus({ days: (o.validityDays ?? 60) - 1 });
     const [plan] = await db
       .insert(customerPlans)
