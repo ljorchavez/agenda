@@ -272,6 +272,13 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
 - Decimos "conforme a la NOM-004", nunca "certificado". Pendiente (con costo): certificación
   NOM-024 y firma electrónica avanzada (e.firma SAT).
 
+## 11f. Dominio y correo (nov 2026)
+- Dominio lugali.com comprado en Vercel (DNS en Vercel).
+- Correo: Google Workspace en lugali.com (MX, SPF, DKIM y verificación los puso Google).
+- Envío desde la app: Resend plan gratis, dominio lugali.com, remitente `Lugali <no-reply@lugali.com>`.
+  Variables RESEND_API_KEY (protegida, solo envío) y EMAIL_FROM en Vercel. Registros de Resend en
+  `resend._domainkey`, `send` y `rsend` (no tocan el correo de Google).
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México
