@@ -1455,7 +1455,7 @@ d('API (integration)', () => {
     const realFetch = globalThis.fetch;
     const mpStatus = new Map<string, { status: string; ref: string }>();
     const sent: { url: string; body: Record<string, unknown> }[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (!url.startsWith('https://api.mercadopago.com')) return realFetch(input, init);
       if (url.endsWith('/checkout/preferences')) {

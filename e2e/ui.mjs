@@ -255,6 +255,7 @@ await page.goto('http://localhost:5173/settings?tab=packages');
 await page.getByTestId('offerings-section').filter({ hasText: '5 cortes' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('packages tab shows the catalog', ((await page.getByTestId('offerings-section').textContent()) ?? '').includes('5 cortes'));
 ok('gift cards listed', ((await page.getByTestId('gift-cards-section').textContent()) ?? '').includes('REGALO24'));
+ok('packages tab offers selling online (needs Mercado Pago)', ((await page.getByTestId('online-sales').textContent().catch(() => '')) ?? '').includes('Mercado Pago'));
 await page.goto('http://localhost:5173/settings?tab=reviews');
 await page.getByTestId('reviews-section').filter({ hasText: '★' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('reviews tab shows reviews with replies', ((await page.getByTestId('reviews-section').textContent()) ?? '').includes('Respuesta del negocio'));
