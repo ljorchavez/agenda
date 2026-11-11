@@ -451,7 +451,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
     await page.getByTestId('clinical-notes').waitFor({ timeout: 8000 }).catch(() => {});
     const before = (await api(`/customers/${c.id}/clinical`, null, psy)).notes.length;
     ok('record lists the documents', (await page.getByTestId('clinical-notes').locator('li').count()) >= 2);
-    await page.getByTestId('clinical-notes').locator('li button').first().click();
+    await page.getByTestId('clinical-notes').locator('li').filter({ hasText: 'Firmado' }).first().locator('button').first().click();
     ok('signed document shows signature and cédula', ((await page.getByTestId('signature-line').first().textContent().catch(() => '')) ?? '').includes('9876543'));
     await page.getByTestId('new-evolution').click();
     await page.getByTestId('clinical-editor').waitFor({ timeout: 6000 }).catch(() => {});
