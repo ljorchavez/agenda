@@ -136,7 +136,8 @@ async function summary(db: Db, tenantId: string, tz: string, day: string, locati
     if (r.sale === 'gift_cards') salesByKind.giftCards += Number(r.total);
   }
   const salesCents = salesByKind.packages + salesByKind.memberships + salesByKind.giftCards;
-  const totalCents = Object.values(byMethod).reduce((a, b) => a + b, 0);
+  // Gift card payments are listed but aren't new money (it came in when the card was sold).
+  const totalCents = Object.entries(byMethod).reduce((a, [m, v]) => (m === 'gift_card' ? a : a + v), 0);
   return { day, locationId, byMethod, salesCents, salesByKind, expectedCashCents: byMethod.cash ?? 0, totalCents };
 }
 

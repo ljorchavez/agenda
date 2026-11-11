@@ -1276,6 +1276,8 @@ export type ReportQuery = z.infer<typeof reportQuerySchema>;
 
 export interface ReportKpis {
   revenueCents: number;
+  /** Part of revenue from selling packages, memberships and gift cards (no booking) */
+  salesCents: number;
   payments: number;
   avgTicketCents: number;
   appointments: number;

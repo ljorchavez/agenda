@@ -295,9 +295,9 @@ ok('booking page shows rating and reviews', (await page.getByTestId('rating-badg
 await page.goto('http://localhost:5173/');
 await page.getByTestId('rating-badge').first().waitFor({ timeout: 8000 }).catch(() => {});
 ok('directory cards show rating', (await page.getByTestId('rating-badge').count()) > 0);
-const past = (await api(`/appointments?from=${encodeURIComponent(new Date(Date.now() - 20 * 864e5).toISOString())}&to=${encodeURIComponent(new Date(Date.now() - 864e5).toISOString())}`, null, tok)).filter((a) => a.status === 'completed');
+const pastDone = (await api(`/appointments?from=${encodeURIComponent(new Date(Date.now() - 20 * 864e5).toISOString())}&to=${encodeURIComponent(new Date(Date.now() - 864e5).toISOString())}`, null, tok)).filter((a) => a.status === 'completed');
 const listed = new Set((await api('/reviews', null, tok)).items.map((r) => r.appointmentId));
-const toReview = past.find((a) => !listed.has(a.id));
+const toReview = pastDone.find((a) => !listed.has(a.id));
 if (toReview) {
   await page.goto(`http://localhost:5173${toReview.managePath}`);
   await page.getByTestId('review-link').click();

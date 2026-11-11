@@ -258,7 +258,9 @@ if (process.env.CRON_SECRET) {
     const x = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&serviceId=${s.id}`, null, token);
     sum += x.body?.kpis?.revenueCents ?? 0;
   }
-  check('reports: per-service revenue partitions the total', sum === total, `${sum} vs ${total}`);
+  // Sales of packages, memberships and gift cards have no service; they make up the rest.
+  const sales = r.body?.kpis?.salesCents ?? 0;
+  check('reports: per-service revenue partitions the total', sum + sales === total, `${sum} + ${sales} vs ${total}`);
   const on = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&source=online`, null, token);
   const off = await call('GET', `/api/reports?from=${yearAgo}&to=${today}&source=staff`, null, token);
   check('reports: online + front desk = all appointments', on.body.kpis.appointments + off.body.kpis.appointments === r.body.kpis.appointments);

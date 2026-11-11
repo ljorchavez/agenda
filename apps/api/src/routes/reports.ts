@@ -57,9 +57,14 @@ function filters(q: ReportQuery): SQL {
   return parts.length ? sql.join(parts, sql` `) : sql``;
 }
 
+/**
+ * Payments that count as income. Paying with a gift card is not new money (it was counted when
+ * the card was sold), so those are left out everywhere in the reports.
+ */
 function paymentFilter(q: ReportQuery, f: SQL): SQL {
-  if (!q.serviceId && !q.staffUserId && !q.resourceId && !q.source && !q.locationId) return sql``;
-  return sql`and exists (select 1 from appointments a where a.id = p.appointment_id and a.tenant_id = p.tenant_id ${f})`;
+  const notGift = sql`and p.method <> 'gift_card'`;
+  if (!q.serviceId && !q.staffUserId && !q.resourceId && !q.source && !q.locationId) return notGift;
+  return sql`${notGift} and exists (select 1 from appointments a where a.id = p.appointment_id and a.tenant_id = p.tenant_id ${f})`;
 }
 
 async function kpis(db: Db, tenantId: string, q: ReportQuery, r: Range): Promise<ReportKpis> {
@@ -68,7 +73,8 @@ async function kpis(db: Db, tenantId: string, q: ReportQuery, r: Range): Promise
   const f = filters(q);
   const [pay, appt, cust] = await Promise.all([
     db.execute(sql`
-      select coalesce(sum(p.amount_cents), 0) as revenue, count(*) as payments
+      select coalesce(sum(p.amount_cents), 0) as revenue, count(*) as payments,
+             coalesce(sum(p.amount_cents) filter (where p.customer_plan_id is not null or p.sold_gift_card_id is not null), 0) as sales
       from payments p where p.tenant_id = ${tenantId} and p.status = 'paid'
         and p.paid_at >= ${F}::timestamptz and p.paid_at < ${T}::timestamptz ${paymentFilter(q, f)}`),
     db.execute(sql`
@@ -99,6 +105,7 @@ async function kpis(db: Db, tenantId: string, q: ReportQuery, r: Range): Promise
   const total = n(a.total);
   return {
     revenueCents: revenue,
+    salesCents: n(p.sales),
     payments: n(p.payments),
     avgTicketCents: n(p.payments) > 0 ? Math.round(revenue / n(p.payments)) : 0,
     appointments: total,

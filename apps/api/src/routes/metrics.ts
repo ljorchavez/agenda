@@ -40,7 +40,8 @@ metricsRoutes.get('/metrics/dashboard', async (c) => {
   // Team members only see their own numbers.
   const scope = await getScope(db, c);
   const sa = scopeSql(scope, 'a');
-  const sp = paymentScopeSql(scope, 'p');
+  // Paying with a gift card isn't income (it was counted when the card was sold).
+  const sp = sql`${paymentScopeSql(scope, 'p')} and p.method <> 'gift_card'`;
   const newCustomersSql = scope.all
     ? sql`select count(*) as new_customers from customers
           where tenant_id = ${tenantId} and created_at >= ${F} and created_at < ${T}`
