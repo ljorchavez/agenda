@@ -30,6 +30,8 @@ export const toCouponDto = (c: Coupon, uses: number): CouponDto => ({
   active: c.active,
   maxUses: c.maxUses,
   validUntil: c.validUntil,
+  serviceIds: c.serviceIds ?? [],
+  maxUsesPerCustomer: c.maxUsesPerCustomer,
   uses,
 });
 

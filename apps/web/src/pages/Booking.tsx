@@ -1,5 +1,6 @@
 import { PublicReviews, RatingBadge } from '../components/Reviews';
 import { ShopSection } from '../components/Shop';
+import { SocialButton } from '../components/SocialIcons';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -123,6 +124,7 @@ export function BookingPage() {
           </div>
         )}
         {!book.isSuccess && <ShopSection business={full} />}
+        {!book.isSuccess && <PublicReviews summary={full.reviews} />}
       </div>
     </div>
   );
@@ -165,13 +167,17 @@ function ProfileHeader({ business, subtitle, mapsUrl, locationLine }: { business
         <div className="absolute right-3 top-3"><LanguageSwitch /></div>
       </div>
       <div className="px-4 pb-5 sm:px-6">
-        <div className="-mt-10 sm:-mt-12">
-          <span className="inline-block rounded-full bg-white p-1 shadow-sm">
+        <div className="relative z-10 -mt-10 sm:-mt-12">
+          <span className="inline-block rounded-full bg-white p-1 shadow-md">
             <Avatar name={business.name} photoUrl={page.logoUrl} size={88} />
           </span>
         </div>
         <h1 className="mt-1 text-2xl font-bold text-slate-900">{business.name}</h1>
-        <RatingBadge average={business.reviews.average} count={business.reviews.count} />
+        {business.reviews.count > 0 && (
+          <a href="#resenas" className="hover:underline">
+            <RatingBadge average={business.reviews.average} count={business.reviews.count} />
+          </a>
+        )}
         {locationLine}
         <p className="text-slate-600">{subtitle}</p>
         {business.description && <p className="mt-2 text-sm text-slate-700">{business.description}</p>}
@@ -187,12 +193,8 @@ function ProfileHeader({ business, subtitle, mapsUrl, locationLine }: { business
         </ul>
         {(wa || socials.length > 0) && (
           <div className="mt-3 flex flex-wrap gap-2">
-            {wa && <a href={wa} target="_blank" rel="noreferrer" className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700">WhatsApp</a>}
-            {socials.map((x) => (
-              <a key={x.n} href={x.url} target="_blank" rel="noreferrer" className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:border-brand-500">
-                {t(`page.${x.n}`)}
-              </a>
-            ))}
+            {wa && <SocialButton net="whatsapp" href={wa} />}
+            {socials.map((x) => <SocialButton key={x.n} net={x.n} href={x.url} />)}
           </div>
         )}
         {page.gallery.length > 0 && (
@@ -205,7 +207,6 @@ function ProfileHeader({ business, subtitle, mapsUrl, locationLine }: { business
           </div>
         )}
       </div>
-      <div className="px-4 pb-5 sm:px-6"><PublicReviews summary={business.reviews} /></div>
       {zoom && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setZoom(null)} role="dialog" aria-label={t('page.photo')}>
           <img src={zoom} alt="" className="max-h-full max-w-full rounded-lg" />
@@ -303,14 +304,17 @@ function CustomerForm({ onSubmit, pending, error, summary, cta, promo }: {
   summary?: ReactNode;
   cta: string;
   /** Coupon box and loyalty reward note (bookings with a price) */
-  promo?: { slug: string; totalCents: number; coupons: boolean; reward: PublicBusinessDto['promos']['reward'] };
+  promo?: { slug: string; totalCents: number; coupons: boolean; reward: PublicBusinessDto['promos']['reward']; serviceId?: string | null };
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState({ name: '', phone: '', email: '' });
   const [code, setCode] = useState('');
   const [coupon, setCoupon] = useState<CouponCheck | null>(null);
   const check = useMutation({
-    mutationFn: () => api<CouponCheck>(`/public/${promo!.slug}/coupons/${encodeURIComponent(code.trim())}`),
+    mutationFn: () =>
+      api<CouponCheck>(
+        `/public/${promo!.slug}/coupons/${encodeURIComponent(code.trim())}?${new URLSearchParams({ ...(promo!.serviceId ? { serviceId: promo!.serviceId } : {}), ...(form.phone ? { phone: form.phone } : {}) })}`,
+      ),
     onSuccess: setCoupon,
   });
   const off = coupon && promo ? discountCents(promo.totalCents, coupon) : 0;
@@ -519,7 +523,7 @@ function BookingFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
           pending={pending}
           error={error}
           cta={t(`kinds.${kind}.confirm`)}
-          promo={{ slug: business.slug, totalCents: total, coupons: business.promos.coupons, reward: business.promos.reward }}
+          promo={{ slug: business.slug, totalCents: total, coupons: business.promos.coupons, reward: business.promos.reward, serviceId: needsService ? serviceId : null }}
           summary={
             <p className="rounded-lg bg-slate-50 p-3 text-sm">
               {[
@@ -639,7 +643,7 @@ function ClassesFlow({ business, loc, onBook, pending, error, resetKey }: FlowPr
           pending={pending}
           error={error}
           cta={t(`kinds.${business.kind}.confirm`)}
-          promo={{ slug: business.slug, totalCents: chosen.priceCents * spots, coupons: business.promos.coupons, reward: business.promos.reward }}
+          promo={{ slug: business.slug, totalCents: chosen.priceCents * spots, coupons: business.promos.coupons, reward: business.promos.reward, serviceId: chosen.serviceId }}
           summary={chosen.priceCents > 0 && <p className="rounded-lg bg-slate-50 p-3 text-sm">{t('booking.total')}: <b>{money(chosen.priceCents * spots)}</b></p>}
           onSubmit={(f) => onBook({ classSessionId: chosen.id, spots, ...f })}
         />

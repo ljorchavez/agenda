@@ -231,7 +231,34 @@ await api(`/appointments/${bk.id}`, null, tok, 'DELETE').catch(() => null);
 await page.goto('http://localhost:5173/b/barberia-demo');
 await page.getByTestId('profile-header').waitFor();
 const head = (await page.getByTestId('profile-header').textContent()) ?? '';
-ok('public page header has hours, notice and socials', head.includes('🕒') && head.includes('2x1') && head.includes('Instagram'), head.slice(0, 160));
+ok('public page header has hours, notice and socials', head.includes('🕒') && head.includes('2x1') && (await page.getByTestId('social-instagram').count()) === 1, head.slice(0, 160));
+ok('social links are round icon buttons', (await page.getByTestId('social-whatsapp').count()) === 1 && ((await page.getByTestId('social-instagram').textContent()) ?? '').trim() === '');
+{
+  // Profile picture in front of the banner; choosing a service comes before the reviews
+  const z = await page.evaluate(() => {
+    const avatar = document.querySelector('[data-testid=profile-header] .relative.z-10');
+    return avatar ? getComputedStyle(avatar).zIndex : null;
+  });
+  ok('profile picture sits over the banner', z === '10', String(z));
+  const order = await page.evaluate(() => {
+    const flow = document.querySelector('.card.space-y-6');
+    const reviews = document.querySelector('[data-testid=public-reviews]');
+    return Boolean(flow && reviews && flow.compareDocumentPosition(reviews) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  ok('booking comes before reviews', order);
+}
+// Settings save by themselves (no Guardar button)
+await page.goto('http://localhost:5173/settings');
+await page.locator('#pg-notice').waitFor({ timeout: 8000 }).catch(() => {});
+ok('business settings have no Guardar button', (await page.getByRole('button', { name: 'Guardar', exact: true }).count()) === 0);
+const oldNotice = await page.locator('#pg-notice').inputValue().catch(() => '');
+await page.locator('#pg-notice').fill('Aviso guardado solo');
+await page.getByTestId('save-status').filter({ hasText: 'Guardado' }).waitFor({ timeout: 8000 }).catch(() => {});
+await page.reload();
+await page.locator('#pg-notice').waitFor({ timeout: 8000 }).catch(() => {});
+ok('settings autosave while typing', (await page.locator('#pg-notice').inputValue().catch(() => '')) === 'Aviso guardado solo');
+await page.locator('#pg-notice').fill(oldNotice);
+await page.getByTestId('save-status').filter({ hasText: 'Guardado' }).waitFor({ timeout: 8000 }).catch(() => {});
 // Payments settings: no-show sits next to deposit (no long scroll)
 await page.goto('http://localhost:5173/settings?tab=payments');
 await page.getByText('Cuando un cliente no asiste').waitFor();
@@ -242,6 +269,7 @@ ok('no-show in right column', !!noShowBox && !!methodsBox && noShowBox.x > metho
 await page.goto('http://localhost:5173/settings?tab=promos');
 await page.getByTestId('coupons-section').filter({ hasText: 'BIENVENIDA' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('promotions tab shows rewards and coupons', (await page.getByTestId('rewards-section').isVisible()) && ((await page.getByTestId('coupons-section').textContent()) ?? '').includes('BIENVENIDA'));
+ok('coupons show their rules (once per customer)', ((await page.getByTestId('coupons-section').textContent()) ?? '').includes('1 vez por cliente'));
 await page.goto('http://localhost:5173/agenda');
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
 await page.locator('[role=listbox] button').first().click();
@@ -336,7 +364,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.getByTestId('form-question').nth(1).getByRole('combobox', { name: 'Tipo de respuesta' }).selectOption('choice');
   await page.getByTestId('form-question').nth(1).getByRole('textbox', { name: 'Opciones' }).fill('Correr\nNadar');
   await page.getByTestId('form-builder').getByText('Consulta de seguimiento').click();
-  await page.getByTestId('form-builder').getByRole('button', { name: 'Guardar' }).click();
+  await page.getByTestId('form-builder').getByRole('button', { name: 'Agregar' }).click();
   await page.getByTestId('forms-section').filter({ hasText: 'Cuestionario UI' }).waitFor({ timeout: 8000 }).catch(() => {});
   const made = (await api('/forms', null, ntok)).find((f) => f.name === 'Cuestionario UI');
   ok('builder saves a questionnaire with options and a booking type', made?.fields?.length === 2 && made.fields[1].options.join() === 'Correr,Nadar' && made.serviceIds.length === 1, JSON.stringify(made ?? null).slice(0, 200));

@@ -181,7 +181,7 @@ export function CashTab() {
   const s = sum.data;
   const diff = counted !== '' && s ? toCents(counted) - s.expectedCashCents : null;
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-2" data-testid="cash-tab">
+    <div className="grid items-stretch gap-6 lg:grid-cols-2" data-testid="cash-tab">
       <section className="card space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>

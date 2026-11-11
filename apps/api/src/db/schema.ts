@@ -286,6 +286,10 @@ export const coupons = pgTable('coupons', {
   active: boolean('active').notNull().default(true),
   maxUses: integer('max_uses'),
   validUntil: date('valid_until', { mode: 'string' }),
+  /** Services it applies to (empty = all) */
+  serviceIds: jsonb('service_ids').$type<string[]>().notNull().default([]),
+  /** Times one customer can use it (null = no limit) */
+  maxUsesPerCustomer: integer('max_uses_per_customer'),
   ...timestamps,
 });
 export type Coupon = typeof coupons.$inferSelect;

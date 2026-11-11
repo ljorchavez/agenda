@@ -134,7 +134,7 @@ export function OfferingsSection({ disabled }: { disabled: boolean }) {
           <ErrorText error={save.error} ns="sales" />
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={() => setForm(null)}>{t('common.cancel')}</button>
-            <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+            <button className="btn-primary" disabled={save.isPending}>{form.id ? t('common.done') : t('common.add')}</button>
           </div>
         </form>
       ) : (

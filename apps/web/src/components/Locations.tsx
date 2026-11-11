@@ -194,7 +194,7 @@ function LocationModal({ target, onClose }: { target: LocationDto | null; onClos
         <ErrorText error={save.error} ns="locations" />
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
-          <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+          <button className="btn-primary" disabled={save.isPending}>{target ? t('common.done') : t('common.add')}</button>
         </div>
       </form>
     </Modal>

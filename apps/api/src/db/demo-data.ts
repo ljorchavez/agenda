@@ -258,10 +258,12 @@ async function seedPageLooks() {
         },
       })
       .where(eq(tenants.id, t.id));
+    // BIENVENIDA: once per customer, and only for the first visit where the business has one
+    const firstVisit = (await db.select().from(services).where(eq(services.tenantId, t.id))).filter((x) => /inicial|primera vez/i.test(x.name)).map((x) => x.id);
     const [welcome, friend] = await db
       .insert(coupons)
       .values([
-        { tenantId: t.id, code: 'BIENVENIDA', discountType: 'percent', value: 15 },
+        { tenantId: t.id, code: 'BIENVENIDA', discountType: 'percent', value: 15, maxUsesPerCustomer: 1, serviceIds: firstVisit },
         { tenantId: t.id, code: 'AMIGO50', discountType: 'amount', value: 5000, maxUses: 100 },
         { tenantId: t.id, code: 'VERANO20', discountType: 'percent', value: 20, validUntil: DateTime.now().minus({ months: 2 }).toISODate()! },
       ])

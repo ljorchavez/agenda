@@ -148,7 +148,7 @@ export function CustomerDetailPage() {
         </section>
       </div>
 
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-2">
+      <div className="mt-6 grid items-stretch gap-6 lg:grid-cols-2">
         <CustomerPlansSection customerId={id} />
         <RecordSection customerId={id} />
       </div>

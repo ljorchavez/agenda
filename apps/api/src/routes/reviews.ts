@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import {
+  MIN_PUBLIC_REVIEWS,
+  reviewsArePublic,
   reviewInputSchema,
   reviewModerationSchema,
   type PublicReviewDto,
@@ -38,6 +40,13 @@ const toPublic = (r: typeof reviews.$inferSelect): PublicReviewDto => ({
 });
 
 /** Average, count and the latest visible reviews of a business (or one location). */
+/** What the public sees: nothing when the business turned reviews off or has fewer than 3. */
+export async function publicReviewSummary(db: Pick<Db, 'execute' | 'select'>, tenant: { id: string; settings: { reviews?: { public?: boolean } } }, recent = 5): Promise<ReviewSummaryDto> {
+  if (!reviewsArePublic(tenant.settings)) return { average: null, count: 0, recent: [] };
+  const s = await reviewSummary(db, tenant.id, recent);
+  return s.count >= MIN_PUBLIC_REVIEWS ? s : { average: null, count: 0, recent: [] };
+}
+
 export async function reviewSummary(db: Pick<Db, 'execute' | 'select'>, tenantId: string, recent = 5, locationId?: string): Promise<ReviewSummaryDto> {
   const where = and(eq(reviews.tenantId, tenantId), eq(reviews.hidden, false), locationId ? eq(reviews.locationId, locationId) : undefined);
   const [agg] = await db.select({ avg: sql<string | null>`avg(${reviews.rating})`, n: sql<string>`count(*)` }).from(reviews).where(where);

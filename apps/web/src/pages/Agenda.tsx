@@ -687,8 +687,8 @@ function NewAppointmentModal({ initial, defaultLocation, presetResource, onClose
     return () => window.clearTimeout(id);
   }, [couponCode]);
   const discount = useQuery({
-    queryKey: ['discount-preview', customerId, debouncedCode, basePrice],
-    queryFn: () => api<DiscountPreviewDto>('/appointments/discount', { method: 'POST', body: { customerId: customerId || null, couponCode: debouncedCode || undefined, priceCents: basePrice } }),
+    queryKey: ['discount-preview', customerId, debouncedCode, basePrice, serviceId],
+    queryFn: () => api<DiscountPreviewDto>('/appointments/discount', { method: 'POST', body: { customerId: customerId || null, serviceId: serviceId || null, couponCode: debouncedCode || undefined, priceCents: basePrice } }),
     enabled: (rewardsOn && Boolean(customerId)) || (couponsOn && debouncedCode.length >= 3),
   });
   const d = discount.data;

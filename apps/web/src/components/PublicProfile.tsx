@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { MapView, TYPE_COLORS } from './MapView';
 import { ErrorText } from './ui';
+import { SaveStatus, useAutoSave } from '../lib/autosave';
 
 export const MX_STATES = [
   'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 'Chihuahua',
@@ -21,13 +22,9 @@ export function PublicProfileSection({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
   const { tenant, setTenant } = useAuth();
   const [p, setP] = useState<TenantProfile>(tenant!.profile);
-  const [saved, setSaved] = useState(false);
   const [finding, setFinding] = useState(false);
   const [findError, setFindError] = useState(false);
-  const set = (patch: Partial<TenantProfile>) => {
-    setP((x) => ({ ...x, ...patch }));
-    setSaved(false);
-  };
+  const set = (patch: Partial<TenantProfile>) => setP((x) => ({ ...x, ...patch }));
 
   const save = useMutation({
     mutationFn: () =>
@@ -44,11 +41,9 @@ export function PublicProfileSection({ disabled }: { disabled: boolean }) {
           },
         },
       }),
-    onSuccess: (t2) => {
-      setTenant(t2);
-      setSaved(true);
-    },
+    onSuccess: (t2) => setTenant(t2),
   });
+  const saveState = useAutoSave(p, () => save.mutateAsync(), { enabled: !disabled });
 
   /** Looks up the typed address with OpenStreetMap's geocoder (one request, user-initiated). */
   const findOnMap = async () => {
@@ -155,13 +150,8 @@ export function PublicProfileSection({ disabled }: { disabled: boolean }) {
         </span>
       </label>
 
-      {!disabled && (
-        <div className="flex items-center gap-3">
-          <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
-          {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
-        </div>
-      )}
-      <ErrorText error={save.error} ns="profile" />
+      <SaveStatus state={saveState} floating />
+      {saveState === 'error' && <ErrorText error={save.error} ns="profile" />}
     </section>
   );
 }

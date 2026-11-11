@@ -235,6 +235,18 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
 - Cuenta como venta en reportes y en el corte de caja (forma de pago Mercado Pago).
 - Los negocios demo no tienen Mercado Pago, así que ahí no aparece la sección.
 
+## 11d. Ajustes de página, reseñas, cupones y guardado (nov 2026)
+- Página del negocio: foto de perfil sobre la portada; redes como botones redondos con ícono;
+  primero "Elige un servicio" y las reseñas al final (como Fresha/Booksy: calificación junto al
+  nombre, detalle abajo).
+- Reseñas: se publican a partir de **3**; el negocio puede apagarlas (Configuración → Reseñas) y
+  siguen llegando solo para él. Puede responder en público u ocultar reseñas ofensivas.
+- Cupones (migración 0014): válidos para todos los servicios o solo algunos, y usos por cliente
+  (por defecto 1). BIENVENIDA en las demos: 1 vez por cliente y solo primera consulta.
+- Configuración se guarda sola al escribir (sin botón Guardar). En listas (cupones, paquetes,
+  cuestionarios, sucursales, usuarios) el botón dice "Agregar"/"Listo".
+- Mismo alto para todos los campos y tarjetas de una misma fila.
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México

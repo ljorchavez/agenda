@@ -26,7 +26,7 @@ import { appointments, customers, services, tenants, type Appointment, type Cust
 import { hasOverlap } from '../lib/appointments.js';
 import { findUsableCoupon, resolveDiscount } from '../lib/discounts.js';
 import { customerPlans as customerPlansOf } from '../lib/plans.js';
-import { reviewSummary } from './reviews.js';
+import { publicReviewSummary } from './reviews.js';
 import { shopFor } from '../lib/online-sales.js';
 import { assertRoom, lockSession, querySessions, toPublicSession } from '../lib/classes.js';
 import { assertCanAddBooking, assertCanAddCustomer } from '../lib/plan.js';
@@ -103,7 +103,7 @@ publicRoutes.get('/public/:slug', async (c) => {
     rentalDurations: cfg.durations ? rentalSettingsOf(tenant.settings).durations : null,
     locations: activeLocs.map((l) => toPublicLocation(tenant, l)),
     page: pageSettingsOf(tenant.settings),
-    reviews: await reviewSummary(getDb(), tenant.id, 5),
+    reviews: await publicReviewSummary(getDb(), tenant, 5),
     shop: await shopFor(getDb(), tenant),
     promos: (() => {
       const r = rewardSettingsOf(tenant.settings);
@@ -116,7 +116,17 @@ publicRoutes.get('/public/:slug', async (c) => {
 /** Checks a coupon code on the booking page: what it takes off, or why it can't be used. */
 publicRoutes.get('/public/:slug/coupons/:code', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
-  const coupon = await findUsableCoupon(getDb(), tenant.id, tenant.settings, c.req.param('code'), DateTime.now().setZone(tenant.timezone).toISODate()!);
+  // Optional context: the chosen service and the phone typed so far (the booking checks again).
+  const db = getDb();
+  const serviceId = c.req.query('serviceId');
+  const phone = c.req.query('phone');
+  const known = phone && phone.replace(/\D/g, '').length >= 10
+    ? await db.query.customers.findFirst({ where: and(eq(customers.tenantId, tenant.id), eq(customers.phone, normalizeMxPhone(phone))) })
+    : null;
+  const coupon = await findUsableCoupon(db, tenant.id, tenant.settings, c.req.param('code'), DateTime.now().setZone(tenant.timezone).toISODate()!, {
+    serviceId: serviceId && /^[0-9a-f-]{36}$/.test(serviceId) ? serviceId : null,
+    customerId: known?.id ?? null,
+  });
   return c.json({ code: coupon.code, discountType: coupon.discountType, value: coupon.value });
 });
 
@@ -427,7 +437,7 @@ async function bookClass(requestUrl: string, tenant: Tenant, raw: unknown): Prom
         partySize: input.spots,
         ...(await (async () => {
           const full = service.priceCents * input.spots;
-          const d = await resolveDiscount(tx, tenant, { customerId: customer.id, couponCode: input.couponCode, priceCents: full, today: DateTime.now().setZone(tenant.timezone).toISODate()! });
+          const d = await resolveDiscount(tx, tenant, { customerId: customer.id, serviceId: service.id, couponCode: input.couponCode, priceCents: full, today: DateTime.now().setZone(tenant.timezone).toISODate()! });
           return { priceCents: full - d.discountCents, discountCents: d.discountCents, discountReason: d.reason, couponId: d.couponId };
         })()),
         locationId: session.locationId,
@@ -483,6 +493,7 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
     const fullPrice = bookingPriceCents(resource, service.priceCents, durationMin);
     const discount = await resolveDiscount(tx, tenant, {
       customerId: customer.id,
+      serviceId: service.id,
       couponCode: input.couponCode,
       priceCents: fullPrice,
       today: DateTime.now().setZone(tenant.timezone).toISODate()!,

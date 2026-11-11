@@ -1508,6 +1508,40 @@ d('API (integration)', () => {
     }
   });
 
+  it('coupons: only some services and once per customer', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Cupon Reglas', businessType: 'nutrition', name: 'Dra Cupon', email: 'cupon-reglas@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const slug = reg.tenant.slug;
+    const first = (await call('POST', '/services', { name: 'Consulta inicial', durationMin: 60, priceCents: 70000 }, tok)).body;
+    const follow = (await call('POST', '/services', { name: 'Seguimiento', durationMin: 30, priceCents: 40000 }, tok)).body;
+    const me = (await call('GET', '/auth/me', undefined, tok)).body;
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, coupons: { enabled: true } } }, tok);
+    const cp = await call('POST', '/coupons', { code: 'bienvenida', discountType: 'percent', value: 15, serviceIds: [first.id] }, tok);
+    expect(cp.status).toBe(201);
+    expect(cp.body).toMatchObject({ code: 'BIENVENIDA', serviceIds: [first.id], maxUsesPerCustomer: 1 });
+    expect((await call('GET', `/public/${slug}/coupons/BIENVENIDA?serviceId=${follow.id}`)).body.error).toBe('coupon_not_for_service');
+    expect((await call('GET', `/public/${slug}/coupons/BIENVENIDA?serviceId=${first.id}`)).status).toBe(200);
+    let day = DateTime.now().setZone('America/Mexico_City').plus({ days: 2 });
+    while (day.weekday === 7) day = day.plus({ days: 1 });
+    const slotsF = (await call('GET', `/public/${slug}/availability?serviceId=${follow.id}&date=${day.toISODate()}`)).body.slots;
+    const wrong = await call('POST', `/public/${slug}/bookings`, { serviceId: follow.id, startsAt: slotsF[0], name: 'Paciente Cupon', phone: '5521212121', couponCode: 'BIENVENIDA' });
+    expect(wrong.body.error).toBe('coupon_not_for_service');
+    const slots = (await call('GET', `/public/${slug}/availability?serviceId=${first.id}&date=${day.toISODate()}`)).body.slots;
+    const ok = await call('POST', `/public/${slug}/bookings`, { serviceId: first.id, startsAt: slots[0], name: 'Paciente Cupon', phone: '5521212121', couponCode: 'BIENVENIDA' });
+    expect(ok.status).toBe(201);
+    expect(ok.body.discountCents).toBe(10500);
+    // Same customer again: already used (the check with the phone says so too)
+    expect((await call('GET', `/public/${slug}/coupons/BIENVENIDA?serviceId=${first.id}&phone=5521212121`)).body.error).toBe('coupon_already_used');
+    const again = await call('POST', `/public/${slug}/bookings`, { serviceId: first.id, startsAt: slots[3], name: 'Paciente Cupon', phone: '5521212121', couponCode: 'BIENVENIDA' });
+    expect(again.body.error).toBe('coupon_already_used');
+    // Another customer can still use it; "no limit per customer" lifts the rule
+    expect((await call('POST', `/public/${slug}/bookings`, { serviceId: first.id, startsAt: slots[5], name: 'Otra Paciente', phone: '5521212122', couponCode: 'BIENVENIDA' })).status).toBe(201);
+    await call('PUT', `/coupons/${cp.body.id}`, { code: 'BIENVENIDA', discountType: 'percent', value: 15, serviceIds: [first.id], maxUsesPerCustomer: null }, tok);
+    expect((await call('POST', `/public/${slug}/bookings`, { serviceId: first.id, startsAt: slots[7], name: 'Paciente Cupon', phone: '5521212121', couponCode: 'BIENVENIDA' })).status).toBe(201);
+  });
+
   it('link preview for a business page', async () => {
     const res = await app.request('/api/page/b/negocio-a');
     expect(res.status).toBe(200);
@@ -1564,13 +1598,29 @@ d('API (integration)', () => {
     expect((await call('POST', `/public/reviews/${token}`, { rating: 1, comment: 'Otra' })).status).toBe(409);
     expect((await call('POST', '/public/reviews/x.y', { rating: 5 })).status).toBe(404);
     const slug = reg.tenant.slug;
+    // One review isn't published yet: from 3 on
     let pub = (await call('GET', `/public/${slug}`)).body.reviews;
-    expect(pub).toMatchObject({ average: 5, count: 1 });
-    expect(pub.recent[0]).toMatchObject({ authorName: 'María G.', comment: 'Excelente' });
+    expect(pub).toMatchObject({ average: null, count: 0 });
+    for (const [i, rating] of [4, 3].entries()) {
+      const cu = (await call('POST', '/customers', { name: `Cliente Reseña ${i}`, phone: `558888005${i}` }, tok)).body;
+      const ap = (await call('POST', '/appointments', { customerId: cu.id, serviceId: svc.id, resourceId: res.id, startsAt: DateTime.now().plus({ days: 2 + i }).toISO(), allowOverlap: true }, tok)).body;
+      await call('PATCH', `/appointments/${ap.id}`, { status: 'completed' }, tok);
+      expect((await call('POST', `/public/reviews/${ap.managePath.split('/c/')[1]}`, { rating })).status).toBe(201);
+    }
+    pub = (await call('GET', `/public/${slug}`)).body.reviews;
+    expect(pub).toMatchObject({ average: 4, count: 3 });
     const list = (await call('GET', '/reviews', undefined, tok)).body;
-    await call('PATCH', `/reviews/${list.items[0].id}`, { reply: '¡Gracias, María!' }, tok);
-    expect((await call('GET', `/public/${slug}`)).body.reviews.recent[0].reply).toBe('¡Gracias, María!');
-    await call('PATCH', `/reviews/${list.items[0].id}`, { hidden: true }, tok);
+    const maria = list.items.find((r: { comment: string | null }) => r.comment === 'Excelente');
+    expect(pub.recent.find((r: { comment: string | null }) => r.comment === 'Excelente')).toMatchObject({ authorName: 'María G.' });
+    await call('PATCH', `/reviews/${maria.id}`, { reply: '¡Gracias, María!' }, tok);
+    expect((await call('GET', `/public/${slug}`)).body.reviews.recent.find((r: { comment: string | null }) => r.comment === 'Excelente').reply).toBe('¡Gracias, María!');
+    // The business can keep reviews private: page and directory show none
+    const me = (await call('GET', '/auth/me', undefined, tok)).body;
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, reviews: { public: false } } }, tok);
+    expect((await call('GET', `/public/${slug}`)).body.reviews.count).toBe(0);
+    expect((await call('GET', '/reviews', undefined, tok)).body.count).toBe(3);
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, reviews: { public: true } } }, tok);
+    await call('PATCH', `/reviews/${maria.id}`, { hidden: true }, tok);
     pub = (await call('GET', `/public/${slug}`)).body.reviews;
     expect(pub.count).toBe(0);
 

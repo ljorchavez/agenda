@@ -5,6 +5,7 @@ import type { CouponDto, RewardSettings } from '@agenda/shared';
 import { api } from '../lib/api';
 import { money, toCents } from '../lib/format';
 import { ErrorText } from './ui';
+import { useServices } from '../lib/queries';
 
 const offText = (type: 'percent' | 'amount', value: number) => (type === 'percent' ? `${value}%` : money(value));
 
@@ -58,8 +59,20 @@ export function RewardsSection({ value, onChange, disabled }: { value: RewardSet
   );
 }
 
-type Form = { id?: string; code: string; discountType: 'percent' | 'amount'; value: string; maxUses: string; validUntil: string; active: boolean };
-const EMPTY: Form = { code: '', discountType: 'percent', value: '10', maxUses: '', validUntil: '', active: true };
+type Form = { id?: string; code: string; discountType: 'percent' | 'amount'; value: string; maxUses: string; validUntil: string; active: boolean; serviceIds: string[]; perCustomer: string };
+const EMPTY: Form = { code: '', discountType: 'percent', value: '10', maxUses: '', validUntil: '', active: true, serviceIds: [], perCustomer: '1' };
+const toForm = (c: CouponDto, patch: Partial<Form> = {}): Form => ({
+  id: c.id,
+  code: c.code,
+  discountType: c.discountType,
+  value: String(c.discountType === 'percent' ? c.value : c.value / 100),
+  maxUses: c.maxUses ? String(c.maxUses) : '',
+  validUntil: c.validUntil ?? '',
+  active: c.active,
+  serviceIds: c.serviceIds,
+  perCustomer: c.maxUsesPerCustomer ? String(c.maxUsesPerCustomer) : '',
+  ...patch,
+});
 
 /** Discount codes: turn on, create, pause or delete them; shows how many times each was used. */
 export function CouponsSection({ enabled, onToggle, disabled }: { enabled: boolean; onToggle: (on: boolean) => void; disabled: boolean }) {
@@ -78,6 +91,8 @@ export function CouponsSection({ enabled, onToggle, disabled }: { enabled: boole
           active: f.active,
           maxUses: f.maxUses ? Number(f.maxUses) : null,
           validUntil: f.validUntil || null,
+          serviceIds: f.serviceIds,
+          maxUsesPerCustomer: f.perCustomer ? Number(f.perCustomer) : null,
         },
       }),
     onSuccess: () => {
@@ -89,8 +104,9 @@ export function CouponsSection({ enabled, onToggle, disabled }: { enabled: boole
     mutationFn: (id: string) => api(`/coupons/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['coupons'] }),
   });
-  const toggleActive = (c: CouponDto) =>
-    save.mutate({ id: c.id, code: c.code, discountType: c.discountType, value: String(c.discountType === 'percent' ? c.value : c.value / 100), maxUses: c.maxUses ? String(c.maxUses) : '', validUntil: c.validUntil ?? '', active: !c.active });
+  const toggleActive = (c: CouponDto) => save.mutate(toForm(c, { active: !c.active }));
+  const services = useServices();
+  const svcName = (id: string) => services.data?.find((s) => s.id === id)?.name ?? '';
 
   return (
     <section className="card space-y-4" data-testid="coupons-section">
@@ -113,12 +129,14 @@ export function CouponsSection({ enabled, onToggle, disabled }: { enabled: boole
                     <span className="ml-2 text-xs text-slate-500">
                       {t('promos.uses', { count: c.uses })}{c.maxUses ? ` / ${c.maxUses}` : ''}
                       {c.validUntil && ` · ${t('promos.until', { date: c.validUntil })}`}
+                      {` · ${c.serviceIds.length ? c.serviceIds.map(svcName).filter(Boolean).join(', ') : t('promos.allServices')}`}
+                      {c.maxUsesPerCustomer ? ` · ${t('promos.perCustomerN', { count: c.maxUsesPerCustomer })}` : ''}
                     </span>
                   </div>
                   {!disabled && (
                     <div className="flex gap-3 text-xs">
                       <button type="button" className="text-slate-600 hover:underline" onClick={() => toggleActive(c)}>{c.active ? t('promos.pause') : t('promos.resume')}</button>
-                      <button type="button" className="text-brand-700 hover:underline" onClick={() => setForm({ id: c.id, code: c.code, discountType: c.discountType, value: String(c.discountType === 'percent' ? c.value : c.value / 100), maxUses: c.maxUses ? String(c.maxUses) : '', validUntil: c.validUntil ?? '', active: c.active })}>{t('common.edit')}</button>
+                      <button type="button" className="text-brand-700 hover:underline" onClick={() => setForm(toForm(c))}>{t('common.edit')}</button>
                       <button type="button" className="text-rose-700 hover:underline" onClick={() => window.confirm(t('promos.deleteConfirm', { code: c.code })) && remove.mutate(c.id)}>{t('common.delete')}</button>
                     </div>
                   )}
@@ -158,11 +176,32 @@ export function CouponsSection({ enabled, onToggle, disabled }: { enabled: boole
                   <label className="label" htmlFor="cp-until">{t('promos.validUntil')}</label>
                   <input id="cp-until" type="date" className="input" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} />
                 </div>
+                <div className="col-span-2">
+                  <label className="label" htmlFor="cp-per">{t('promos.perCustomer')}</label>
+                  <select id="cp-per" className="input" value={form.perCustomer} onChange={(e) => setForm({ ...form, perCustomer: e.target.value })}>
+                    <option value="1">{t('promos.perCustomerN', { count: 1 })}</option>
+                    <option value="2">{t('promos.perCustomerN', { count: 2 })}</option>
+                    <option value="3">{t('promos.perCustomerN', { count: 3 })}</option>
+                    <option value="">{t('promos.perCustomerAny')}</option>
+                  </select>
+                </div>
               </div>
+              <fieldset>
+                <legend className="label">{t('promos.services')}</legend>
+                <div className="flex flex-wrap gap-2">
+                  {(services.data ?? []).filter((s) => s.active).map((s) => (
+                    <label key={s.id} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs">
+                      <input type="checkbox" checked={form.serviceIds.includes(s.id)} onChange={(e) => setForm({ ...form, serviceIds: e.target.checked ? [...form.serviceIds, s.id] : form.serviceIds.filter((x) => x !== s.id) })} />
+                      {s.name}
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{t('promos.servicesHelp')}</p>
+              </fieldset>
               <ErrorText error={save.error} ns="promos" />
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn-secondary" onClick={() => setForm(null)}>{t('common.cancel')}</button>
-                <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+                <button className="btn-primary" disabled={save.isPending}>{form.id ? t('common.done') : t('common.add')}</button>
               </div>
             </form>
           ) : (

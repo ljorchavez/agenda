@@ -18,7 +18,10 @@
     "copy": "Copiar",
     "copied": "¡Copiado!",
     "saving": "Guardando…",
-    "remove": "Quitar"
+    "remove": "Quitar",
+    "saveError": "No se pudo guardar. Revisa los datos.",
+    "add": "Agregar",
+    "done": "Listo"
   },
   "nav": {
     "dashboard": "Inicio",
@@ -391,7 +394,11 @@
       "packages": "Paquetes",
       "reviews": "Reseñas",
       "forms": "Cuestionarios"
-    }
+    },
+    "changePassword": "Cambiar contraseña",
+    "passwordChanged": "Contraseña cambiada",
+    "reviewsPublic": "Mostrar reseñas en mi página y en el directorio",
+    "reviewsPublicHelp": "Se publican a partir de 3 reseñas. Si lo apagas, tus clientes pueden seguir calificando y solo tú las ves."
   },
   "booking": {
     "chooseService": "Elige un servicio",
@@ -753,7 +760,9 @@
     "review_not_yet": "Podrás calificar cuando termine tu visita.",
     "form_required": "Contesta las preguntas obligatorias (*).",
     "form_invalid": "Revisa tus respuestas.",
-    "plan_limit_resources": "Tu plan incluye una sola agenda (1 profesional o espacio). Cambia a Estándar para agregar más."
+    "plan_limit_resources": "Tu plan incluye una sola agenda (1 profesional o espacio). Cambia a Estándar para agregar más.",
+    "coupon_not_for_service": "Este cupón no aplica para este servicio.",
+    "coupon_already_used": "Ya usaste este cupón."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -1085,7 +1094,16 @@
     "coupon_invalid": "Ese cupón no existe o no está activo.",
     "coupon_expired": "Ese cupón ya venció.",
     "coupon_used_up": "Ese cupón ya no tiene usos disponibles.",
-    "coupon_exists": "Ya tienes un cupón con ese código."
+    "coupon_exists": "Ya tienes un cupón con ese código.",
+    "allServices": "todos los servicios",
+    "services": "Válido para",
+    "servicesHelp": "Sin marcar ninguno vale para todos los servicios.",
+    "perCustomer": "Usos por cliente",
+    "perCustomerN_one": "{{count}} vez por cliente",
+    "perCustomerN_other": "{{count}} veces por cliente",
+    "perCustomerAny": "Sin límite por cliente",
+    "coupon_not_for_service": "Este cupón no aplica para este servicio.",
+    "coupon_already_used": "Ya usaste este cupón."
   },
   "planFeatures": {
     "packages": "Paquetes, membresías y tarjetas de regalo vienen en el plan Estándar.",
@@ -1241,7 +1259,10 @@
     "seeYours": "Ver tu reseña",
     "leave": "Califica tu visita",
     "askWhatsapp": "Pedir reseña por WhatsApp",
-    "askMessage": "¡Hola {{name}}! Gracias por visitar {{business}}. ¿Nos ayudas con tu opinión? {{url}}"
+    "askMessage": "¡Hola {{name}}! Gracias por visitar {{business}}. ¿Nos ayudas con tu opinión? {{url}}",
+    "publishReply": "Publicar",
+    "verifiedAll": "de visitas verificadas",
+    "showMore": "Ver más reseñas"
   },
   "calendar": {
     "title": "Ver la agenda en tu calendario",

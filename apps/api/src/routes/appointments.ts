@@ -27,6 +27,7 @@ import { z } from 'zod';
 
 const discountPreviewSchema = z.object({
   customerId: z.string().uuid().nullable().optional(),
+  serviceId: z.string().uuid().nullable().optional(),
   couponCode: z.string().trim().max(30).optional(),
   priceCents: z.number().int().min(0),
 });
@@ -184,7 +185,7 @@ appointmentRoutes.post('/appointments/discount', async (c) => {
     const cu = await db.query.customers.findFirst({ where: and(eq(customers.id, body.customerId), eq(customers.tenantId, tenant.id)) });
     if (!cu) throw notFound('customer');
   }
-  const d = await resolveDiscount(db, tenant, { customerId: body.customerId ?? null, couponCode: body.couponCode, priceCents: body.priceCents, today: todayIn(tenant.timezone), soft: true });
+  const d = await resolveDiscount(db, tenant, { customerId: body.customerId ?? null, serviceId: body.serviceId ?? null, couponCode: body.couponCode, priceCents: body.priceCents, today: todayIn(tenant.timezone), soft: true });
   const { couponId: _omit, ...out } = d;
   return c.json(out);
 });
@@ -258,7 +259,7 @@ appointmentRoutes.post('/appointments', async (c) => {
           partySize: spots,
           ...(await (async () => {
             const full = input.priceCents ?? (svc?.priceCents ?? 0) * spots;
-            const d = await resolveDiscount(tx, tenant, { customerId: customer.id, couponCode: input.couponCode, priceCents: full, today: todayIn(tenant.timezone) });
+            const d = await resolveDiscount(tx, tenant, { customerId: customer.id, serviceId: session.serviceId, couponCode: input.couponCode, priceCents: full, today: todayIn(tenant.timezone) });
             return { priceCents: full - d.discountCents, discountCents: d.discountCents, discountReason: d.reason, couponId: d.couponId };
           })()),
           locationId: session.locationId,
@@ -281,7 +282,7 @@ appointmentRoutes.post('/appointments', async (c) => {
       staffUserId: input.staffUserId ?? null,
     });
     const fullPrice = input.priceCents ?? bookingPriceCents(resource, svc.priceCents, durationMin);
-    const discount = await resolveDiscount(tx, tenant, { customerId: customer.id, couponCode: input.couponCode, priceCents: fullPrice, today: todayIn(tenant.timezone) });
+    const discount = await resolveDiscount(tx, tenant, { customerId: customer.id, serviceId: svc.id, couponCode: input.couponCode, priceCents: fullPrice, today: todayIn(tenant.timezone) });
     const [inserted] = await tx
       .insert(appointments)
       .values({

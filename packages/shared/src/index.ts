@@ -369,6 +369,10 @@ export const couponInputSchema = z.object({
   active: z.boolean().default(true),
   maxUses: z.number().int().min(1).nullable().optional(),
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /** Only for these services (empty = every service) */
+  serviceIds: z.array(z.string().uuid()).max(200).default([]),
+  /** Uses per customer (null = no limit); new coupons default to once */
+  maxUsesPerCustomer: z.number().int().min(1).max(100).nullable().default(1),
 }).refine((c) => c.discountType !== 'percent' || c.value <= 100, { path: ['value'], message: 'percent_max' });
 export type CouponInput = z.infer<typeof couponInputSchema>;
 export interface CouponDto {
@@ -379,6 +383,8 @@ export interface CouponDto {
   active: boolean;
   maxUses: number | null;
   validUntil: string | null;
+  serviceIds: string[];
+  maxUsesPerCustomer: number | null;
   /** Bookings (not cancelled) that used it */
   uses: number;
 }
@@ -434,6 +440,8 @@ export const tenantSettingsSchema = z.object({
       giftCardAmounts: z.array(z.number().int().min(10_000).max(5_000_000)).max(6).default([]),
     })
     .optional(),
+  /** Verified reviews on the booking page and the directory (default: shown) */
+  reviews: z.object({ public: z.boolean() }).optional(),
   /** Who gets a booking made with "Cualquiera disponible" */
   assignment: z
     .object({
@@ -443,6 +451,9 @@ export const tenantSettingsSchema = z.object({
     })
     .optional(),
 });
+/** Reviews are shown publicly only from this many on (one bad first review doesn't define a business). */
+export const MIN_PUBLIC_REVIEWS = 3;
+export const reviewsArePublic = (settings: { reviews?: { public?: boolean } } | null | undefined) => settings?.reviews?.public !== false;
 export type SalesSettings = { online: boolean; giftCardAmounts: number[] };
 export const DEFAULT_GIFT_CARD_AMOUNTS = [50_000, 100_000, 150_000];
 export function salesSettingsOf(settings: { sales?: Partial<SalesSettings> } | null | undefined): SalesSettings {

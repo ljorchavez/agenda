@@ -18,7 +18,10 @@
     "copy": "Copy",
     "copied": "Copied!",
     "saving": "Saving…",
-    "remove": "Remove"
+    "remove": "Remove",
+    "saveError": "Couldn't save. Check the data.",
+    "add": "Add",
+    "done": "Done"
   },
   "nav": {
     "dashboard": "Home",
@@ -391,7 +394,11 @@
       "packages": "Packages",
       "reviews": "Reviews",
       "forms": "Questionnaires"
-    }
+    },
+    "changePassword": "Change password",
+    "passwordChanged": "Password changed",
+    "reviewsPublic": "Show reviews on my page and in the directory",
+    "reviewsPublicHelp": "They're published from 3 reviews on. If you turn it off, customers can still rate you and only you see them."
   },
   "booking": {
     "chooseService": "Choose a service",
@@ -753,7 +760,9 @@
     "review_not_yet": "You can rate once your visit is over.",
     "form_required": "Answer the required questions (*).",
     "form_invalid": "Check your answers.",
-    "plan_limit_resources": "Your plan includes a single agenda (1 professional or space). Switch to Standard to add more."
+    "plan_limit_resources": "Your plan includes a single agenda (1 professional or space). Switch to Standard to add more.",
+    "coupon_not_for_service": "This coupon doesn't apply to this service.",
+    "coupon_already_used": "You already used this coupon."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -1085,7 +1094,16 @@
     "coupon_invalid": "That coupon does not exist or is not active.",
     "coupon_expired": "That coupon has expired.",
     "coupon_used_up": "That coupon has no uses left.",
-    "coupon_exists": "You already have a coupon with that code."
+    "coupon_exists": "You already have a coupon with that code.",
+    "allServices": "all services",
+    "services": "Valid for",
+    "servicesHelp": "Tick none to make it valid for every service.",
+    "perCustomer": "Uses per customer",
+    "perCustomerN_one": "{{count}} time per customer",
+    "perCustomerN_other": "{{count}} times per customer",
+    "perCustomerAny": "No limit per customer",
+    "coupon_not_for_service": "This coupon doesn't apply to this service.",
+    "coupon_already_used": "You already used this coupon."
   },
   "planFeatures": {
     "packages": "Packages, memberships and gift cards come with the Standard plan.",
@@ -1241,7 +1259,10 @@
     "seeYours": "See your review",
     "leave": "Rate your visit",
     "askWhatsapp": "Ask for a review on WhatsApp",
-    "askMessage": "Hi {{name}}! Thanks for visiting {{business}}. Would you share your opinion? {{url}}"
+    "askMessage": "Hi {{name}}! Thanks for visiting {{business}}. Would you share your opinion? {{url}}",
+    "publishReply": "Publish",
+    "verifiedAll": "from verified visits",
+    "showMore": "Show more reviews"
   },
   "calendar": {
     "title": "See the agenda in your calendar",

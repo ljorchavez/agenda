@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
-import { BUSINESS_TYPES, businessKind, type BusinessType, type DirectoryDto } from '@agenda/shared';
+import { BUSINESS_TYPES, businessKind, MIN_PUBLIC_REVIEWS, type BusinessType, type DirectoryDto } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 
 /**
@@ -53,8 +53,11 @@ directoryRoutes.get('/public-directory', async (c) => {
              where r.tenant_id = t.id and r.active and r.price_per_hour_cents > 0) as hourly_from,
            (select min(s.price_cents) from services s
              where s.tenant_id = t.id and s.active and s.price_cents > 0) as service_from,
-           (select avg(rv.rating) from reviews rv where rv.tenant_id = t.id and not rv.hidden) as rating_avg,
-           (select count(*) from reviews rv where rv.tenant_id = t.id and not rv.hidden) as rating_count
+           -- Shown only when the business keeps reviews public and has at least MIN_PUBLIC_REVIEWS
+           case when coalesce(t.settings->'reviews'->>'public', 'true') <> 'false'
+             then (select avg(rv.rating) from reviews rv where rv.tenant_id = t.id and not rv.hidden) end as rating_avg,
+           case when coalesce(t.settings->'reviews'->>'public', 'true') <> 'false'
+             then (select count(*) from reviews rv where rv.tenant_id = t.id and not rv.hidden) else 0 end as rating_count
     from pins p join tenants t on t.id = p.tenant_id
     where p.lat is not null and p.lng is not null and p.city is not null
     order by t.name, p.location_name
@@ -80,8 +83,8 @@ directoryRoutes.get('/public-directory', async (c) => {
       priceUnit: r.hourly_from != null ? ('hour' as const) : null,
       locationId: r.location_id,
       locationName: Number(r.location_count) > 1 ? r.location_name : null,
-      ratingAverage: r.rating_avg == null ? null : Math.round(Number(r.rating_avg) * 10) / 10,
-      ratingCount: Number(r.rating_count ?? 0),
+      ratingAverage: r.rating_avg == null || Number(r.rating_count ?? 0) < MIN_PUBLIC_REVIEWS ? null : Math.round(Number(r.rating_avg) * 10) / 10,
+      ratingCount: Number(r.rating_count ?? 0) < MIN_PUBLIC_REVIEWS ? 0 : Number(r.rating_count ?? 0),
     }));
 
   const byState = new Map<string, Set<string>>();

@@ -99,6 +99,13 @@
       "when": 1795000000000,
       "tag": "0013_online_sales",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795100000000,
+      "tag": "0014_coupon_rules",
+      "breakpoints": true
     }
   ]
 }

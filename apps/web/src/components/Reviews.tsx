@@ -29,17 +29,29 @@ export function RatingBadge({ average, count }: { average: number | null; count:
   );
 }
 
-/** Latest verified reviews on the public page. */
+/**
+ * Booking page, after booking and the shop (like Fresha or Booksy: the rating sits next to the
+ * name and the reviews further down): average, count and the latest ones, two at first.
+ */
 export function PublicReviews({ summary }: { summary: ReviewSummaryDto }) {
   const { t } = useTranslation();
-  if (!summary.count) return null;
+  const [all, setAll] = useState(false);
+  if (!summary.count || summary.average == null) return null;
+  const shown = all ? summary.recent : summary.recent.slice(0, 2);
   return (
-    <section className="mt-4" data-testid="public-reviews">
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
-        {t('reviews.title')} <RatingBadge average={summary.average} count={summary.count} />
-      </h2>
+    <section id="resenas" className="card mt-4 scroll-mt-4 space-y-3" data-testid="public-reviews">
+      <div className="flex items-center gap-4">
+        <div className="text-center">
+          <div className="text-3xl font-bold text-slate-900">{summary.average.toFixed(1)}</div>
+          <Stars value={Math.round(summary.average)} size="text-sm" />
+        </div>
+        <div>
+          <h2 className="font-semibold">{t('reviews.title')}</h2>
+          <p className="text-sm text-slate-500">{t('reviews.count', { count: summary.count })} · ✓ {t('reviews.verifiedAll')}</p>
+        </div>
+      </div>
       <ul className="space-y-2">
-        {summary.recent.map((r, i) => (
+        {shown.map((r, i) => (
           <li key={i} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
             <div className="flex items-center justify-between">
               <span className="font-medium">{r.authorName}</span>
@@ -47,10 +59,15 @@ export function PublicReviews({ summary }: { summary: ReviewSummaryDto }) {
             </div>
             {r.comment && <p className="mt-1 text-slate-700">{r.comment}</p>}
             {r.reply && <p className="mt-1 border-l-2 border-brand-300 pl-2 text-xs text-slate-600"><b>{t('reviews.reply')}:</b> {r.reply}</p>}
-            <p className="mt-1 text-[11px] text-slate-400">✓ {t('reviews.verified')} · {dateOnly(r.createdAt)}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{dateOnly(r.createdAt)}</p>
           </li>
         ))}
       </ul>
+      {!all && summary.recent.length > 2 && (
+        <button type="button" className="text-sm font-medium text-brand-700 hover:underline" onClick={() => setAll(true)}>
+          {t('reviews.showMore')}
+        </button>
+      )}
     </section>
   );
 }
@@ -91,7 +108,7 @@ export function ReviewsSection() {
             {replying?.id === r.id ? (
               <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); mod.mutate({ id: r.id, reply: replying.text || null }); }}>
                 <input className="input" autoFocus value={replying.text} onChange={(e) => setReplying({ id: r.id, text: e.target.value })} placeholder={t('reviews.replyPlaceholder')} />
-                <button className="btn-primary">{t('common.save')}</button>
+                <button className="btn-primary">{t('reviews.publishReply')}</button>
               </form>
             ) : manager && (
               <div className="mt-2 flex gap-3 text-xs">

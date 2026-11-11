@@ -1,5 +1,6 @@
 import { FormsSection } from '../components/Forms';
 import { AssignmentSettingsSection } from '../components/Assignment';
+import { SaveStatus, useAutoSave } from '../lib/autosave';
 import { OnlineSalesSection } from '../components/OnlineSales';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -13,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   assignableRoles,
   assignmentSettingsOf,
+  reviewsArePublic,
   salesSettingsOf,
   BUSINESS_TYPES,
   isManager,
@@ -57,7 +59,7 @@ function MemberSettings() {
   return (
     <>
       <PageHeader title={t('settings.title')} />
-      <div className="grid items-start gap-6 lg:grid-cols-2">
+      <div className="grid items-stretch gap-6 lg:grid-cols-2">
         <AccountSection />
         <CalendarLinksSection />
         <section className="card space-y-4">
@@ -101,28 +103,32 @@ function AccountSection() {
   const [name, setName] = useState(user?.name ?? '');
   const [currentPassword, setCurrent] = useState('');
   const [newPassword, setNew] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [changed, setChanged] = useState(false);
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (withPassword: boolean) =>
       api<SessionUser>('/auth/me', {
         method: 'PATCH',
-        body: { name, ...(newPassword ? { currentPassword, newPassword } : {}) },
+        body: { name, ...(withPassword && newPassword ? { currentPassword, newPassword } : {}) },
       }),
-    onSuccess: (u) => {
+    onSuccess: (u, withPassword) => {
       setUser(u);
-      setCurrent('');
-      setNew('');
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      if (withPassword) {
+        setCurrent('');
+        setNew('');
+        setChanged(true);
+        setTimeout(() => setChanged(false), 2500);
+      }
     },
   });
+  const nameState = useAutoSave(name, () => save.mutateAsync(false), { valid: name.trim().length >= 2 });
   return (
     <section className="card space-y-4">
       <h2 className="font-semibold">{t('settings.account')}</h2>
       <div className="text-sm text-slate-500">
         {user?.email} · <span className="font-medium text-slate-700">{t(`settings.role.${user?.role ?? 'staff'}`)}</span>
       </div>
-      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+      <SaveStatus state={nameState} floating />
+      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (newPassword) save.mutate(true); }}>
         <div>
           <label className="label">{t('auth.name')}</label>
           <input required minLength={2} className="input" value={name} onChange={(e) => setName(e.target.value)} />
@@ -138,8 +144,8 @@ function AccountSection() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button className="btn-secondary" disabled={save.isPending || (Boolean(newPassword) && !currentPassword)}>{t('common.save')}</button>
-          {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
+          <button className="btn-secondary" disabled={save.isPending || !newPassword || !currentPassword}>{t('settings.changePassword')}</button>
+          {changed && <span className="text-sm text-emerald-700">✓ {t('settings.passwordChanged')}</span>}
         </div>
         <ErrorText error={save.error} ns="settings" />
       </form>
@@ -185,7 +191,6 @@ function BusinessSettings() {
     setSettings((s) => ({ ...s, selfService: { ...s.selfService!, ...patch } }));
   const payments = settings.payments!;
   const invalid = payments.transfer.clabe !== '' && !isValidClabe(payments.transfer.clabe);
-  const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const save = useMutation({
@@ -194,11 +199,12 @@ function BusinessSettings() {
         method: 'PATCH',
         body: { name, businessType, phone: phone || null, settings, locale: i18n.language.startsWith('en') ? 'en' : 'es' },
       }),
-    onSuccess: (t2) => {
-      setTenant(t2);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    },
+    onSuccess: (t2) => setTenant(t2),
+  });
+  // Every change is saved by itself a moment later (no "Guardar" button).
+  const saveState = useAutoSave({ name, businessType, phone, settings }, () => save.mutateAsync(), {
+    enabled: canEdit,
+    valid: !invalid && name.trim().length >= 2,
   });
 
   const publicUrl = `${window.location.origin}/b/${tenant?.slug}`;
@@ -220,18 +226,15 @@ function BusinessSettings() {
     { id: 'account', label: t('settings.tabs.account') },
   ];
   const tab = tabs.some((x) => x.id === params.get('tab')) ? params.get('tab')! : 'business';
-  // Tabs that share one "Guardar" (business data, booking rules, payments)
-  const saveBar = canEdit && ['business', 'booking', 'payments', 'promos', 'packages'].includes(tab) && (
-    <div className="flex items-center gap-3">
-      <button className="btn-primary" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{t('common.save')}</button>
-      {saved && <span className="text-sm text-emerald-700">{t('common.saved')}</span>}
-      <ErrorText error={save.error} ns="paymentSettings" />
-    </div>
+  // Problems saving (e.g. a bad CLABE) show under the section being edited.
+  const saveBar = canEdit && ['business', 'booking', 'payments', 'promos', 'packages'].includes(tab) && saveState === 'error' && (
+    <ErrorText error={save.error} ns="paymentSettings" />
   );
 
   return (
     <>
       <PageHeader title={t('settings.title')} />
+      <SaveStatus state={saveState} floating />
       <div role="tablist" aria-label={t('settings.title')} className="-mx-1 mb-6 flex gap-1 overflow-x-auto border-b border-slate-200 px-1">
         {tabs.map((x) => (
           <button
@@ -249,7 +252,7 @@ function BusinessSettings() {
 
       {tab === 'business' && (
         <div className="space-y-6">
-          <div className="grid items-start gap-6 lg:grid-cols-2">
+          <div className="grid items-stretch gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.business')}</h2>
           <div>
@@ -298,7 +301,7 @@ function BusinessSettings() {
             slug={tenant!.slug}
           />
           {saveBar}
-          <div className="grid items-start gap-6 lg:grid-cols-2">
+          <div className="grid items-stretch gap-6 lg:grid-cols-2">
             <PublicProfileSection disabled={!canEdit} />
           </div>
         </div>
@@ -306,7 +309,7 @@ function BusinessSettings() {
 
       {tab === 'booking' && (
         <div className="space-y-6">
-          <div className="grid items-start gap-6 lg:grid-cols-2">
+          <div className="grid items-stretch gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <h2 className="font-semibold">{t('settings.publicLink')}</h2>
           <div className="flex gap-2">
@@ -408,7 +411,7 @@ function BusinessSettings() {
 
       {tab === 'payments' && (
         <div className="space-y-6">
-          <div className="grid items-start gap-6 lg:grid-cols-2">
+          <div className="grid items-stretch gap-6 lg:grid-cols-2">
         <PaymentSettingsSection
           value={payments}
           disabled={!isOwner}
@@ -421,7 +424,7 @@ function BusinessSettings() {
 
       {tab === 'promos' && (
         <div className="space-y-6">
-          <div className="grid items-start gap-6 lg:grid-cols-2">
+          <div className="grid items-stretch gap-6 lg:grid-cols-2">
             <RewardsSection value={rewardSettingsOf(settings)} onChange={(r) => setSettings((s) => ({ ...s, rewards: r }))} disabled={!canEdit} />
             <CouponsSection enabled={couponsEnabled(settings)} onToggle={(on) => setSettings((s) => ({ ...s, coupons: { enabled: on } }))} disabled={!canEdit} />
           </div>
@@ -434,7 +437,7 @@ function BusinessSettings() {
       {tab === 'plan' && <PlanSection canChange={isOwner} />}
       {tab === 'packages' && (
         <div className="space-y-6">
-          <div className="grid items-start gap-6 lg:grid-cols-2">
+          <div className="grid items-stretch gap-6 lg:grid-cols-2">
             <OfferingsSection disabled={!businessManager} />
             <div className="space-y-6">
               <OnlineSalesSection disabled={!businessManager} value={salesSettingsOf(settings)} onChange={(v) => setSettings((x) => ({ ...x, sales: v }))} />
@@ -445,9 +448,20 @@ function BusinessSettings() {
         </div>
       )}
       {tab === 'forms' && <FormsSection disabled={!businessManager} />}
-      {tab === 'reviews' && <ReviewsSection />}
+      {tab === 'reviews' && (
+        <div className="space-y-6">
+          <label className="card flex items-start gap-3 text-sm" data-testid="reviews-public">
+            <input type="checkbox" className="mt-0.5 h-5 w-5 accent-teal-700" disabled={!canEdit} checked={reviewsArePublic(settings)} onChange={(e) => setSettings((x) => ({ ...x, reviews: { public: e.target.checked } }))} />
+            <span>
+              <span className="font-medium text-slate-800">{t('settings.reviewsPublic')}</span>
+              <span className="block text-slate-500">{t('settings.reviewsPublicHelp')}</span>
+            </span>
+          </label>
+          <ReviewsSection />
+        </div>
+      )}
       {tab === 'account' && (
-        <div className="grid items-start gap-6 lg:grid-cols-2">
+        <div className="grid items-stretch gap-6 lg:grid-cols-2">
           <AccountSection />
           <section className="card space-y-4">
             <LanguageSelect />
@@ -676,7 +690,7 @@ function UserModal({
           ) : <span />}
           <div className="flex gap-2">
             <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>
-            <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+            <button className="btn-primary" disabled={save.isPending}>{target ? t('common.done') : t('common.add')}</button>
           </div>
         </div>
       </form>

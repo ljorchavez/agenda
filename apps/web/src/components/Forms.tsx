@@ -402,7 +402,7 @@ export function FormsSection({ disabled }: { disabled: boolean }) {
           <ErrorText error={save.error} ns="forms" />
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={() => setDraft(null)}>{t('common.cancel')}</button>
-            <button className="btn-primary" disabled={save.isPending}>{t('common.save')}</button>
+            <button className="btn-primary" disabled={save.isPending}>{draft.id ? t('common.done') : t('common.add')}</button>
           </div>
         </form>
       ) : (
