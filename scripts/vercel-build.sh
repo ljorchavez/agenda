@@ -7,6 +7,7 @@ set -euo pipefail
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "Applying database migrations…"
   pnpm --filter @agenda/api db:migrate
+  pnpm --filter @agenda/api db:seed-missing || echo "Demo seed skipped"
 else
   echo "DATABASE_URL not set: skipping migrations"
 fi
