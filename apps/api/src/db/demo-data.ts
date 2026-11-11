@@ -839,7 +839,7 @@ async function seedDoctor() {
         hours: { days: [1, 2, 3, 4, 5, 6], open: '09:00', close: '19:00', slotMinutes: 30 },
         payments: {
           ...DEFAULT_PAYMENT_SETTINGS,
-          transfer: { bank: 'Banorte', accountHolder: 'Consultorio Médico Demo SC', clabe: '072090001234567891' },
+          transfer: { bank: 'Banorte', accountHolder: 'Consultorio Médico Demo SC', clabe: '072090001234567893' },
           deposit: { enabled: true, type: 'percent', value: 50 },
         },
         clinic: { legalName: 'Consultorio Médico Demo SC', healthLicense: '2506009876' },
