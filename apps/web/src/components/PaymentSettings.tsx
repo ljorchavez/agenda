@@ -13,8 +13,8 @@ import { useAuth } from '../lib/auth';
 import { money, toCents } from '../lib/format';
 import { ErrorText } from './ui';
 
-const OFFLINE: PaymentMethod[] = ['cash', 'card', 'transfer'];
-const ONLINE: PaymentMethod[] = ['mercadopago', 'spei'];
+const OFFLINE = ['cash', 'card', 'transfer'] as const;
+const ONLINE = ['mercadopago', 'spei'] as const;
 
 function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
   return (
@@ -55,7 +55,7 @@ export function PaymentSettingsSection({
     },
   });
 
-  const setMethod = (m: PaymentMethod, on: boolean) => onChange({ ...value, methods: { ...value.methods, [m]: on } });
+  const setMethod = (m: (typeof OFFLINE)[number] | (typeof ONLINE)[number], on: boolean) => onChange({ ...value, methods: { ...value.methods, [m]: on } });
   const d = value.deposit;
   const setDeposit = (patch: Partial<PaymentSettings['deposit']>) => onChange({ ...value, deposit: { ...d, ...patch } });
   const clabeError = value.transfer.clabe !== '' && !isValidClabe(value.transfer.clabe);
