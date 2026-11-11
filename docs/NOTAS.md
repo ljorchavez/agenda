@@ -279,6 +279,13 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
   Variables RESEND_API_KEY (protegida, solo envío) y EMAIL_FROM en Vercel. Registros de Resend en
   `resend._domainkey`, `send` y `rsend` (no tocan el correo de Google).
 
+## 11g. Correos al cliente y recordatorios (nov 2026)
+- Correo al agendar, cambiar y cancelar (si el cliente tiene correo; se apaga en Configuración).
+- Recordatorio por correo y WhatsApp a las horas que eligió el negocio.
+- Vercel gratis solo corre crons 1 vez al día: GitHub Actions (`.github/workflows/reminders.yml`)
+  llama `/api/cron/reminders` cada 15 min con un token OIDC de GitHub (sin secreto compartido).
+- Cuenta demo: demo@lugali.com / demo1234 (equipo demo también @lugali.com).
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México

@@ -1,19 +1,22 @@
 # Sends due appointment reminders (email and WhatsApp) every 15 minutes.
 # Vercel's free plan only runs crons once a day; this keeps reminders on time for free.
+# No secret needed: the job proves who it is with a GitHub OIDC token the API checks.
 name: Recordatorios
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
 jobs:
   reminders:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Enviar recordatorios pendientes
-        env:
-          REMINDERS_SECRET: ${{ secrets.REMINDERS_SECRET }}
         run: |
-          if [ -z "$REMINDERS_SECRET" ]; then echo "Falta el secreto REMINDERS_SECRET"; exit 0; fi
-          curl -fsS --max-time 120 -H "Authorization: Bearer $REMINDERS_SECRET" \
+          TOKEN=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=agenda-reminders" | jq -r .value)
+          curl -fsS --max-time 120 -H "Authorization: Bearer $TOKEN" \
             https://agenda-crm-rouge.vercel.app/api/cron/reminders
