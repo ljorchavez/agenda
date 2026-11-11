@@ -364,7 +364,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.getByTestId('form-question').nth(1).getByRole('combobox', { name: 'Tipo de respuesta' }).selectOption('choice');
   await page.getByTestId('form-question').nth(1).getByRole('textbox', { name: 'Opciones' }).fill('Correr\nNadar');
   await page.getByTestId('form-builder').getByText('Consulta de seguimiento').click();
-  await page.getByTestId('form-builder').getByRole('button', { name: 'Agregar' }).click();
+  await page.getByTestId('form-builder').getByRole('button', { name: 'Agregar', exact: true }).click();
   await page.getByTestId('forms-section').filter({ hasText: 'Cuestionario UI' }).waitFor({ timeout: 8000 }).catch(() => {});
   const made = (await api('/forms', null, ntok)).find((f) => f.name === 'Cuestionario UI');
   ok('builder saves a questionnaire with options and a booking type', made?.fields?.length === 2 && made.fields[1].options.join() === 'Correr,Nadar' && made.serviceIds.length === 1, JSON.stringify(made ?? null).slice(0, 200));

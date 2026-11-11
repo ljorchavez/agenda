@@ -36,7 +36,15 @@ export const toCouponDto = (c: Coupon, uses: number): CouponDto => ({
 });
 
 /** The coupon behind a code, or why it can't be used. */
-export async function findUsableCoupon(db: Q, tenantId: string, settings: TenantSettings, code: string, today: string): Promise<Coupon> {
+export async function findUsableCoupon(
+  db: Q,
+  tenantId: string,
+  settings: TenantSettings,
+  code: string,
+  today: string,
+  /** Booking it would apply to: the service must be covered and the customer within their limit */
+  use: { serviceId?: string | null; customerId?: string | null } = {},
+): Promise<Coupon> {
   if (!couponsEnabled(settings)) throw new AppError(422, 'coupon_invalid', 'Coupons are off');
   const c = await db.query.coupons.findFirst({
     where: and(eq(coupons.tenantId, tenantId), sql`upper(${coupons.code}) = ${code.trim().toUpperCase()}`),
@@ -45,6 +53,15 @@ export async function findUsableCoupon(db: Q, tenantId: string, settings: Tenant
   if (c.validUntil && c.validUntil < today) throw new AppError(422, 'coupon_expired', 'The code expired');
   if (c.maxUses != null && ((await couponUses(db, tenantId)).get(c.id) ?? 0) >= c.maxUses) {
     throw new AppError(422, 'coupon_used_up', 'The code has no uses left');
+  }
+  if (use.serviceId && c.serviceIds.length && !c.serviceIds.includes(use.serviceId)) {
+    throw new AppError(422, 'coupon_not_for_service', 'The code is not valid for this service');
+  }
+  if (use.customerId && c.maxUsesPerCustomer != null) {
+    const res = await db.execute<{ n: string }>(sql`
+      select count(*) as n from appointments
+      where tenant_id = ${tenantId} and coupon_id = ${c.id} and customer_id = ${use.customerId} and status <> 'cancelled'`);
+    if (Number(res.rows[0]?.n ?? 0) >= c.maxUsesPerCustomer) throw new AppError(422, 'coupon_already_used', 'This customer already used the code');
   }
   return c;
 }
@@ -79,14 +96,14 @@ export async function rewardProgress(db: Pick<Db, 'execute'>, tenantId: string, 
 export async function resolveDiscount(
   db: Q,
   tenant: { id: string; settings: TenantSettings },
-  o: { customerId: string | null; couponCode?: string | null; priceCents: number; today: string; soft?: boolean },
+  o: { customerId: string | null; serviceId?: string | null; couponCode?: string | null; priceCents: number; today: string; soft?: boolean },
 ): Promise<DiscountPreviewDto & { couponId: string | null }> {
   const progress = o.customerId ? await rewardProgress(db, tenant.id, o.customerId, tenant.settings) : null;
   let coupon: Coupon | null = null;
   let couponError: string | null = null;
   if (o.couponCode?.trim()) {
     try {
-      coupon = await findUsableCoupon(db, tenant.id, tenant.settings, o.couponCode, o.today);
+      coupon = await findUsableCoupon(db, tenant.id, tenant.settings, o.couponCode, o.today, { serviceId: o.serviceId, customerId: o.customerId });
     } catch (e) {
       if (!o.soft || !(e instanceof AppError)) throw e;
       couponError = e.code;
