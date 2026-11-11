@@ -1174,4 +1174,166 @@ d('API (integration)', () => {
     expect(taken.free).toBe(false);
     expect(taken.times.length).toBeGreaterThan(0);
   });
+
+  it('packages, memberships, gift cards, cash closing and commissions', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Ventas Prueba', businessType: 'barbershop', name: 'Dueña Ventas', email: 'ventas@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const other = (await call('POST', '/services', { name: 'Tinte', durationMin: 60, priceCents: 50000 }, tok)).body;
+    const ana = (await call('POST', '/resources', { name: 'Ana' }, tok)).body;
+    const cust = (await call('POST', '/customers', { name: 'Cliente Paquete', phone: '5588880021' }, tok)).body;
+
+    // Free plan: no packages, records or cash
+    expect((await call('POST', '/offerings', { kind: 'package', name: '5 cortes', priceCents: 80000, sessions: 5, validityDays: 60, serviceIds: [svc.id] }, tok)).status).toBe(402);
+    expect((await call('GET', '/cash/summary?day=2026-11-01', undefined, tok)).status).toBe(402);
+    expect((await call('PUT', '/tenant/plan', { plan: 'standard' }, tok)).status).toBe(200);
+
+    const pack = (await call('POST', '/offerings', { kind: 'package', name: '5 cortes', priceCents: 80000, sessions: 5, validityDays: 60, serviceIds: [svc.id] }, tok)).body;
+    const memb = (await call('POST', '/offerings', { kind: 'membership', name: 'Mensual ilimitado', priceCents: 120000, sessions: null }, tok)).body;
+    expect((await call('POST', '/offerings', { kind: 'package', name: 'Sin sesiones', priceCents: 1000 }, tok)).status).toBe(422);
+    expect((await call('POST', `/customers/${cust.id}/plans`, { offeringId: pack.id, method: 'cash' }, tok)).status).toBe(201);
+
+    const now = DateTime.now().setZone('America/Mexico_City');
+    const book = async (serviceId: string, h: number) =>
+      (await call('POST', '/appointments', { customerId: cust.id, serviceId, resourceId: ana.id, startsAt: now.set({ hour: h, minute: 0 }).toISO(), allowOverlap: true }, tok)).body;
+    const a1 = await book(svc.id, 9);
+    // Choices only after "Asistió", and only plans that cover the service
+    expect((await call('POST', `/appointments/${a1.id}/use-plan`, { planId: (await call('GET', `/appointments/${a1.id}/plans`, undefined, tok)).body.choices[0].id }, tok)).status).toBe(422);
+    await call('PATCH', `/appointments/${a1.id}`, { status: 'completed' }, tok);
+    const choices = (await call('GET', `/appointments/${a1.id}/plans`, undefined, tok)).body.choices;
+    expect(choices).toHaveLength(1);
+    expect(choices[0]).toMatchObject({ name: '5 cortes', sessionsLeft: 5 });
+    expect((await call('POST', `/appointments/${a1.id}/use-plan`, { planId: choices[0].id }, tok)).status).toBe(200);
+    const after = (await call('GET', `/appointments/${a1.id}`, undefined, tok)).body;
+    expect(after).toMatchObject({ priceCents: 0, discountCents: 20000, discountReason: 'package' });
+    let plans = (await call('GET', `/customers/${cust.id}/plans`, undefined, tok)).body.plans;
+    expect(plans[0]).toMatchObject({ sessionsUsed: 1, sessionsLeft: 4, status: 'active' });
+    expect(plans[0].uses).toHaveLength(1);
+    const tint = await book(other.id, 11);
+    await call('PATCH', `/appointments/${tint.id}`, { status: 'completed' }, tok);
+    expect((await call('GET', `/appointments/${tint.id}/plans`, undefined, tok)).body.choices).toHaveLength(0);
+    // Undoing "Asistió" gives the session back and the price
+    await call('PATCH', `/appointments/${a1.id}`, { status: 'confirmed' }, tok);
+    expect((await call('GET', `/appointments/${a1.id}`, undefined, tok)).body).toMatchObject({ priceCents: 20000, discountCents: 0 });
+    plans = (await call('GET', `/customers/${cust.id}/plans`, undefined, tok)).body.plans;
+    expect(plans[0].sessionsLeft).toBe(5);
+    // Membership: unlimited sessions for any service
+    await call('POST', `/customers/${cust.id}/plans`, { offeringId: memb.id, method: 'card' }, tok);
+    expect((await call('GET', `/appointments/${tint.id}/plans`, undefined, tok)).body.choices[0]).toMatchObject({ name: 'Mensual ilimitado', sessionsLeft: null });
+
+    // Gift card: sold to the customer, pays part of a booking, can't go below zero
+    const gift = (await call('POST', '/gift-cards', { amountCents: 30000, method: 'cash', customerId: cust.id, recipientName: 'Mamá' }, tok)).body;
+    expect(gift.code).toMatch(/^[A-Z2-9]{8}$/);
+    const a2 = await book(svc.id, 13);
+    expect((await call('POST', '/gift-cards/redeem', { code: gift.code.toLowerCase(), appointmentId: a2.id, amountCents: 20000 }, tok)).body.balanceCents).toBe(10000);
+    expect((await call('POST', '/gift-cards/redeem', { code: gift.code, appointmentId: a2.id, amountCents: 20000 }, tok)).body.error).toBe('gift_card_balance');
+    expect((await call('GET', `/gift-cards/${gift.code}`, undefined, tok)).body.balanceCents).toBe(10000);
+    await call('POST', '/payments', { customerId: cust.id, appointmentId: tint.id, amountCents: 50000, method: 'cash' }, tok);
+
+    // Cash closing: per method, sales of packages/memberships/gift cards, expected vs counted
+    const day = now.toISODate();
+    const sum = (await call('GET', `/cash/summary?day=${day}`, undefined, tok)).body;
+    expect(sum.byMethod).toMatchObject({ cash: 80000 + 30000 + 50000, card: 120000, gift_card: 20000 });
+    expect(sum.salesByKind).toMatchObject({ packages: 80000, memberships: 120000, giftCards: 30000 });
+    expect(sum.expectedCashCents).toBe(160000);
+    expect((await call('POST', '/cash/closings', { day, locationId: sum.locationId, countedCashCents: 159000, notes: 'Faltó cambio' }, tok)).status).toBe(201);
+    const closings = (await call('GET', '/cash/closings', undefined, tok)).body;
+    expect(closings[0]).toMatchObject({ differenceCents: -1000, closedByName: 'Dueña Ventas' });
+
+    // Commissions: 40% general, 50% on Tinte; a package session counts at full price
+    await call('PATCH', `/appointments/${a1.id}`, { status: 'completed' }, tok);
+    await call('POST', `/appointments/${a1.id}/use-plan`, { planId: choices[0].id }, tok);
+    expect((await call('PUT', `/resources/${ana.id}/commission`, { commissionPct: 40, commissionByService: { [other.id]: 50 } }, tok)).status).toBe(200);
+    const rep = (await call('GET', `/reports/commissions?from=${day}&to=${day}`, undefined, tok)).body;
+    expect(rep.rows[0]).toMatchObject({ resourceName: 'Ana', completed: 2, soldCents: 70000, commissionCents: 8000 + 25000 });
+
+    // A team member sees only their commissions and can't do cash
+    await call('POST', '/users', { name: 'Ana', email: 'ventas-ana@test.mx', password: 'password123', role: 'staff', resourceId: ana.id }, tok);
+    const anaTok = (await call('POST', '/auth/login', { email: 'ventas-ana@test.mx', password: 'password123' })).body.token;
+    expect((await call('GET', `/reports/commissions?from=${day}&to=${day}`, undefined, anaTok)).body.rows).toHaveLength(1);
+    expect((await call('GET', `/cash/summary?day=${day}`, undefined, anaTok)).status).toBe(403);
+    expect((await call('POST', `/customers/${cust.id}/plans`, { offeringId: pack.id, method: 'cash' }, anaTok)).status).toBe(403);
+  });
+
+  it('client record: encrypted, only for who may see it; photos need private storage', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Expediente Prueba', businessType: 'nutrition', name: 'Dra Exp', email: 'exp@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const cust = (await call('POST', '/customers', { name: 'Paciente Exp', phone: '5588880031' }, tok)).body;
+    expect((await call('GET', `/customers/${cust.id}/record`, undefined, tok)).status).toBe(402);
+    await call('PUT', '/tenant/plan', { plan: 'standard' }, tok);
+    expect((await call('PUT', `/customers/${cust.id}/record`, { allergies: 'Penicilina', conditions: 'Hipotiroidismo; levotiroxina', consent: true }, tok)).status).toBe(200);
+    expect((await call('POST', `/customers/${cust.id}/record/notes`, { body: 'Plan bajo en sodio' }, tok)).status).toBe(201);
+    const rec = (await call('GET', `/customers/${cust.id}/record`, undefined, tok)).body;
+    expect(rec).toMatchObject({ allergies: 'Penicilina', consentByName: 'Dra Exp', photosEnabled: false });
+    expect(rec.notes[0]).toMatchObject({ body: 'Plan bajo en sodio', authorName: 'Dra Exp' });
+    // Encrypted at rest
+    const { getDb } = await import('../src/db/client.js');
+    const { sql } = await import('drizzle-orm');
+    const raw = (await getDb().execute(sql`select allergies_enc, (select body_enc from record_notes where customer_id = ${cust.id} limit 1) as note from customer_records where customer_id = ${cust.id}`)).rows[0] as { allergies_enc: string; note: string };
+    expect(raw.allergies_enc).not.toContain('Penicilina');
+    expect(raw.note).not.toContain('sodio');
+    // Team members: only for customers they attended; front desk none
+    const svc = (await call('POST', '/services', { name: 'Consulta', durationMin: 30, priceCents: 50000 }, tok)).body;
+    const r1 = (await call('POST', '/resources', { name: 'Nutrióloga Uno' }, tok)).body;
+    await call('POST', '/resources', { name: 'Nutrióloga Dos' }, tok);
+    await call('POST', '/users', { name: 'Uno', email: 'exp-uno@test.mx', password: 'password123', role: 'staff', resourceId: r1.id }, tok);
+    const unoTok = (await call('POST', '/auth/login', { email: 'exp-uno@test.mx', password: 'password123' })).body.token;
+    expect((await call('GET', `/customers/${cust.id}/record`, undefined, unoTok)).status).toBe(403);
+    await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, resourceId: r1.id, startsAt: DateTime.now().plus({ days: 1 }).toISO(), allowOverlap: true }, tok);
+    expect((await call('GET', `/customers/${cust.id}/record`, undefined, unoTok)).status).toBe(200);
+    // Photos: refused cleanly while the private store isn't connected
+    const form = new FormData();
+    form.append('file', new File([new Uint8Array([255, 216, 255])], 'a.jpg', { type: 'image/jpeg' }));
+    const up = await app.request(`/api/customers/${cust.id}/record/photos`, { method: 'POST', body: form, headers: { authorization: `Bearer ${tok}` } });
+    expect(up.status).toBe(502);
+  });
+
+  it('verified reviews and calendar links', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Reseñas Prueba', businessType: 'barbershop', name: 'Dueño Reseñas', email: 'resenas@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    const svc = (await call('POST', '/services', { name: 'Corte', durationMin: 30, priceCents: 20000 }, tok)).body;
+    const res = (await call('POST', '/resources', { name: 'Toño' }, tok)).body;
+    const cust = (await call('POST', '/customers', { name: 'María González Pérez', phone: '5588880041' }, tok)).body;
+    const appt = (await call('POST', '/appointments', { customerId: cust.id, serviceId: svc.id, resourceId: res.id, startsAt: DateTime.now().plus({ days: 1 }).toISO(), allowOverlap: true }, tok)).body;
+    const token = appt.managePath.split('/c/')[1];
+    expect((await call('GET', `/public/reviews/${token}`)).body.notYet).toBe(true);
+    expect((await call('POST', `/public/reviews/${token}`, { rating: 5 })).status).toBe(422);
+    await call('PATCH', `/appointments/${appt.id}`, { status: 'completed' }, tok);
+    expect((await call('GET', `/public/manage/${token}`)).body.reviewPath).toBe(`/r/${token}`);
+    expect((await call('POST', `/public/reviews/${token}`, { rating: 5, comment: 'Excelente' })).status).toBe(201);
+    expect((await call('POST', `/public/reviews/${token}`, { rating: 1, comment: 'Otra' })).status).toBe(409);
+    expect((await call('POST', '/public/reviews/x.y', { rating: 5 })).status).toBe(404);
+    const slug = reg.tenant.slug;
+    let pub = (await call('GET', `/public/${slug}`)).body.reviews;
+    expect(pub).toMatchObject({ average: 5, count: 1 });
+    expect(pub.recent[0]).toMatchObject({ authorName: 'María G.', comment: 'Excelente' });
+    const list = (await call('GET', '/reviews', undefined, tok)).body;
+    await call('PATCH', `/reviews/${list.items[0].id}`, { reply: '¡Gracias, María!' }, tok);
+    expect((await call('GET', `/public/${slug}`)).body.reviews.recent[0].reply).toBe('¡Gracias, María!');
+    await call('PATCH', `/reviews/${list.items[0].id}`, { hidden: true }, tok);
+    pub = (await call('GET', `/public/${slug}`)).body.reviews;
+    expect(pub.count).toBe(0);
+
+    // Calendar: business link and per team member, no phone numbers; regenerate kills the old one
+    const feeds = (await call('GET', '/calendar-feeds', undefined, tok)).body as { scope: string; url: string; resourceId: string | null }[];
+    const biz = feeds.find((f) => f.scope === 'business')!;
+    expect(feeds.some((f) => f.resourceId === res.id)).toBe(true);
+    const path = new URL(biz.url).pathname;
+    const ics = await app.request(path);
+    const text = await ics.text();
+    expect(ics.headers.get('content-type')).toContain('text/calendar');
+    expect(text).toContain('SUMMARY:Corte · María');
+    expect(text).not.toContain('5588880041');
+    expect(text).not.toContain('González');
+    const again = (await call('POST', '/calendar-feeds/regenerate', { scope: 'business' }, tok)).body;
+    expect(again.url).not.toBe(biz.url);
+    expect((await app.request(path)).status).toBe(404);
+    expect((await app.request(new URL(again.url).pathname)).status).toBe(200);
+  });
 });
