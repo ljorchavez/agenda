@@ -15,6 +15,7 @@ import {
   type PublicBookingResult,
   type PublicBusinessDto,
   type PublicClassSessionDto,
+  type PublicFormDto,
 } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
 import { ErrorText, Loading } from '../components/ui';

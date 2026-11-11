@@ -1357,10 +1357,14 @@ d('API (integration)', () => {
     const raw = (await getDb().execute(sql`select answers_enc from form_responses where customer_id = ${appt.customerId}`)).rows[0] as { answers_enc: string };
     expect(raw.answers_enc).not.toContain('Subir');
     // Team members who didn't attend can't see answers nor edit forms
-    const rx = (await call('POST', '/resources', { name: 'Nutrióloga X' }, tok)).body;
-    await call('POST', '/users', { name: 'Equipo', email: 'forms-rec@test.mx', password: 'password123', role: 'staff', resourceId: rx.id }, tok);
+    const ra = (await call('POST', '/resources', { name: 'Nutrióloga A' }, tok)).body;
+    const rb = (await call('POST', '/resources', { name: 'Nutrióloga B' }, tok)).body;
+    await call('POST', '/users', { name: 'Equipo', email: 'forms-rec@test.mx', password: 'password123', role: 'staff', resourceId: rb.id }, tok);
     const recTok = (await call('POST', '/auth/login', { email: 'forms-rec@test.mx', password: 'password123' })).body.token;
-    expect((await call('GET', `/appointments/${appt.id}/forms`, undefined, recTok)).status).toBe(403);
+    const other = (await call('POST', '/customers', { name: 'Paciente de A', phone: '5577770009' }, tok)).body;
+    const theirs = (await call('POST', '/appointments', { customerId: other.id, serviceId: s1.id, resourceId: ra.id, startsAt: DateTime.now().plus({ days: 3 }).toISO(), allowOverlap: true }, tok)).body;
+    expect((await call('GET', `/appointments/${theirs.id}/forms`, undefined, recTok)).status).toBe(403);
+    expect((await call('POST', `/appointments/${theirs.id}/forms`, { formId: f.body.id, values: { objetivo: 'Bajar' } }, recTok)).status).toBe(403);
     expect((await call('POST', '/forms', body, recTok)).status).toBe(403);
     // Listing shows the count; deleting the form keeps the answers
     expect((await call('GET', '/forms', undefined, tok)).body[0].responses).toBe(1);
