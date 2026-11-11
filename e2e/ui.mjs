@@ -240,6 +240,8 @@ ok('social links are round icon buttons', (await page.getByTestId('social-whatsa
     return avatar ? getComputedStyle(avatar).zIndex : null;
   });
   ok('profile picture sits over the banner', z === '10', String(z));
+  await page.goto('http://localhost:5173/b/nutricion-demo');
+  await page.getByTestId('public-reviews').waitFor({ timeout: 8000 }).catch(() => {});
   const order = await page.evaluate(() => {
     const flow = document.querySelector('.card.space-y-6');
     const reviews = document.querySelector('[data-testid=public-reviews]');
@@ -274,9 +276,9 @@ await page.goto('http://localhost:5173/agenda');
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
 await page.locator('[role=listbox] button').first().click();
 if (await page.locator('#na-svc').count()) await page.selectOption('#na-svc', { index: 1 });
-await page.fill('#na-coupon', 'bienvenida');
-await page.getByTestId('discount-preview').filter({ hasText: 'BIENVENIDA' }).waitFor({ timeout: 8000 }).catch(() => {});
-ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('BIENVENIDA'));
+await page.fill('#na-coupon', 'amigo50');
+await page.getByTestId('discount-preview').filter({ hasText: 'AMIGO50' }).waitFor({ timeout: 8000 }).catch(() => {});
+ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('AMIGO50'));
 await page.keyboard.press('Escape');
 // ---- Packages, records, commissions, cash, reviews and calendar
 await page.goto('http://localhost:5173/settings?tab=packages');
