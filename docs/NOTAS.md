@@ -136,7 +136,7 @@ Necesario:
 
 ---
 
-## 9. Página pública personalizada (pendiente)
+## 9. Página pública personalizada (hecho, salvo la vista previa al compartir)
 Cada negocio ya tiene su página `/b/<slug>`. Agregar personalización sencilla, para todos los
 planes, guardada en la configuración del negocio (sin migración) y editable en Configuración →
 Negocio con vista previa:
@@ -144,7 +144,7 @@ Negocio con vista previa:
 - Galería sencilla del lugar (4–8 fotos), para todos los planes.
 - Redes (Instagram, Facebook, TikTok) y botón de WhatsApp.
 - Aviso destacado opcional ("Cerramos el 24", "2x1 los martes").
-- Vista previa al compartir la liga en WhatsApp con su banner y nombre.
+- **Pendiente:** vista previa al compartir la liga en WhatsApp con su banner y nombre.
 - **Mismos colores de Agenda para todos** (sin color de marca ni plantillas).
 - Después: dominio propio por negocio (Premium).
 
@@ -235,8 +235,8 @@ mismo precio) y mostrar el precio final antes de confirmar si solo queda uno má
 
 ### Pendientes (en orden)
 1. App instalable desde el navegador (PWA) e íconos: los dueños usan el celular.
-2. Cobros: suscripción con tarjeta, y anticipo/depósito al reservar para evitar que el cliente
-   no llegue (venta en línea de paquetes y tarjetas de regalo también espera esto).
+2. Cobros: suscripción con tarjeta (falta proveedor). El anticipo al reservar ya está hecho;
+   falta vender paquetes y tarjetas de regalo en línea.
 3. Facturación CFDI: AgendaPro aún no la tiene; es nuestra mejor ventaja.
 4. Confianza: testimonios de negocios reales, dominio propio y soporte por WhatsApp.
 5. Sincronización completa con Google Calendar en los dos sentidos (OAuth):
