@@ -574,6 +574,76 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('rentals show price per hour', padel?.priceUnit === 'hour' && padel.priceFromCents > 0, JSON.stringify(padel));
 }
 
+// ---- Packages, memberships and gift cards (yoga demo; cleans up after itself)
+{
+  const { token } = await asDemo('yoga-demo');
+  const off = await call('GET', '/api/offerings', null, token);
+  check('offerings list', off.status === 200 && Array.isArray(off.body), off.text.slice(0, 200));
+  const created = await call('POST', '/api/offerings', { kind: 'package', name: `E2E paquete ${Date.now()}`, priceCents: 100, sessions: 3, validityDays: 30 }, token);
+  check('create a package', created.status === 201, created.text);
+  const cust = (await call('GET', '/api/customers?limit=1', null, token)).body?.items?.[0];
+  const sold = await call('POST', `/api/customers/${cust?.id}/plans`, { offeringId: created.body?.id, method: 'cash' }, token);
+  check('sell a package to a customer', sold.status === 201, sold.text);
+  const plans = await call('GET', `/api/customers/${cust?.id}/plans`, null, token);
+  const mine = plans.body?.plans?.find((p) => p.id === sold.body?.id);
+  check('customer sees sessions left and expiry', mine?.sessionsLeft === 3 && !!mine?.expiresOn, JSON.stringify(mine));
+  check('cancel the sold package', (await call('POST', `/api/customer-plans/${sold.body?.id}/cancel`, null, token)).status === 204);
+  check('remove it from the catalog', (await call('DELETE', `/api/offerings/${created.body?.id}`, null, token)).status === 204);
+  const gift = await call('POST', '/api/gift-cards', { amountCents: 100, method: 'cash', customerId: cust?.id, recipientName: 'E2E' }, token);
+  check('sell a gift card', gift.status === 201 && /^[A-Z2-9]{8}$/.test(gift.body?.code ?? ''), gift.text);
+  const bal = await call('GET', `/api/gift-cards/${gift.body?.code}`, null, token);
+  check('gift card balance lookup', bal.body?.balanceCents === 100, bal.text);
+}
+
+// ---- Client record (nutrition demo): encrypted, decrypted only for allowed logins
+{
+  const { token } = await asDemo('nutricion-demo');
+  const cust = (await call('GET', '/api/customers?limit=1', null, token)).body?.items?.[0];
+  const put = await call('PUT', `/api/customers/${cust?.id}/record`, { consent: true }, token);
+  check('record saves consent', put.status === 200, put.text);
+  const note = await call('POST', `/api/customers/${cust?.id}/record/notes`, { body: 'Nota E2E' }, token);
+  check('record adds a dated note with author', note.status === 201 && note.body?.authorName, note.text);
+  const rec = await call('GET', `/api/customers/${cust?.id}/record`, null, token);
+  check('record reads back (decrypted)', rec.status === 200 && rec.body?.notes?.some((n) => n.body === 'Nota E2E') && !!rec.body?.consentAt, rec.text.slice(0, 200));
+  check('record is never cached', /no-store/.test(rec.headers.get('cache-control') ?? ''));
+  check('delete the E2E note', (await call('DELETE', `/api/record-notes/${note.body?.id}`, null, token)).status === 204);
+  check('record photo storage reported', typeof rec.body?.photosEnabled === 'boolean', String(rec.body?.photosEnabled));
+}
+
+// ---- Commissions and cash closing (barbershop demo)
+{
+  const { token } = await asDemo('barberia-demo');
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  const from = new Date(Date.now() - 30 * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  const com = await call('GET', `/api/reports/commissions?from=${from}&to=${today}`, null, token);
+  check('commission report', com.status === 200 && Array.isArray(com.body?.rows), com.text.slice(0, 200));
+  const sum = await call('GET', `/api/cash/summary?day=${today}`, null, token);
+  check('cash summary by method', sum.status === 200 && typeof sum.body?.byMethod?.cash === 'number' && 'gift_card' in (sum.body?.byMethod ?? {}), sum.text.slice(0, 200));
+  const hist = await call('GET', '/api/cash/closings', null, token);
+  check('cash closing history', hist.status === 200 && Array.isArray(hist.body), hist.text.slice(0, 200));
+  // Calendar link: secret .ics with no phones
+  const feeds = await call('GET', '/api/calendar-feeds', null, token);
+  const biz = feeds.body?.find?.((f) => f.scope === 'business');
+  check('calendar links listed', feeds.status === 200 && !!biz?.url, feeds.text.slice(0, 200));
+  if (biz) {
+    const ics = await fetch(biz.url.replace(/^https?:\/\/[^/]+/, BASE));
+    const txt = await ics.text();
+    check('iCal feed serves a calendar', ics.status === 200 && txt.startsWith('BEGIN:VCALENDAR') && /text\/calendar/.test(ics.headers.get('content-type') ?? ''), txt.slice(0, 80));
+    check('iCal has no phone numbers', !/\+52\d{8,}/.test(txt));
+  }
+  check('bad iCal token -> 404', (await call('GET', '/api/ical/nope.ics')).status === 404);
+  // Reviews
+  const rv = await call('GET', '/api/reviews', null, token);
+  check('reviews list for the business', rv.status === 200 && Array.isArray(rv.body?.items), rv.text.slice(0, 200));
+}
+{
+  const pub = await call('GET', '/api/public/barberia-demo');
+  check('public page carries the review summary', typeof pub.body?.reviews?.count === 'number' && Array.isArray(pub.body?.reviews?.recent), JSON.stringify(pub.body?.reviews ?? null).slice(0, 200));
+  const d = await call('GET', '/api/public-directory');
+  check('directory entries carry rating', d.body?.entries?.every((e) => typeof e.ratingCount === 'number'));
+  check('bad review link -> 404', (await call('GET', '/api/public/reviews/x.y')).status === 404);
+}
+
 // ---- Password reset and login throttling (random email, so real accounts are never locked)
 {
   const ghost = `e2e-${Date.now()}@example.com`;

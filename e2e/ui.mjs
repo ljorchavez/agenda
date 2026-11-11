@@ -250,6 +250,62 @@ await page.fill('#na-coupon', 'bienvenida');
 await page.getByTestId('discount-preview').filter({ hasText: 'BIENVENIDA' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('coupon discount previewed', ((await page.getByTestId('discount-preview').textContent().catch(() => '')) ?? '').includes('BIENVENIDA'));
 await page.keyboard.press('Escape');
+// ---- Packages, records, commissions, cash, reviews and calendar
+await page.goto('http://localhost:5173/settings?tab=packages');
+await page.getByTestId('offerings-section').filter({ hasText: '5 cortes' }).waitFor({ timeout: 8000 }).catch(() => {});
+ok('packages tab shows the catalog', ((await page.getByTestId('offerings-section').textContent()) ?? '').includes('5 cortes'));
+ok('gift cards listed', ((await page.getByTestId('gift-cards-section').textContent()) ?? '').includes('REGALO24'));
+await page.goto('http://localhost:5173/settings?tab=reviews');
+await page.getByTestId('reviews-section').filter({ hasText: '★' }).waitFor({ timeout: 8000 }).catch(() => {});
+ok('reviews tab shows reviews with replies', ((await page.getByTestId('reviews-section').textContent()) ?? '').includes('Respuesta del negocio'));
+await page.goto('http://localhost:5173/settings?tab=account');
+await page.getByTestId('calendar-links').waitFor({ timeout: 8000 }).catch(() => {});
+const icsUrl = await page.getByTestId('calendar-links').locator('input').first().inputValue().catch(() => '');
+const ics = icsUrl ? await (await fetch(icsUrl.replace(/^https?:\/\/[^/]+/, 'http://localhost:3000'))).text() : '';
+ok('calendar link serves iCal', ics.startsWith('BEGIN:VCALENDAR') && !/\+52\d{8}/.test(ics), icsUrl);
+await page.goto('http://localhost:5173/payments?tab=commissions');
+await page.getByTestId('commissions-tab').locator('tbody tr').first().waitFor({ timeout: 8000 }).catch(() => {});
+ok('commissions report has rows', (await page.getByTestId('commissions-tab').locator('tbody tr').count()) > 0);
+await page.goto('http://localhost:5173/payments?tab=cash');
+await page.getByTestId('cash-history').locator('li').first().waitFor({ timeout: 8000 }).catch(() => {});
+ok('cash closing history shown', ((await page.getByTestId('cash-history').textContent()) ?? '').includes('Faltaron'));
+await page.fill('#cash-counted', '1');
+ok('cash difference computed', ((await page.getByTestId('cash-diff').textContent().catch(() => '')) ?? '').includes('$'));
+// Customer with a package: sessions left; record section with a note
+const withPlan = (await api('/customers?limit=200', null, tok)).items;
+let planCustomer = null;
+for (const c of withPlan) {
+  const pl = await api(`/customers/${c.id}/plans`, null, tok);
+  if (pl.plans?.some((p) => p.status === 'active')) { planCustomer = c; break; }
+}
+if (planCustomer) {
+  await page.goto(`http://localhost:5173/customers/${planCustomer.id}`);
+  await page.getByTestId('customer-plans').waitFor({ timeout: 8000 }).catch(() => {});
+  ok('customer shows sessions left', ((await page.getByTestId('sessions-left').first().textContent().catch(() => '')) ?? '').match(/Queda|Ilimitadas/) != null);
+  await page.getByTestId('record-section').waitFor({ timeout: 8000 }).catch(() => {});
+  await page.getByTestId('record-section').getByRole('textbox', { name: 'Notas clínicas o de servicio' }).fill('Nota de prueba UI');
+  await page.getByTestId('record-section').getByRole('button', { name: 'Agregar' }).click();
+  await page.getByTestId('record-notes').filter({ hasText: 'Nota de prueba UI' }).waitFor({ timeout: 6000 }).catch(() => {});
+  ok('record note added with author', ((await page.getByTestId('record-notes').textContent()) ?? '').includes('Nota de prueba UI'));
+} else ok('a customer with a package exists', false);
+// Public: rating and reviews on the booking page and the directory; leave a review
+await page.goto('http://localhost:5173/b/barberia-demo');
+await page.getByTestId('public-reviews').waitFor({ timeout: 8000 }).catch(() => {});
+ok('booking page shows rating and reviews', (await page.getByTestId('rating-badge').count()) > 0 && (await page.getByTestId('public-reviews').count()) > 0);
+await page.goto('http://localhost:5173/');
+await page.getByTestId('rating-badge').first().waitFor({ timeout: 8000 }).catch(() => {});
+ok('directory cards show rating', (await page.getByTestId('rating-badge').count()) > 0);
+const past = (await api(`/appointments?from=${encodeURIComponent(new Date(Date.now() - 20 * 864e5).toISOString())}&to=${encodeURIComponent(new Date(Date.now() - 864e5).toISOString())}`, null, tok)).filter((a) => a.status === 'completed');
+const listed = new Set((await api('/reviews', null, tok)).items.map((r) => r.appointmentId));
+const toReview = past.find((a) => !listed.has(a.id));
+if (toReview) {
+  await page.goto(`http://localhost:5173${toReview.managePath}`);
+  await page.getByTestId('review-link').click();
+  await page.getByRole('button', { name: '5', exact: true }).click();
+  await page.getByRole('button', { name: 'Enviar reseña' }).click();
+  await page.getByTestId('review-done').waitFor({ timeout: 6000 }).catch(() => {});
+  ok('customer leaves a verified review', await page.getByTestId('review-done').isVisible().catch(() => false));
+} else ok('a completed booking to review exists', false);
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));
