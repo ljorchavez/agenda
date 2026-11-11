@@ -1353,7 +1353,7 @@ const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nut
       history: {
         ocupacion: 'Contadora', estadoCivil: 'Casado(a)', escolaridad: 'Licenciatura', tipoSangre: 'O+',
         heredofamiliares: 'Madre con diabetes mellitus tipo 2. Padre con hipertensión arterial.',
-        patologicos: 'Niega cirugías y hospitalizaciones.', alergias: 'Penicilina', medicamentos: 'Ninguno', tabaco: 'Nunca', alcohol: 'Ocasional',
+        patologicos: 'Niega cirugías y hospitalizaciones.', alergias: 'Penicilina', medicamentosActuales: 'Ninguno', tabaco: 'Nunca', alcohol: 'Ocasional',
         noPatologicos: 'Sedentaria, dieta alta en carbohidratos. Esquema de vacunación completo.',
         padecimientoActual: 'Refiere poliuria y polidipsia de 3 meses de evolución, cansancio por las tardes. Glucosa capilar en farmacia de 210 mg/dL.',
         habitus: 'Consciente, orientada, bien hidratada.', signos: { ta: '130/85', fc: 78, fr: 16, temp: 36.6, spo2: 97, peso: 82, talla: 162 },
@@ -1421,7 +1421,7 @@ const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nut
     },
     {
       history: {
-        ocupacion: 'Comerciante', estadoCivil: 'Casado(a)', tipoSangre: 'B+', patologicos: 'Hipertensión controlada con losartán', alergias: 'Negadas', medicamentos: 'Losartán 50 mg',
+        ocupacion: 'Comerciante', estadoCivil: 'Casado(a)', tipoSangre: 'B+', patologicos: 'Hipertensión controlada con losartán', alergias: 'Negadas', medicamentosActuales: 'Losartán 50 mg',
         motivo: 'Dolor intenso en muela inferior izquierda', padecimientoActual: 'Dolor espontáneo y nocturno de 4 días en 36, no cede con analgésicos.',
         signos: { ta: '135/85', fc: 80 }, tejidosBlandos: 'Sin aumento de volumen', encias: 'Sin bolsas', oclusion: 'Clase II', higiene: 'Deficiente',
         odontograma: { '36': { state: 'caries', surfaces: ['O', 'M', 'D'] }, '46': { state: 'corona' }, '17': { state: 'endodoncia' }, '27': { state: 'ausente' } },
@@ -1432,8 +1432,7 @@ const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nut
         {
           procedimiento: 'Endodoncia en 36: acceso, conductometría, instrumentación rotatoria y obturación.', piezas: '36', anestesia: 'Articaína 4 %, 2 cartuchos', materiales: 'Gutapercha, cemento sellador',
           odontograma: { '36': { state: 'endodoncia' }, '46': { state: 'corona' }, '17': { state: 'endodoncia' }, '27': { state: 'ausente' } },
-          medicamentos: [{ name: 'Ibuprofeno 400 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 8 horas', duration: '3 días' }],
-          indicaciones: 'Evitar masticar del lado izquierdo hasta colocar corona.', proxima: 'Toma de impresión para corona',
+          indicaciones: 'Ibuprofeno 400 mg cada 8 horas por 3 días si hay dolor. Evitar masticar del lado izquierdo hasta colocar corona.', proxima: 'Toma de impresión para corona',
         },
       ],
     },
@@ -1549,7 +1548,7 @@ async function seedClinical() {
       c.evolutions.forEach((e, k) => { if (p.ids[k + 1]) sign(p.customer_id, p.ids[k + 1]!, evoTpl, e, at(k + 1)); });
       if (i === 0) {
         // A correction to the history: signed and attached, the original never changes
-        const content = { texto: ADDENDA[type], sobre: `${hist.title} del ${hist.signedAt.toISOString().slice(0, 10)}` };
+        const content = { texto: ADDENDA[type], sobre: `${hist.title} del ${hist.signedAt!.toISOString().slice(0, 10)}` };
         const signedAt = new Date(at(1).getTime() + 70 * 60e3);
         notes.push({
           tenantId: t.id, customerId: p.customer_id, appointmentId: p.ids[1] ?? null, template: 'addendum', kind: 'addendum', title: 'Nota aclaratoria',

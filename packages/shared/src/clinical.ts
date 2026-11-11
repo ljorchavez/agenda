@@ -143,7 +143,7 @@ const personales: ClinicalSection = {
   fields: [
     { id: 'patologicos', label: 'Personales patológicos (enfermedades, cirugías, hospitalizaciones, transfusiones, traumatismos)', type: 'longtext' },
     { id: 'alergias', label: 'Alergias', type: 'text' },
-    { id: 'medicamentos', label: 'Medicamentos actuales', type: 'text' },
+    { id: 'medicamentosActuales', label: 'Medicamentos actuales', type: 'text' },
     { id: 'tabaco', label: 'Tabaco', type: 'select', options: ['Nunca', 'Exfumador(a)', 'Fuma actualmente'] },
     { id: 'alcohol', label: 'Alcohol', type: 'select', options: ['No', 'Ocasional', 'Frecuente'] },
     { id: 'sustancias', label: 'Otras sustancias', type: 'text' },
