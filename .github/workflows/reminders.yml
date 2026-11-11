@@ -14,5 +14,6 @@ jobs:
         env:
           REMINDERS_SECRET: ${{ secrets.REMINDERS_SECRET }}
         run: |
+          if [ -z "$REMINDERS_SECRET" ]; then echo "Falta el secreto REMINDERS_SECRET"; exit 0; fi
           curl -fsS --max-time 120 -H "Authorization: Bearer $REMINDERS_SECRET" \
             https://agenda-crm-rouge.vercel.app/api/cron/reminders
