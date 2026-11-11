@@ -201,9 +201,6 @@ export const services = pgTable(
     priceCents: integer('price_cents').notNull().default(0),
     active: boolean('active').notNull().default(true),
     photoUrl: text('photo_url'),
-    /** Commission: general percent, replaced per service by commissionByService[serviceId] */
-    commissionPct: numeric('commission_pct', { precision: 5, scale: 2 }),
-    commissionByService: jsonb('commission_by_service').$type<Record<string, number>>().notNull().default({}),
     ...timestamps,
   },
   (t) => [index('services_tenant_idx').on(t.tenantId)],
@@ -237,6 +234,9 @@ export const resources = pgTable(
     /** Own working hours; null = the hours of its location */
     hours: jsonb('hours').$type<WorkHours>(),
     photoUrl: text('photo_url'),
+    /** Commission: general percent, replaced per service by commissionByService[serviceId] */
+    commissionPct: numeric('commission_pct', { precision: 5, scale: 2 }),
+    commissionByService: jsonb('commission_by_service').$type<Record<string, number>>().notNull().default({}),
     ...timestamps,
   },
   (t) => [
