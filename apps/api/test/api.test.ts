@@ -1646,7 +1646,8 @@ d('API (integration)', () => {
     const pt = /\?t=([0-9a-f-]{36}\.\d{10}\.[A-Za-z0-9_-]{24})/.exec(sentInTests[0]!.text)![1]!;
     const portal = async (t: string) => {
       const res = await app.request('/api/public/portal', { headers: { 'x-portal-token': t } });
-      return { status: res.status, body: await res.json() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return { status: res.status, body: (await res.json()) as any };
     };
     let p = await portal(pt);
     expect(p.status).toBe(200);

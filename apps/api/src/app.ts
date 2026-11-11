@@ -73,8 +73,9 @@ export function createApp() {
   // Public (no auth)
   app.route('/', directoryRoutes);
   app.route('/', manageRoutes);
-  app.route('/', publicRoutes);
+  // Before publicRoutes: /public/portal and /public/prescriptions would match /public/:slug
   app.route('/', portalRoutes);
+  app.route('/', publicRoutes);
   app.route('/', webhookRoutes);
   app.route('/', publicReviewRoutes);
   app.route('/', publicCalendarRoutes);
