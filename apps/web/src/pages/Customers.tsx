@@ -33,21 +33,26 @@ export function CustomersPage() {
   const { sort, toggle } = useSort<SortKey>({ key: 'name', dir: 'asc' }, FIRST_DIR);
   const [creating, setCreating] = useState(false);
   const [page, setPage] = useState(0);
+  const [archived, setArchived] = useState(false);
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(q.trim()), 250);
     return () => clearTimeout(id);
   }, [q]);
 
-  const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}`, false, { size: PAGE_SIZE, index: page });
+  const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}${archived ? '&archived=1' : ''}`, false, { size: PAGE_SIZE, index: page });
   // A new search or order starts again on page 1
-  useEffect(() => setPage(0), [debounced, sort.key, sort.dir]);
+  useEffect(() => setPage(0), [debounced, sort.key, sort.dir, archived]);
 
   return (
     <>
       <PageHeader title={t('customers.title')} actions={<button className="btn-primary" onClick={() => setCreating(true)}>{t('customers.new')}</button>} />
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <input type="search" className={`${FILTER_CTRL} w-full sm:!w-80`} aria-label={t('customers.searchPlaceholder')} placeholder={t('customers.searchPlaceholder')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} data-testid="show-archived" />
+          {t('customers.showArchived')}
+        </label>
       </div>
 
       {isLoading ? (

@@ -25,6 +25,8 @@ import {
   type BusinessHours,
   type FormField,
   type OnlinePurchase,
+  type ClinicalAuthor,
+  type Professional,
   type PlanId,
   type WorkHours,
   type TenantSettings,
@@ -94,6 +96,8 @@ export const users = pgTable(
     name: text('name').notNull(),
     /** Sessions issued before this moment are rejected (set when the password is reset). */
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
+    /** Cédula, institution and specialty for clinical documents */
+    professional: jsonb('professional').$type<Professional | null>(),
     ...timestamps,
   },
   (t) => [uniqueIndex('users_email_idx').on(t.email)],
@@ -181,6 +185,12 @@ export const customers = pgTable(
     email: text('email'),
     notes: text('notes'),
     birthday: date('birthday'),
+    /** Patient data (health businesses) */
+    sex: text('sex').$type<'F' | 'M' | 'X'>(),
+    address: text('address'),
+    curp: text('curp'),
+    /** Hidden from lists; clinical records must be kept 5 years (NOM-004 5.4) */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [
@@ -618,3 +628,45 @@ export const formResponses = pgTable('form_responses', {
   authorName: text('author_name'),
   ...timestamps,
 });
+
+/** Clinical documents (historia clínica, notas, receta, consentimiento…). Signed ones never change. */
+export const clinicalNotes = pgTable(
+  'clinical_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+    appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
+    template: text('template').notNull(),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    /** encryptSecret(JSON of the field values) */
+    contentEnc: text('content_enc').notNull(),
+    status: text('status').$type<'draft' | 'signed'>().notNull().default('draft'),
+    authorId: uuid('author_id'),
+    /** Snapshot of who wrote/signed it (name, cédula, specialty) */
+    author: jsonb('author').$type<ClinicalAuthor | null>(),
+    signedAt: timestamp('signed_at', { withTimezone: true }),
+    contentHash: text('content_hash'),
+    amendsId: uuid('amends_id'),
+    ...timestamps,
+  },
+  (t) => [index('clinical_notes_customer_idx').on(t.tenantId, t.customerId, t.createdAt)],
+);
+export type ClinicalNote = typeof clinicalNotes.$inferSelect;
+
+/** Who opened, signed, printed or exported a clinical record (bitácora). */
+export const recordAccessLog = pgTable(
+  'record_access_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id'),
+    userName: text('user_name'),
+    action: text('action').notNull(),
+    detail: text('detail'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('record_access_log_customer_idx').on(t.tenantId, t.customerId, t.createdAt)],
+);

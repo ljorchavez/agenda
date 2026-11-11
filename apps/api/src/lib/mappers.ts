@@ -96,6 +96,10 @@ export function toCustomerDto(c: Customer): CustomerDto {
     email: c.email,
     notes: c.notes,
     birthday: c.birthday,
+    sex: c.sex ?? null,
+    address: c.address ?? null,
+    curp: c.curp ?? null,
+    archived: Boolean(c.archivedAt),
     createdAt: iso(c.createdAt)!,
   };
 }

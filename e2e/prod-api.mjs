@@ -718,6 +718,38 @@ const mxDay = (i) => new Date(Date.now() + i * 864e5).toLocaleDateString('en-CA'
   check('demo login unaffected by someone else being locked', demo.status === 200);
 }
 
+// ---- Expediente clínico (NOM-004 / NOM-013) on the health demos
+{
+  const login = await call('POST', '/api/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const slugs = ['medico-demo', 'dental-demo', 'psicologia-demo', 'fisioterapia-demo', 'nutricion-demo'];
+  check('demo owner has the five health demos', slugs.every((s) => login.body?.businesses?.some((b) => b.slug === s)), JSON.stringify(login.body?.businesses?.map((b) => b.slug)));
+  check('demo owner has a professional license', Boolean(login.body?.user?.professional?.license));
+  for (const slug of ['medico-demo', 'dental-demo']) {
+    const b = login.body?.businesses?.find((x) => x.slug === slug);
+    if (!b) continue;
+    const tok = (await call('POST', '/api/auth/switch', { tenantId: b.id }, login.body.token)).body?.token;
+    const list = (await call('GET', '/api/customers?limit=120', null, tok)).body?.items ?? [];
+    let rec = null;
+    let patient = null;
+    for (const c of list) {
+      const r = await call('GET', `/api/customers/${c.id}/clinical`, null, tok);
+      if (r.body?.notes?.some((n) => n.status === 'signed')) { rec = r.body; patient = c; break; }
+    }
+    check(`${slug}: patient record with signed documents`, Boolean(rec));
+    if (!rec) continue;
+    check(`${slug}: norm`, rec.norm === (slug === 'dental-demo' ? 'NOM-013-SSA2-2015' : 'NOM-004-SSA3-2012'), rec.norm);
+    check(`${slug}: signed notes carry author, cédula and hash`, rec.notes.filter((n) => n.status === 'signed').every((n) => n.author?.name && n.contentHash?.length === 64));
+    const signed = rec.notes.find((n) => n.status === 'signed');
+    const edit = await call('PUT', `/api/clinical-notes/${signed.id}`, { content: { x: 1 } }, tok);
+    check(`${slug}: signed note cannot change`, edit.status === 409, edit.text);
+    const del = await call('DELETE', `/api/customers/${patient.id}`, null, tok);
+    check(`${slug}: patient with record is kept (retention)`, del.status === 409 && del.body?.error === 'record_retention', del.text);
+    const log = await call('GET', `/api/customers/${patient.id}/clinical-log`, null, tok);
+    check(`${slug}: bitácora logs the views`, log.status === 200 && log.body.some((l) => l.action === 'view'));
+    if (slug === 'dental-demo') check('dental: odontogram', Boolean(rec.odontogram));
+  }
+}
+
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed  (${mx(Date.now())})`);
 process.exit(fail ? 1 : 0);

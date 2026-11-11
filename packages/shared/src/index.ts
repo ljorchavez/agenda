@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { professionalSchema, type Professional } from './clinical';
+
+export * from './clinical';
 
 // ---------- Enums ----------
 
@@ -50,6 +53,8 @@ export const CATEGORY_TYPES: Record<BusinessCategory, readonly BusinessType[]> =
   pets: ['veterinary'],
   other: ['other'],
 };
+/** Health giros keep a clinical record (NOM-004; dental: NOM-013) and say "pacientes". */
+export const isHealthType = (t: BusinessType | string | null | undefined): boolean => CATEGORY_TYPES.health.includes(t as BusinessType);
 export const businessCategory = (t: BusinessType): BusinessCategory =>
   BUSINESS_CATEGORIES.find((c) => CATEGORY_TYPES[c].includes(t)) ?? 'other';
 
@@ -438,6 +443,14 @@ export const tenantSettingsSchema = z.object({
       online: z.boolean(),
       /** Gift card amounts offered online, in cents (none = no gift cards online) */
       giftCardAmounts: z.array(z.number().int().min(10_000).max(5_000_000)).max(6).default([]),
+    })
+    .optional(),
+  /** Health businesses: data printed on clinical documents */
+  clinic: z
+    .object({
+      legalName: z.string().trim().max(200).nullable().optional(),
+      /** Aviso de funcionamiento / licencia sanitaria */
+      healthLicense: z.string().trim().max(100).nullable().optional(),
     })
     .optional(),
   /** Verified reviews on the booking page and the directory (default: shown) */
@@ -914,6 +927,8 @@ export const accountUpdateSchema = z
     name: z.string().trim().min(2).max(120).optional(),
     currentPassword: z.string().max(200).optional(),
     newPassword: z.string().min(8).max(200).optional(),
+    /** Health professionals: cédula, institution, specialty */
+    professional: professionalSchema.optional(),
   })
   .refine((x) => !x.newPassword || Boolean(x.currentPassword), { path: ['currentPassword'], message: 'currentPassword required' });
 export type AccountUpdateInput = z.infer<typeof accountUpdateSchema>;
@@ -945,6 +960,19 @@ export const customerInputSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable()
     .optional(),
+  /** Patient data for the clinical record (health businesses) */
+  sex: z.enum(['F', 'M', 'X']).nullable().optional(),
+  address: z.string().trim().max(300).nullable().optional(),
+  curp: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{4}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d$/, 'curp_format')
+    .nullable()
+    .optional()
+    .or(z.literal('').transform(() => null)),
+  /** Archived customers are hidden from lists (records kept 5 years) */
+  archived: z.boolean().optional(),
 });
 export type CustomerInput = z.infer<typeof customerInputSchema>;
 
@@ -1173,6 +1201,8 @@ export interface SessionUser {
   resourceId: string | null;
   /** Location this login is limited to in the current business (null = all) */
   locationId: string | null;
+  /** Cédula, institution and specialty shown on clinical documents */
+  professional: Professional | null;
 }
 
 export interface TenantDto {
@@ -1220,6 +1250,10 @@ export interface CustomerDto {
   email: string | null;
   notes: string | null;
   birthday: string | null;
+  sex: 'F' | 'M' | 'X' | null;
+  address: string | null;
+  curp: string | null;
+  archived: boolean;
   createdAt: string;
 }
 

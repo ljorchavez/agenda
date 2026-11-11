@@ -1,18 +1,21 @@
 /**
  * Demo data. Run with `pnpm db:seed`, and reset every night by the `/api/cron/reset-demo` job.
  * One owner login (demo@agenda.mx / demo1234) for every demo business, switchable in the app:
- * nutrition clinic, restaurant, barbershop with two locations, yoga studio, padel club and medical practice.
+ * nutrition clinic, restaurant, barbershop with two locations, yoga studio, padel club, medical practice,
+ * dental clinic, psychologist and physiotherapy (health giros with clinical records).
  * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
  * (team members), pedro@ (nutrition staff). Plus clearly-labelled `demo-*` directory listings.
  */
 import { and, eq, inArray, like, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS, type FormAnswerValue, type FormField } from '@agenda/shared';
+import { randomUUID } from 'node:crypto';
+import { CLINICAL_TEMPLATES, DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS, type FormAnswerValue, type FormField } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { getDb } from './client.js';
 import {
   appointments,
   cashClosings,
+  clinicalNotes,
   classSessions,
   coupons,
   customerPlans,
@@ -34,6 +37,7 @@ import {
 } from './schema.js';
 import { encryptSecret } from '../lib/crypto.js';
 import { saveResponse } from '../lib/forms.js';
+import { signatureHash } from '../routes/clinical.js';
 
 const TZ = 'America/Mexico_City';
 
@@ -111,6 +115,7 @@ export async function seedDemo() {
           transfer: { bank: 'BBVA', accountHolder: 'Nutrición Demo SA de CV', clabe: '012180001234567899' },
           deposit: { enabled: true, type: 'percent', value: 30 },
         },
+        clinic: { legalName: 'Nutrición Demo SA de CV', healthLicense: null },
       },
     })
     .returning();
@@ -226,9 +231,11 @@ export async function seedDemo() {
   await seedClasses();
   await seedPadel();
   await seedDoctor();
+  await seedHealthDemos();
   await seedPageLooks();
   await seedDirectory();
   await seedExtras();
+  await seedClinical();
   console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
 }
 
@@ -835,6 +842,7 @@ async function seedDoctor() {
           transfer: { bank: 'Banorte', accountHolder: 'Consultorio Médico Demo SC', clabe: '072090001234567891' },
           deposit: { enabled: true, type: 'percent', value: 50 },
         },
+        clinic: { legalName: 'Consultorio Médico Demo SC', healthLicense: '2506009876' },
       },
     })
     .returning();
@@ -1249,4 +1257,331 @@ async function seedReviews() {
     }
   }
   console.log(`Seeded packages, records, commissions, cash closings and reviews`);
+}
+
+// ---------- Health giros: dentist, psychologist, physiotherapist and their clinical records ----------
+
+/** Practice with one or two practitioners: first visits, follow-ups and payments. */
+async function seedPractice(o: {
+  slug: string; name: string; type: 'dental' | 'psychology' | 'physiotherapy'; desc: string; address: string; neighborhood: string;
+  lat: number; lng: number; phone: string; services: [string, number, number][]; pros: [string, string, string][]; perDay: number;
+}) {
+  const db = getDb();
+  await resetTenant(o.slug);
+  const [tenant] = await db
+    .insert(tenants)
+    .values({
+      name: o.name, slug: o.slug, businessType: o.type, phone: o.phone, timezone: TZ, description: o.desc,
+      address: o.address, neighborhood: o.neighborhood, city: 'Colima', state: 'Colima', lat: o.lat, lng: o.lng,
+      directoryListed: true, plan: 'premium',
+      settings: {
+        ...DEFAULT_TENANT_SETTINGS,
+        hours: { days: [1, 2, 3, 4, 5, 6], open: '09:00', close: '19:00', slotMinutes: 30 },
+        payments: { ...DEFAULT_PAYMENT_SETTINGS, deposit: { enabled: true, type: 'percent', value: 30 } },
+        clinic: { legalName: `${o.name.replace(' Demo', '')} SC`, healthLicense: '2506001234' },
+      },
+    })
+    .returning();
+  const tenantId = tenant!.id;
+  await addOwner(db, tenantId);
+  const svc = await db.insert(services).values(o.services.map(([name, durationMin, priceCents]) => ({ tenantId, name, durationMin, priceCents }))).returning();
+  const pros = await db.insert(resources).values(o.pros.map(([name, color, description]) => ({ tenantId, name, color, description }))).returning();
+  const custs = await demoCustomers(tenantId, 45, o.phone.slice(3, 8), 240);
+  const seen = new Set<string>();
+  const now = DateTime.now().setZone(TZ);
+  const rows: (typeof appointments.$inferInsert)[] = [];
+  for (let d = -180; d <= 14; d++) {
+    const day = now.plus({ days: d }).startOf('day');
+    if (day.weekday === 7) continue;
+    for (const pro of pros) {
+      for (let k = 0; k < o.perDay; k++) {
+        if (rand() < 0.35) continue;
+        const start = day.set({ hour: [9, 10, 11, 12, 16, 17, 18][(k * 3 + pro.name.length) % 7]! });
+        if (d >= 0 && start < now) continue;
+        const cu = pick(custs);
+        const service = seen.has(cu.id) ? pick(svc.slice(1)) : svc[0]!;
+        seen.add(cu.id);
+        rows.push({
+          tenantId, customerId: cu.id, serviceId: service.id, resourceId: pro.id,
+          startsAt: start.toJSDate(), endsAt: start.plus({ minutes: service.durationMin }).toJSDate(),
+          status: start < now ? pastStatus() : rand() > 0.5 ? 'confirmed' : 'scheduled',
+          priceCents: service.priceCents, source: rand() > 0.5 ? 'online' : 'staff',
+        });
+      }
+    }
+  }
+  // One booking per practitioner and hour
+  const unique = [...new Map(rows.map((r) => [`${r.resourceId}${(r.startsAt as Date).toISOString()}`, r])).values()];
+  const inserted = (await insertChunked(appointments, unique)) as unknown as (typeof appointments.$inferSelect)[];
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'transfer'], depositPct: 30, online: 0.4 });
+  console.log(`Seeded ${o.name} with ${inserted.length} appointments, ${paid} payments`);
+}
+
+async function seedHealthDemos() {
+  await seedPractice({
+    slug: 'dental-demo', name: 'Clínica Dental Demo', type: 'dental', phone: '+523121112233',
+    desc: 'Odontología general, endodoncia y ortodoncia. Expediente clínico conforme a la NOM-013. Cuenta de demostración.',
+    address: 'Av. Constitución 1450', neighborhood: 'Residencial Esmeralda', lat: 19.2615, lng: -103.7105,
+    services: [['Valoración y limpieza', 60, 70000], ['Resina', 45, 90000], ['Endodoncia', 90, 350000], ['Ajuste de ortodoncia', 30, 60000]],
+    pros: [['Dra. Mónica Lara', '#0891b2', 'Odontología general'], ['Dr. Felipe Rosas', '#7c3aed', 'Endodoncia y ortodoncia']], perDay: 4,
+  });
+  await seedPractice({
+    slug: 'psicologia-demo', name: 'Consultorio de Psicología Demo', type: 'psychology', phone: '+523122223344',
+    desc: 'Terapia individual, de pareja y para adolescentes. Presencial y en línea. Cuenta de demostración.',
+    address: 'Calle Venustiano Carranza 820', neighborhood: 'Jardines de Vista Hermosa', lat: 19.2555, lng: -103.7152,
+    services: [['Primera sesión (valoración)', 60, 90000], ['Sesión individual', 50, 80000], ['Terapia de pareja', 60, 110000]],
+    pros: [['Psic. Andrea Solís', '#db2777', 'Terapia cognitivo-conductual']], perDay: 5,
+  });
+  await seedPractice({
+    slug: 'fisioterapia-demo', name: 'Fisioterapia Demo', type: 'physiotherapy', phone: '+523123334455',
+    desc: 'Rehabilitación deportiva, columna y postoperatorio. Cuenta de demostración.',
+    address: 'Av. Tecnológico 330', neighborhood: 'Lomas de Circunvalación', lat: 19.2528, lng: -103.703,
+    services: [['Valoración fisioterapéutica', 60, 70000], ['Sesión de fisioterapia', 50, 55000], ['Punción seca', 40, 60000]],
+    pros: [['L.F.T. Ramón Iñiguez', '#ea580c', 'Rehabilitación deportiva'], ['L.F.T. Carla Peña', '#16a34a', 'Columna y postura']], perDay: 5,
+  });
+}
+
+/** A signature drawn on screen (SVG data URL, enough for the demo). */
+const scribble = (seedN: number) => {
+  const pts = Array.from({ length: 9 }, (_, i) => `${10 + i * 22},${30 + Math.round(Math.sin(i * 1.7 + seedN) * 14)}`).join(' ');
+  return `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60"><polyline points="${pts}" fill="none" stroke="#1e293b" stroke-width="2"/></svg>`).toString('base64')}`;
+};
+
+const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nutrition', { history: Record<string, unknown>; evolutions: Record<string, unknown>[] }[]> = {
+  medical: [
+    {
+      history: {
+        ocupacion: 'Contadora', estadoCivil: 'Casado(a)', escolaridad: 'Licenciatura', tipoSangre: 'O+',
+        heredofamiliares: 'Madre con diabetes mellitus tipo 2. Padre con hipertensión arterial.',
+        patologicos: 'Niega cirugías y hospitalizaciones.', alergias: 'Penicilina', medicamentos: 'Ninguno', tabaco: 'Nunca', alcohol: 'Ocasional',
+        noPatologicos: 'Sedentaria, dieta alta en carbohidratos. Esquema de vacunación completo.',
+        padecimientoActual: 'Refiere poliuria y polidipsia de 3 meses de evolución, cansancio por las tardes. Glucosa capilar en farmacia de 210 mg/dL.',
+        habitus: 'Consciente, orientada, bien hidratada.', signos: { ta: '130/85', fc: 78, fr: 16, temp: 36.6, spo2: 97, peso: 82, talla: 162 },
+        cabeza: 'Sin alteraciones', cuello: 'Sin adenomegalias', torax: 'Campos pulmonares bien ventilados', abdomen: 'Globoso, blando, no doloroso', miembros: 'Sin edema',
+        resultados: 'Glucosa en ayuno 168 mg/dL, HbA1c 7.9 %.',
+        diagnosticos: [{ code: 'E11.9', text: 'Diabetes mellitus tipo 2 sin complicaciones' }, { code: 'E66.9', text: 'Obesidad' }],
+        pronostico: 'Bueno para la vida, reservado para la función si no hay apego.',
+        medicamentos: [{ name: 'Metformina 850 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 12 horas con alimentos', duration: '30 días' }],
+        indicaciones: 'Plan de alimentación, caminata 30 minutos diarios. Glucosa en ayuno y HbA1c en 3 meses.',
+      },
+      evolutions: [
+        {
+          evolucion: 'Refiere mejoría de la poliuria. Buen apego a metformina, leve molestia gástrica la primera semana.',
+          signos: { ta: '125/80', fc: 74, peso: 79.5, talla: 162 }, resultados: 'Glucosa capilar en ayuno 132 mg/dL.',
+          diagnosticos: [{ code: 'E11.9', text: 'Diabetes mellitus tipo 2 en control' }], pronostico: 'Bueno',
+          medicamentos: [{ name: 'Metformina 850 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 12 horas', duration: '90 días' }],
+          indicaciones: 'Continuar tratamiento. Cita en 3 meses con HbA1c.',
+        },
+      ],
+    },
+    {
+      history: {
+        ocupacion: 'Maestro', estadoCivil: 'Casado(a)', tipoSangre: 'A+', heredofamiliares: 'Padre con infarto a los 60 años.',
+        patologicos: 'Apendicectomía a los 20 años.', alergias: 'Negadas', tabaco: 'Exfumador(a)', alcohol: 'Ocasional',
+        padecimientoActual: 'Cefalea occipital de predominio matutino de 2 semanas. Cifras de 150/95 en casa.',
+        signos: { ta: '150/95', fc: 82, fr: 16, temp: 36.4, spo2: 98, peso: 88, talla: 175 },
+        cabeza: 'Sin alteraciones', torax: 'Ruidos cardiacos rítmicos', abdomen: 'Cicatriz en fosa iliaca derecha', miembros: 'Pulsos presentes',
+        diagnosticos: [{ code: 'I10', text: 'Hipertensión arterial sistémica' }], pronostico: 'Bueno con tratamiento',
+        medicamentos: [{ name: 'Losartán 50 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 24 horas', duration: '30 días' }],
+        indicaciones: 'Dieta baja en sodio, registro de presión en casa, perfil de lípidos y química sanguínea.',
+      },
+      evolutions: [
+        {
+          evolucion: 'Sin cefalea. Registro en casa promedio 128/82.', signos: { ta: '128/82', fc: 72 }, resultados: 'Colesterol total 215 mg/dL, LDL 140 mg/dL.',
+          diagnosticos: [{ code: 'I10', text: 'Hipertensión arterial en control' }, { code: 'E78.0', text: 'Hipercolesterolemia' }], pronostico: 'Bueno',
+          medicamentos: [{ name: 'Losartán 50 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 24 horas', duration: '90 días' }],
+          indicaciones: 'Continuar losartán. Dieta baja en grasas saturadas. Control en 3 meses.',
+        },
+      ],
+    },
+  ],
+  dental: [
+    {
+      history: {
+        ocupacion: 'Estudiante', estadoCivil: 'Soltero(a)', tipoSangre: 'O+', heredofamiliares: 'Sin importancia', alergias: 'Negadas', tabaco: 'Nunca', alcohol: 'No',
+        motivo: 'Dolor al masticar del lado derecho', padecimientoActual: 'Dolor a estímulos fríos en molar superior derecho de 1 mes, sin dolor nocturno.',
+        signos: { ta: '110/70', fc: 70 }, cabezaCuello: 'Sin alteraciones', atm: 'Sin chasquidos ni dolor', tejidosBlandos: 'Sin lesiones', encias: 'Inflamación leve en zona posterior', oclusion: 'Clase I', higiene: 'Regular',
+        odontograma: { '16': { state: 'caries', surfaces: ['O', 'D'] }, '26': { state: 'obturado', surfaces: ['O'] }, '36': { state: 'caries', surfaces: ['O'] }, '18': { state: 'ausente' }, '48': { state: 'extraccion' } },
+        resultados: 'Radiografía periapical 16: caries en dentina sin compromiso pulpar.',
+        diagnosticos: [{ code: 'K02.1', text: 'Caries de la dentina (16, 36)' }, { code: 'K05.1', text: 'Gingivitis crónica' }],
+        pronostico: 'Favorable', plan: '1. Profilaxis. 2. Resinas en 16 y 36. 3. Valorar extracción del 48 (tercer molar).',
+      },
+      evolutions: [
+        {
+          procedimiento: 'Profilaxis y resina en 16 (O-D) con aislamiento absoluto.', piezas: '16', anestesia: 'Lidocaína 2 % con epinefrina, 1 cartucho', materiales: 'Resina A2, adhesivo universal',
+          odontograma: { '16': { state: 'obturado', surfaces: ['O', 'D'] }, '26': { state: 'obturado', surfaces: ['O'] }, '36': { state: 'caries', surfaces: ['O'] }, '18': { state: 'ausente' }, '48': { state: 'extraccion' } },
+          indicaciones: 'No comer en 2 horas. Técnica de cepillado e hilo dental.', proxima: 'Resina en 36',
+        },
+        {
+          procedimiento: 'Resina en 36 (O).', piezas: '36', anestesia: 'Lidocaína 2 %, 1 cartucho', materiales: 'Resina A2',
+          odontograma: { '16': { state: 'obturado', surfaces: ['O', 'D'] }, '26': { state: 'obturado', surfaces: ['O'] }, '36': { state: 'obturado', surfaces: ['O'] }, '18': { state: 'ausente' }, '48': { state: 'extraccion' } },
+          indicaciones: 'Control en 6 meses.', proxima: 'Valoración de tercer molar',
+        },
+      ],
+    },
+    {
+      history: {
+        ocupacion: 'Comerciante', estadoCivil: 'Casado(a)', tipoSangre: 'B+', patologicos: 'Hipertensión controlada con losartán', alergias: 'Negadas', medicamentos: 'Losartán 50 mg',
+        motivo: 'Dolor intenso en muela inferior izquierda', padecimientoActual: 'Dolor espontáneo y nocturno de 4 días en 36, no cede con analgésicos.',
+        signos: { ta: '135/85', fc: 80 }, tejidosBlandos: 'Sin aumento de volumen', encias: 'Sin bolsas', oclusion: 'Clase II', higiene: 'Deficiente',
+        odontograma: { '36': { state: 'caries', surfaces: ['O', 'M', 'D'] }, '46': { state: 'corona' }, '17': { state: 'endodoncia' }, '27': { state: 'ausente' } },
+        resultados: 'Radiografía: caries profunda en 36 con compromiso pulpar.', diagnosticos: [{ code: 'K04.0', text: 'Pulpitis irreversible (36)' }],
+        pronostico: 'Favorable con endodoncia', plan: 'Endodoncia en 36 y corona. Profilaxis.',
+      },
+      evolutions: [
+        {
+          procedimiento: 'Endodoncia en 36: acceso, conductometría, instrumentación rotatoria y obturación.', piezas: '36', anestesia: 'Articaína 4 %, 2 cartuchos', materiales: 'Gutapercha, cemento sellador',
+          odontograma: { '36': { state: 'endodoncia' }, '46': { state: 'corona' }, '17': { state: 'endodoncia' }, '27': { state: 'ausente' } },
+          medicamentos: [{ name: 'Ibuprofeno 400 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 8 horas', duration: '3 días' }],
+          indicaciones: 'Evitar masticar del lado izquierdo hasta colocar corona.', proxima: 'Toma de impresión para corona',
+        },
+      ],
+    },
+  ],
+  psychology: [
+    {
+      history: {
+        ocupacion: 'Diseñadora', estadoCivil: 'Soltero(a)', escolaridad: 'Licenciatura',
+        motivo: '"Me siento con mucha presión en el trabajo y no puedo dormir."', historiaProblema: 'Inicia hace 4 meses con cambio de puesto. Insomnio de conciliación y preocupación constante.',
+        tratamientosPrevios: 'Ninguno', heredofamiliares: 'Madre con ansiedad', familia: 'Vive sola; buena relación con su hermana.', medicos: 'Sin enfermedades. Sin medicamentos.', sustancias: 'Café 4 tazas al día',
+        apariencia: 'Aliñada, cooperadora', animo: 'Ansioso, afecto congruente', pensamiento: 'Coherente, rumiaciones sobre el trabajo', orientacion: 'Orientada en las tres esferas', juicio: 'Conservado', riesgo: 'Sin ideación de daño. Riesgo bajo.',
+        pruebas: 'Inventario de Ansiedad de Beck: 24 (moderada).',
+        diagnosticos: [{ code: 'F41.1', text: 'Trastorno de ansiedad generalizada' }], pronostico: 'Favorable',
+        plan: 'Terapia cognitivo-conductual semanal, 12 sesiones. Psicoeducación, higiene del sueño y reestructuración cognitiva.',
+      },
+      evolutions: [
+        { objetivo: 'Psicoeducación sobre ansiedad', desarrollo: 'Se explica el modelo cognitivo. Se identifican pensamientos automáticos en el trabajo.', observaciones: 'Ánimo ansioso, participativa.', tareas: 'Registro de pensamientos diario', plan: 'Revisar registro' },
+        { objetivo: 'Reestructuración cognitiva', desarrollo: 'Se revisa el registro. Cuestionamiento socrático de "si me equivoco me corren".', observaciones: 'Mejor sueño (6 horas). Afecto más amplio.', tareas: 'Respiración diafragmática 2 veces al día', plan: 'Exposición a escenarios temidos' },
+      ],
+    },
+  ],
+  physiotherapy: [
+    {
+      history: {
+        ocupacion: 'Corredor amateur, ingeniero', estadoCivil: 'Casado(a)',
+        motivo: 'Dolor en rodilla derecha al correr', diagnosticoMedico: 'Síndrome de dolor patelofemoral', antecedentes: 'Esguince de tobillo derecho hace 2 años.', actividad: 'Corre 25 km por semana',
+        eva: 6, localizacion: 'Cara anterior de rodilla derecha', tipo: 'Aumenta al bajar escaleras y después de 5 km',
+        signos: { ta: '120/75', fc: 62 }, postura: 'Valgo de rodilla derecha', arcos: 'Flexión de rodilla completa con dolor al final', fuerza: 'Glúteo medio derecho 4/5, cuádriceps 4/5', pruebas: 'Clarke positivo', marcha: 'Sin alteraciones',
+        diagnosticoFisio: 'Dolor patelofemoral derecho por debilidad de glúteo medio y cuádriceps.', diagnosticos: [{ code: 'M22.2', text: 'Trastornos patelofemorales' }], pronostico: 'Bueno',
+        objetivos: 'Disminuir dolor a EVA ≤2 y volver a correr 10 km.', plan: '10 sesiones, 2 por semana: terapia manual, fortalecimiento y readaptación a la carrera.',
+      },
+      evolutions: [
+        { evaInicial: 6, tecnicas: 'Electroterapia TENS 15 min, liberación miofascial de tensor de la fascia lata.', ejercicios: 'Puente glúteo, almeja con banda, sentadilla isométrica.', evaFinal: 3, respuesta: 'Buena tolerancia.', casa: 'Ejercicios 3 series de 12 diario' },
+        { evaInicial: 4, tecnicas: 'Terapia manual y vendaje neuromuscular.', ejercicios: 'Step down, sentadilla a una pierna asistida.', evaFinal: 2, respuesta: 'Corre 3 km sin dolor.', casa: 'Progresión de carrera 2 km + 1 km' },
+      ],
+    },
+  ],
+  nutrition: [
+    {
+      history: {
+        ocupacion: 'Abogada', estadoCivil: 'Casado(a)',
+        motivo: 'Bajar de peso y mejorar la energía', heredofamiliares: 'Padre con diabetes tipo 2', patologicos: 'Hipotiroidismo', medicamentos: 'Levotiroxina 50 mcg', alergias: 'Lactosa (intolerancia)',
+        actividad: 'Caminata 2 veces por semana', agua: 1.2, horarios: 'Desayuna 10:00, come 16:00, cena 22:00. Duerme 6 horas.', recordatorio: 'Café con pan dulce; torta; tacos de guisado; refresco.',
+        medidas: { peso: 78, talla: 160, cintura: 92, cadera: 108, grasa: 38 }, bioquimicos: 'Glucosa 104 mg/dL, triglicéridos 180 mg/dL.',
+        diagnosticoNutricio: 'Obesidad grado I con riesgo cardiometabólico por circunferencia de cintura.', pronostico: 'Bueno con apego',
+        plan: '1,500 kcal: 50 % HC, 25 % proteína, 25 % lípidos. 5 tiempos de comida.', metas: 'Bajar 4 kg en 2 meses',
+      },
+      evolutions: [
+        { medidas: { peso: 76.2, talla: 160, cintura: 89, grasa: 36.5 }, adherencia: 'Bueno', evolucion: 'Bajó 1.8 kg. Más energía, sin refresco entre semana.', ajustes: 'Agregar colación de proteína por la tarde.' },
+        { medidas: { peso: 74.9, talla: 160, cintura: 87, grasa: 35.4 }, adherencia: 'Regular', evolucion: 'Bajó 1.3 kg. Fines de semana con excesos.', ajustes: 'Opciones para comer fuera.' },
+      ],
+    },
+  ],
+};
+
+const ADDENDA: Record<keyof typeof CASES, string> = {
+  medical: 'Se corrige: la alergia referida es a sulfas, no a penicilina.',
+  dental: 'Se aclara: el dolor a estímulos fríos inició hace 6 semanas, no hace 1 mes.',
+  psychology: 'Se aclara: el cambio de puesto fue hace 5 meses; el insomnio inició 1 mes después.',
+  physiotherapy: 'Se corrige: el esguince previo fue de tobillo izquierdo.',
+  nutrition: 'Se corrige: la levotiroxina es de 75 mcg, no de 50 mcg.',
+};
+
+/**
+ * Clinical records for the health demos: patient data, signed histories and progress notes linked
+ * to their visits (odontograms in dental), a signed informed consent, an addendum and a draft.
+ */
+async function seedClinical() {
+  const db = getDb();
+  const owner = await db.query.users.findFirst({ where: eq(users.email, DEMO_OWNER.email) });
+  if (!owner) return;
+  const professional = { license: '9876543', institution: 'Universidad de Colima', specialty: null, specialtyLicense: null };
+  await db.update(users).set({ professional }).where(eq(users.id, owner.id));
+  const author = { name: owner.name, ...professional };
+  const TEMPLATES = {
+    medical: ['medical_history', 'medical_evolution'], dental: ['dental_history', 'dental_evolution'], psychology: ['psychology_history', 'psychology_session'],
+    physiotherapy: ['physio_history', 'physio_session'], nutrition: ['nutrition_history', 'nutrition_followup'],
+  } as const;
+  const STREETS = ['Calle Madero 120, Centro', 'Av. Pino Suárez 455, Jardines', 'Calle Aldama 80, El Moralete', 'Av. Tecnológico 900, Lomas', 'Calle Obregón 33, San Pablo'];
+  let total = 0;
+  for (const slug of ['medico-demo', 'dental-demo', 'psicologia-demo', 'fisioterapia-demo', 'nutricion-demo']) {
+    const t = await tenantBySlug(slug);
+    if (!t) continue;
+    const type = t.businessType as keyof typeof CASES;
+    const [histTpl, evoTpl] = TEMPLATES[type];
+    const titleOf = (id: string) => CLINICAL_TEMPLATES[id]!.title;
+    // Patients with at least 3 completed visits, the ones a practice would have a record for
+    const done = await db.execute<{ customer_id: string; ids: string[]; starts: string[] }>(sql`
+      select customer_id, array_agg(id::text order by starts_at) as ids, array_agg(starts_at::text order by starts_at) as starts
+      from appointments where tenant_id = ${t.id} and status = 'completed'
+      group by customer_id having count(*) >= 3 order by min(starts_at) limit 6`);
+    const notes: (typeof clinicalNotes.$inferInsert)[] = [];
+    const sign = (customerId: string, appointmentId: string | null, template: string, content: Record<string, unknown>, at: Date, extra: Partial<typeof clinicalNotes.$inferInsert> = {}) => {
+      const signedAt = new Date(at.getTime() + 50 * 60e3);
+      const row = {
+        id: randomUUID(), tenantId: t.id, customerId, appointmentId, template, kind: CLINICAL_TEMPLATES[template]!.kind, title: titleOf(template),
+        contentEnc: encryptSecret(JSON.stringify(content)), status: 'signed' as const, authorId: owner.id, author, signedAt,
+        contentHash: signatureHash({ content, template, customerId, author, signedAt }), createdAt: at, ...extra,
+      };
+      notes.push(row);
+      return row;
+    };
+    for (const [i, p] of done.rows.entries()) {
+      const c = CASES[type][i % CASES[type].length]!;
+      const female = i % 2 === 0;
+      const year = 1965 + ((i * 7) % 40);
+      await db.update(customers).set({
+        sex: female ? 'F' : 'M', birthday: `${year}-${String(1 + (i % 12)).padStart(2, '0')}-${String(3 + i * 4).padStart(2, '0')}`,
+        address: `${STREETS[i % STREETS.length]}, Colima, Col.`,
+      }).where(eq(customers.id, p.customer_id));
+      const at = (k: number) => new Date(p.starts[k]!);
+      const hist = sign(p.customer_id, p.ids[0]!, histTpl, c.history, at(0));
+      c.evolutions.forEach((e, k) => { if (p.ids[k + 1]) sign(p.customer_id, p.ids[k + 1]!, evoTpl, e, at(k + 1)); });
+      if (i === 0) {
+        // A correction to the history: signed and attached, the original never changes
+        const content = { texto: ADDENDA[type], sobre: `${hist.title} del ${hist.signedAt.toISOString().slice(0, 10)}` };
+        const signedAt = new Date(at(1).getTime() + 70 * 60e3);
+        notes.push({
+          tenantId: t.id, customerId: p.customer_id, appointmentId: p.ids[1] ?? null, template: 'addendum', kind: 'addendum', title: 'Nota aclaratoria',
+          contentEnc: encryptSecret(JSON.stringify(content)), status: 'signed', authorId: owner.id, author, signedAt, amendsId: hist.id,
+          contentHash: signatureHash({ content, template: 'addendum', customerId: p.customer_id, author, signedAt }), createdAt: signedAt,
+        });
+      }
+      if (i === 1 && (type === 'medical' || type === 'dental' || type === 'physiotherapy')) {
+        const patient = (await db.query.customers.findFirst({ where: eq(customers.id, p.customer_id) }))!.name;
+        sign(p.customer_id, p.ids[1] ?? null, 'consent', {
+          acto: type === 'dental' ? 'Tratamiento de conductos (endodoncia) del órgano dentario 36 con anestesia local.' : type === 'medical' ? 'Toma de biopsia de lesión en piel con anestesia local.' : 'Punción seca en musculatura de la pierna derecha.',
+          riesgos: 'Dolor, inflamación, sangrado leve, reacción a la anestesia; poco frecuente: infección.',
+          beneficios: 'Eliminar el dolor y conservar la función.',
+          contingencias: true,
+          firmas: {
+            patient: { name: patient, image: scribble(1) }, doctor: { name: owner.name, image: scribble(2) },
+            witness1: { name: 'Laura Gómez', image: scribble(3) }, witness2: { name: 'Raúl Cárdenas', image: scribble(4) },
+          },
+        }, at(1));
+      }
+    }
+    // A draft (only the author sees it) for the latest visit of the first patient
+    const first = done.rows[0];
+    if (first) {
+      const last = first.ids.length - 1;
+      notes.push({
+        tenantId: t.id, customerId: first.customer_id, appointmentId: first.ids[last]!, template: evoTpl, kind: 'evolution', title: titleOf(evoTpl),
+        contentEnc: encryptSecret(JSON.stringify({})), status: 'draft', authorId: owner.id, author, createdAt: new Date(first.starts[last]!),
+      });
+    }
+    if (notes.length) await db.insert(clinicalNotes).values(notes);
+    total += notes.length;
+  }
+  console.log(`Seeded ${total} clinical documents (NOM-004 / NOM-013)`);
 }

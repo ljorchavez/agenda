@@ -1,6 +1,7 @@
+import { setPatientWords } from '../i18n';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AuthResponse, BusinessSummary, SessionUser, TenantDto } from '@agenda/shared';
+import { isHealthType, type AuthResponse, type BusinessSummary, type SessionUser, type TenantDto } from '@agenda/shared';
 import { api, tokenStore } from './api';
 
 interface AuthState {
@@ -25,6 +26,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<TenantDto | null>(null);
   const [loading, setLoading] = useState(Boolean(tokenStore.get()));
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
+  // Health businesses talk about "pacientes"
+  useEffect(() => setPatientWords(Boolean(tenant && isHealthType(tenant.businessType))), [tenant?.businessType]);
 
   useEffect(() => {
     if (!tokenStore.get()) return;

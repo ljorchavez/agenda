@@ -1,9 +1,11 @@
 import { AppointmentForms } from '../components/Forms';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
 import {
+  isHealthType,
   bookingPriceCents,
   computeDepositCents,
   couponsEnabled,
@@ -1333,6 +1335,17 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             {noteState === 'saved' && <span className="text-emerald-700">✓ {t('common.saved')}</span>}
             {noteState === 'error' && <span className="text-rose-700">{t('agenda.notesError')}</span>}
           </p>
+        </div>
+      )}
+
+      {isHealthType(tenant!.businessType) && cur.customerId && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link to={`/customers/${cur.customerId}?nota=evolution&cita=${cur.id}`} className="btn-primary !py-1.5 text-sm" data-testid="appt-clinical-note" onClick={onClose}>
+            ✍️ {t('clinical.evolutionNote')}
+          </Link>
+          <Link to={`/customers/${cur.customerId}`} className="btn-secondary !py-1.5 text-sm" onClick={onClose}>
+            📋 {t('clinical.openRecord')}
+          </Link>
         </div>
       )}
 

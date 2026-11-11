@@ -247,6 +247,31 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
   cuestionarios, sucursales, usuarios) el botón dice "Agregar"/"Listo".
 - Mismo alto para todos los campos y tarjetas de una misma fila.
 
+## 11e. Giros de salud: expediente clínico NOM-004 y NOM-013 (hecho, migración 0015)
+- Giro por categoría (como el directorio): primero la categoría y adentro sus giros (registro,
+  nuevo negocio y Configuración).
+- Giros de salud (médico, dental, nutrición, psicología, fisioterapia) dicen "Pacientes".
+- Expediente clínico por paciente con plantillas por giro:
+  - Médico: historia clínica, nota de evolución, receta, interconsulta, referencia, consentimiento.
+  - Dental (NOM-013): historia estomatológica con odontograma (FDI, permanentes y temporales),
+    nota de evolución con odontograma actualizado, receta, referencia, consentimiento.
+  - Psicología: historia psicológica con examen mental y nota de sesión.
+  - Fisioterapia: valoración (EVA, arcos, fuerza) y nota de sesión.
+  - Nutrición: historia nutricional con antropometría e IMC y seguimiento.
+- Borrador que se guarda solo; firma con contraseña (fecha, hora, nombre, cédula y huella
+  SHA-256). Lo firmado no cambia: se corrige con nota aclaratoria firmada.
+- Contenido cifrado. Bitácora de accesos (consultar, firmar, imprimir) visible para dueño/admin.
+- Conservación 5 años: un paciente con expediente firmado se archiva en lugar de borrarse
+  ("Ver archivados" en la lista).
+- Impresión / PDF con membrete (razón social, licencia sanitaria), datos del paciente y firma con
+  cédula. Consentimiento con firmas en pantalla de paciente, profesional y 2 testigos.
+- Datos profesionales (cédula, institución, especialidad) en Mi cuenta; datos del consultorio en
+  Configuración. Desde la cita: botón "Nota de evolución".
+- Demos nuevas (demo@): dental-demo, psicologia-demo, fisioterapia-demo, con expedientes de ejemplo
+  (también en medico-demo y nutricion-demo).
+- Decimos "conforme a la NOM-004", nunca "certificado". Pendiente (con costo): certificación
+  NOM-024 y firma electrónica avanzada (e.firma SAT).
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México

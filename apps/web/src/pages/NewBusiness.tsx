@@ -1,8 +1,9 @@
+import { BusinessTypePicker } from '../components/BusinessTypePicker';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
-import { ADDON_PRICES, BUSINESS_TYPES, type AuthResponse, type BusinessType } from '@agenda/shared';
+import { ADDON_PRICES, type AuthResponse, type BusinessType } from '@agenda/shared';
 import { money } from '../lib/format';
 import { ErrorText, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
@@ -38,17 +39,13 @@ export function NewBusinessPage() {
           <label className="label" htmlFor="nb-name">{t('auth.businessName')}</label>
           <input id="nb-name" required minLength={2} className="input" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="label" htmlFor="nb-type">{t('auth.businessType')}</label>
-            <select id="nb-type" className="input" value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value as BusinessType })}>
-              {BUSINESS_TYPES.map((b) => <option key={b} value={b}>{t(`businessTypes.${b}`)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label" htmlFor="nb-phone">{t('auth.phone')}</label>
-            <input id="nb-phone" type="tel" className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          </div>
+        <div>
+          <span className="label">{t('auth.businessType')}</span>
+          <BusinessTypePicker id="nb-type" value={form.businessType} onChange={(b) => setForm({ ...form, businessType: b })} />
+        </div>
+        <div>
+          <label className="label" htmlFor="nb-phone">{t('auth.phone')}</label>
+          <input id="nb-phone" type="tel" className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
         </div>
         <ErrorText error={create.error} ns="auth" />
         <div className="flex gap-2">

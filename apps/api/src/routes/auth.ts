@@ -55,7 +55,7 @@ async function linkedResource(db: Pick<Db, 'query'>, tenantId: string, userId: s
   return r?.id ?? null;
 }
 
-async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 'email'>, tenantId: string) {
+async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 'email'> & { professional?: User['professional'] }, tenantId: string) {
   const m = await db.query.memberships.findFirst({
     where: and(eq(memberships.tenantId, tenantId), eq(memberships.userId, u.id)),
     columns: { role: true, locationId: true },
@@ -68,6 +68,7 @@ async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 
     role: m.role,
     resourceId: await linkedResource(db, tenantId, u.id),
     locationId: m.role === 'owner' ? null : m.locationId,
+    professional: u.professional ?? null,
   };
 }
 
@@ -257,6 +258,10 @@ authRoutes.patch('/auth/me', requireAuth, async (c) => {
   const patch: Partial<typeof users.$inferInsert> = {};
   if (input.name) patch.name = input.name;
   if (input.newPassword) patch.passwordHash = await hashPassword(input.newPassword);
+  if (input.professional) {
+    const p = input.professional;
+    patch.professional = { license: p.license || null, institution: p.institution || null, specialty: p.specialty || null, specialtyLicense: p.specialtyLicense || null };
+  }
   const [updated] = Object.keys(patch).length
     ? await db.update(users).set(patch).where(eq(users.id, user.id)).returning()
     : [user];

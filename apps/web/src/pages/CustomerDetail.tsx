@@ -2,15 +2,16 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
+import { isHealthType, paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
 import { CustomerFormModal } from './Customers';
 import { StarRating } from '../components/Rating';
 import { CustomerPlansSection } from '../components/Sales';
 import { RecordSection } from '../components/Record';
+import { ClinicalRecordSection } from '../components/ClinicalRecord';
 
 interface Detail extends CustomerWithStats {
   appointments: {
@@ -50,6 +51,8 @@ export function CustomerDetailPage() {
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
   const { manager, scoped } = useAccess();
+  const { tenant } = useAuth();
+  const health = isHealthType(tenant?.businessType ?? '');
 
   const { data, isLoading } = useQuery({
     queryKey: ['customer', id],
@@ -62,6 +65,17 @@ export function CustomerDetailPage() {
       void qc.invalidateQueries({ queryKey: ['customers'] });
       navigate('/customers');
     },
+    // Signed clinical records are kept 5 years (NOM-004): archive instead.
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'record_retention' && window.confirm(t('clinical.retentionArchive'))) archive.mutate(true);
+    },
+  });
+  const archive = useMutation({
+    mutationFn: (on: boolean) => api(`/customers/${id}`, { method: 'PUT', body: { name: data!.name, archived: on } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['customers'] });
+      void qc.invalidateQueries({ queryKey: ['customer', id] });
+    },
   });
 
   if (isLoading || !data) return <Loading />;
@@ -69,7 +83,7 @@ export function CustomerDetailPage() {
   return (
     <>
       <PageHeader
-        title={data.name}
+        title={data.archived ? `${data.name} · ${t("customers.archived")}` : data.name}
         actions={
           <>
             {data.phone && (
@@ -148,16 +162,32 @@ export function CustomerDetailPage() {
         </section>
       </div>
 
+      {health && (
+        <div className="mt-6">
+          <ClinicalRecordSection customerId={id} />
+        </div>
+      )}
+
       <div className="mt-6 grid items-stretch gap-6 lg:grid-cols-2">
         <CustomerPlansSection customerId={id} />
-        <RecordSection customerId={id} />
+        <RecordSection customerId={id} clinical={health} />
       </div>
 
       {manager && (
-        <div className="mt-8">
+        <div className="mt-8 flex flex-wrap gap-4">
+          {data.archived ? (
+            <button className="text-sm text-brand-700 hover:underline" onClick={() => archive.mutate(false)} data-testid="unarchive">
+              {t('customers.unarchive')}
+            </button>
+          ) : (
+            <button className="text-sm text-slate-600 hover:underline" onClick={() => archive.mutate(true)} data-testid="archive">
+              {t('customers.archive')}
+            </button>
+          )}
           <button className="text-sm text-rose-700 hover:underline" onClick={() => window.confirm(t('customers.deleteConfirm')) && remove.mutate()}>
             {t('common.delete')}
           </button>
+          <ErrorText error={remove.error instanceof ApiError && remove.error.code === 'record_retention' ? null : remove.error} />
         </div>
       )}
 

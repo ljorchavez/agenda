@@ -38,7 +38,8 @@ function PrivatePhoto({ photo, onOpen }: { photo: RecordPhotoDto; onOpen: (url: 
  * Expediente: allergies, conditions/medication, consent, dated notes with author and photos.
  * Shown only to owners, admins and whoever attended the customer (the API enforces it).
  */
-export function RecordSection({ customerId }: { customerId: string }) {
+/** `clinical`: health businesses write notes in the expediente clínico, so free notes are hidden. */
+export function RecordSection({ customerId, clinical }: { customerId: string; clinical?: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -134,7 +135,7 @@ export function RecordSection({ customerId }: { customerId: string }) {
           </div>
           {save.isSuccess && <p className="text-xs text-emerald-700">✓ {t('common.saved')}</p>}
 
-          <div>
+          {!clinical && <div>
             <h3 className="label">{t('record.notes')}</h3>
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (note.trim()) addNote.mutate(); }}>
               <textarea rows={2} className="input" placeholder={t('record.notePlaceholder')} value={note} onChange={(e) => setNote(e.target.value)} aria-label={t('record.notes')} />
@@ -154,7 +155,7 @@ export function RecordSection({ customerId }: { customerId: string }) {
               ))}
               {d.notes.length === 0 && <li className="text-sm text-slate-500">{t('record.noNotes')}</li>}
             </ul>
-          </div>
+          </div>}
 
           <ResponsesList responses={d.responses ?? []} />
 

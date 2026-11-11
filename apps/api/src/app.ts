@@ -26,6 +26,7 @@ import { couponRoutes } from './routes/coupons.js';
 import { uploadRoutes } from './routes/uploads.js';
 import { saleRoutes } from './routes/sales.js';
 import { formRoutes } from './routes/forms.js';
+import { clinicalRoutes } from './routes/clinical.js';
 import { shareRoutes } from './routes/share.js';
 import { shopRoutes } from './routes/shop.js';
 import { recordRoutes } from './routes/records.js';
@@ -79,7 +80,7 @@ export function createApp() {
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();
   // Auth on explicit prefixes so unknown paths still return 404 instead of 401.
-  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections', '/coupons', '/offerings', '/customer-plans', '/gift-cards', '/cash', '/record-notes', '/record-photos', '/reviews', '/calendar-feeds', '/forms']) {
+  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections', '/coupons', '/offerings', '/customer-plans', '/gift-cards', '/cash', '/record-notes', '/record-photos', '/reviews', '/calendar-feeds', '/forms', '/clinical-notes']) {
     priv.use(prefix, requireAuth);
     priv.use(`${prefix}/*`, requireAuth);
   }
@@ -101,6 +102,7 @@ export function createApp() {
   priv.route('/', reviewRoutes);
   priv.route('/', calendarRoutes);
   priv.route('/', formRoutes);
+  priv.route('/', clinicalRoutes);
   app.route('/', priv);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));

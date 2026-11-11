@@ -1,7 +1,8 @@
 import { ReviewPage } from './pages/Review';
 import { PurchasePage } from './components/Shop';
 import type { ReactElement } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { ClinicalPrintPage } from './components/ClinicalRecord';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
@@ -37,6 +38,11 @@ function Redirect({ to }: { to: string }) {
   return <Navigate to={`${path}${qs ? `?${qs}` : ''}`} replace />;
 }
 
+function PrintRecord() {
+  const { id } = useParams();
+  return <ClinicalPrintPage customerId={id!} />;
+}
+
 export function App() {
   return (
     <Routes>
@@ -53,6 +59,8 @@ export function App() {
       <Route path="/c/:token" element={<ManagePage />} />
       <Route path="/r/:token" element={<ReviewPage />} />
       <Route path="/compra/:token" element={<PurchasePage />} />
+      {/* Printable clinical documents: no menus, letterhead only */}
+      <Route path="/customers/:id/imprimir" element={<Protected><PrintRecord /></Protected>} />
       {/* The business back office */}
       <Route
         element={

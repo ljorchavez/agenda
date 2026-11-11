@@ -1542,6 +1542,76 @@ d('API (integration)', () => {
     expect((await call('POST', `/public/${slug}/bookings`, { serviceId: first.id, startsAt: slots[7], name: 'Paciente Cupon', phone: '5521212121', couponCode: 'BIENVENIDA' })).status).toBe(201);
   });
 
+  it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Consultorio Prueba', businessType: 'medical', name: 'Dra. Ana Ruiz', email: 'nom004@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    // Cédula and specialty on the profile
+    const meU = await call('PATCH', '/auth/me', { professional: { license: '1234567', institution: 'UNAM', specialty: 'Medicina familiar' } }, tok);
+    expect(meU.body.professional).toMatchObject({ license: '1234567', specialty: 'Medicina familiar' });
+    const pat = (await call('POST', '/customers', { name: 'Paciente Nom', phone: '5577001100', birthday: '1990-05-04', sex: 'F', address: 'Calle 1, Colima', curp: 'rual900504mclzzn09' }, tok)).body;
+    expect(pat).toMatchObject({ sex: 'F', curp: 'RUAL900504MCLZZN09' });
+    expect((await call('POST', '/customers', { name: 'Mala Curp', phone: '5577001101', curp: 'XX' }, tok)).status).toBe(422);
+    // Editing without the patient fields keeps them
+    const kept = (await call('PUT', `/customers/${pat.id}`, { name: 'Paciente Nom', phone: '5577001100' }, tok)).body;
+    expect(kept.address).toBe('Calle 1, Colima');
+
+    // Not for non-health giros
+    const barber = (await call('POST', '/customers', { name: 'Cliente Barba', phone: '5577001102' }, a.token)).body;
+    expect((await call('GET', `/customers/${barber.id}/clinical`, undefined, a.token)).status).toBe(422);
+
+    // Draft → incomplete sign refused → complete → signed with the password
+    const draft = await call('POST', `/customers/${pat.id}/clinical-notes`, { template: 'medical_evolution', content: { evolucion: 'Tos de 3 días' } }, tok);
+    expect(draft.status).toBe(201);
+    expect(draft.body.status).toBe('draft');
+    expect((await call('POST', `/clinical-notes/${draft.body.id}/sign`, { password: 'password123' }, tok)).body.error).toBe('clinical_incomplete');
+    const content = {
+      evolucion: 'Tos de 3 días sin fiebre', signos: { ta: '120/80', fc: 78, temp: 36.6 }, diagnosticos: [{ code: 'J00', text: 'Rinofaringitis aguda' }],
+      pronostico: 'Bueno', medicamentos: [{ name: 'Paracetamol 500 mg', dose: '1 tableta', route: 'Oral', frequency: 'Cada 8 h', duration: '3 días' }], indicaciones: 'Líquidos abundantes',
+    };
+    expect((await call('PUT', `/clinical-notes/${draft.body.id}`, { content }, tok)).status).toBe(200);
+    expect((await call('POST', `/clinical-notes/${draft.body.id}/sign`, { password: 'mala' }, tok)).body.error).toBe('wrong_password');
+    const signed = await call('POST', `/clinical-notes/${draft.body.id}/sign`, { password: 'password123' }, tok);
+    expect(signed.body).toMatchObject({ status: 'signed', author: { name: 'Dra. Ana Ruiz', license: '1234567' } });
+    expect(signed.body.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    // Signed: can't change or delete
+    expect((await call('PUT', `/clinical-notes/${draft.body.id}`, { content: { evolucion: 'otra' } }, tok)).body.error).toBe('clinical_signed');
+    expect((await call('DELETE', `/clinical-notes/${draft.body.id}`, undefined, tok)).status).toBe(409);
+    // Correction = signed nota aclaratoria
+    const add = await call('POST', `/clinical-notes/${draft.body.id}/addendum`, { text: 'La temperatura fue 37.1', password: 'password123' }, tok);
+    expect(add.body).toMatchObject({ kind: 'addendum', status: 'signed', amendsId: draft.body.id });
+    // Signed right away (history) and a template from another giro refused
+    expect((await call('POST', `/customers/${pat.id}/clinical-notes`, { template: 'dental_history', content: {} }, tok)).body.error).toBe('clinical_template');
+
+    const rec = (await call('GET', `/customers/${pat.id}/clinical`, undefined, tok)).body;
+    expect(rec.norm).toBe('NOM-004-SSA3-2012');
+    expect(rec.patient).toMatchObject({ birthday: '1990-05-04', sex: 'F' });
+    expect(rec.notes.map((n: { kind: string }) => n.kind)).toEqual(['addendum', 'evolution']);
+    expect(rec.notes[1].content.diagnosticos[0].code).toBe('J00');
+    // Encrypted at rest
+    const { getDb } = await import('../src/db/client.js');
+    const { sql } = await import('drizzle-orm');
+    const raw = (await getDb().execute(sql`select content_enc from clinical_notes where customer_id = ${pat.id} limit 1`)).rows[0] as { content_enc: string };
+    expect(raw.content_enc).not.toContain('Paracetamol');
+    // Bitácora (owner) and prints
+    await call('POST', `/customers/${pat.id}/clinical-log`, { action: 'print', detail: 'Receta' }, tok);
+    const log = (await call('GET', `/customers/${pat.id}/clinical-log`, undefined, tok)).body;
+    expect(log.map((l: { action: string }) => l.action)).toEqual(expect.arrayContaining(['view', 'sign', 'addendum', 'print']));
+    // Drafts of someone else are not shown; team members who didn't attend can't open it
+    const rx = (await call('POST', '/resources', { name: 'Dr. Otro' }, tok)).body;
+    await call('POST', '/users', { name: 'Dr. Otro', email: 'nom004-otro@test.mx', password: 'password123', role: 'staff', resourceId: rx.id }, tok);
+    const otro = (await call('POST', '/auth/login', { email: 'nom004-otro@test.mx', password: 'password123' })).body.token;
+    expect((await call('GET', `/customers/${pat.id}/clinical`, undefined, otro)).status).toBe(403);
+    // 5 years: delete refused, archive instead
+    const del = await call('DELETE', `/customers/${pat.id}`, undefined, tok);
+    expect(del.body.error).toBe('record_retention');
+    expect((await call('PUT', `/customers/${pat.id}`, { name: 'Paciente Nom', phone: '5577001100', archived: true }, tok)).body.archived).toBe(true);
+    const listed = (await call('GET', '/customers?q=Paciente%20Nom', undefined, tok)).body.items;
+    expect(listed).toHaveLength(0);
+    expect((await call('GET', '/customers?archived=1&q=Paciente%20Nom', undefined, tok)).body.items).toHaveLength(1);
+  });
+
   it('link preview for a business page', async () => {
     const res = await app.request('/api/page/b/negocio-a');
     expect(res.status).toBe(200);

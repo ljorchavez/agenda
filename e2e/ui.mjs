@@ -22,7 +22,7 @@ const tok = await page.evaluate(() => localStorage.getItem('agenda.token'));
 ok('Inicio gone from menu', (await page.locator('nav a[href="/inicio"]').count()) === 0);
 // 1. New booking: search and pick a customer, then save
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
-const search = page.getByRole('searchbox', { name: /Cliente/ });
+const search = page.getByRole('searchbox', { name: /Cliente|Paciente/ });
 // Typing part of a name filters the list; take the first match of whatever business opened
 await page.locator('[role=listbox] button').first().waitFor();
 const firstName = ((await page.locator('[role=listbox] button .font-medium').first().textContent()) ?? '').split(' ')[0];
@@ -43,7 +43,7 @@ ok('booking created for picked customer', dec.some((a) => a.customerName === pic
 //     and a taken time shows up before saving, with free options to tap
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
 const newName = `Zacarías Nuevo ${Date.now() % 10000}`;
-await page.getByRole('searchbox', { name: /Cliente/ }).fill(newName);
+await page.getByRole('searchbox', { name: /Cliente|Paciente/ }).fill(newName);
 await page.getByTestId('new-customer').waitFor({ timeout: 5000 }).catch(() => {});
 ok('unknown name becomes a new customer', ((await page.getByTestId('new-customer').textContent().catch(() => '')) ?? '').includes('no está en tu lista'));
 await page.getByTestId('new-customer').locator('input[type=tel]').fill('3121112233');
@@ -263,15 +263,15 @@ await page.locator('#pg-notice').fill(oldNotice);
 await page.getByTestId('save-status').filter({ hasText: 'Guardado' }).waitFor({ timeout: 8000 }).catch(() => {});
 // Payments settings: no-show sits next to deposit (no long scroll)
 await page.goto('http://localhost:5173/settings?tab=payments');
-await page.getByText('Cuando un cliente no asiste').waitFor();
-const noShowBox = await page.getByText('Cuando un cliente no asiste').boundingBox();
+await page.getByText(/Cuando un (cliente|paciente) no asiste/).waitFor();
+const noShowBox = await page.getByText(/Cuando un (cliente|paciente) no asiste/).boundingBox();
 const methodsBox = await page.getByText('Métodos de pago').boundingBox();
 ok('no-show in right column', !!noShowBox && !!methodsBox && noShowBox.x > methodsBox.x + 200, JSON.stringify([noShowBox?.x, methodsBox?.x]));
 // Promotions: settings tab, coupon in a new booking
 await page.goto('http://localhost:5173/settings?tab=promos');
 await page.getByTestId('coupons-section').filter({ hasText: 'BIENVENIDA' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('promotions tab shows rewards and coupons', (await page.getByTestId('rewards-section').isVisible()) && ((await page.getByTestId('coupons-section').textContent()) ?? '').includes('BIENVENIDA'));
-ok('coupons show their rules (once per customer)', ((await page.getByTestId('coupons-section').textContent()) ?? '').includes('1 vez por cliente'));
+ok('coupons show their rules (once per customer)', ((await page.getByTestId('coupons-section').textContent()) ?? '').match(/1 vez por (cliente|paciente)/) != null);
 await page.goto('http://localhost:5173/agenda');
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
 await page.locator('[role=listbox] button').first().click();
@@ -415,6 +415,72 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
     await page.getByTestId('record-responses').getByRole('button').first().click().catch(() => {});
     ok('record shows the answered questionnaire', ((await page.getByTestId('record-responses').textContent().catch(() => '')) ?? '').match(/Historia clínica nutricional[\s\S]*Comer mejor/) != null);
   } else ok('questionnaire customer created', false);
+}
+// ---- Health giros: "Pacientes", giro picker by category, expediente clínico (NOM-004 / NOM-013)
+{
+  const login = await api('/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
+  const as = async (slug) => (await api('/auth/switch', { tenantId: login.businesses.find((b) => b.slug === slug).id }, login.token)).token;
+  const withRecord = async (t) => {
+    const list = (await api('/customers?limit=200', null, t)).items;
+    for (const c of list) {
+      const r = await api(`/customers/${c.id}/clinical`, null, t);
+      if (r?.notes?.some((n) => n.kind === 'history' && n.status === 'signed')) return { c, r };
+    }
+    return null;
+  };
+  const psy = await as('psicologia-demo');
+  await page.evaluate((t) => localStorage.setItem('agenda.token', t), psy);
+  await page.goto('http://localhost:5173/customers');
+  await page.getByRole('heading', { name: 'Pacientes' }).waitFor({ timeout: 8000 }).catch(() => {});
+  ok('health giro says Pacientes', (await page.getByRole('heading', { name: 'Pacientes' }).count()) >= 1 && (await page.getByRole('link', { name: 'Pacientes' }).count()) >= 1);
+  ok('archived patients toggle', (await page.getByTestId('show-archived').count()) === 1);
+  await page.goto('http://localhost:5173/settings');
+  await page.getByTestId('business-type-picker').waitFor({ timeout: 8000 }).catch(() => {});
+  ok('giro picker shows categories and the giros inside', (await page.getByTestId('pick-category-health').count()) === 1 && (await page.getByTestId('pick-type-psychology').count()) === 1 && (await page.getByTestId('pick-type-dental').count()) === 1);
+  ok('clinic data for letterhead', await page.getByTestId('clinic-section').isVisible().catch(() => false));
+  await page.goto('http://localhost:5173/settings?tab=account');
+  await page.getByTestId('pro-license').waitFor({ timeout: 8000 }).catch(() => {});
+  ok('professional data (cédula) in my account', (await page.getByTestId('pro-license').inputValue().catch(() => '')) === '9876543');
+  const found = await withRecord(psy);
+  ok('demo patient with a signed history', Boolean(found));
+  if (found) {
+    const { c } = found;
+    await page.goto(`http://localhost:5173/customers/${c.id}`);
+    await page.getByTestId('clinical-record').waitFor({ timeout: 8000 }).catch(() => {});
+    const before = (await api(`/customers/${c.id}/clinical`, null, psy)).notes.length;
+    ok('record lists the documents', (await page.getByTestId('clinical-notes').locator('li').count()) >= 2);
+    await page.getByTestId('clinical-notes').locator('li button').first().click();
+    ok('signed document shows signature and cédula', ((await page.getByTestId('signature-line').first().textContent().catch(() => '')) ?? '').includes('9876543'));
+    await page.getByTestId('new-evolution').click();
+    await page.getByTestId('clinical-editor').waitFor({ timeout: 6000 }).catch(() => {});
+    ok('sign disabled until required fields', await page.getByTestId('sign-button').isDisabled());
+    await page.getByTestId('clinical-editor').getByLabel('Desarrollo e intervención').fill('Sesión de prueba UI: se trabajan técnicas de respiración.');
+    await page.getByTestId('sign-button').click();
+    await page.getByTestId('sign-dialog').locator('input[type=password]').fill('incorrecta');
+    await page.getByTestId('sign-dialog').getByRole('button', { name: /Firmar/ }).click();
+    await page.getByTestId('sign-dialog').getByText('Contraseña incorrecta').waitFor({ timeout: 6000 }).catch(() => {});
+    ok('wrong password does not sign', await page.getByTestId('sign-dialog').getByText('Contraseña incorrecta').isVisible().catch(() => false));
+    await page.getByTestId('sign-dialog').locator('input[type=password]').fill('demo1234');
+    await page.getByTestId('sign-dialog').getByRole('button', { name: /Firmar/ }).click();
+    await page.getByTestId('clinical-editor').waitFor({ state: 'detached', timeout: 8000 }).catch(() => {});
+    const after = (await api(`/customers/${c.id}/clinical`, null, psy)).notes;
+    const mine = after.find((n) => n.status === 'signed' && String(n.content.desarrollo ?? '').startsWith('Sesión de prueba UI'));
+    ok('session note signed with password', Boolean(mine) && after.length === before + 1, `${before} -> ${after.length}`);
+    await page.goto(`http://localhost:5173/customers/${c.id}/imprimir?doc=all&noprint=1`);
+    await page.getByTestId('clinical-print').waitFor({ timeout: 8000 }).catch(() => {});
+    const printed = (await page.getByTestId('clinical-print').textContent().catch(() => '')) ?? '';
+    ok('printable record with letterhead and cédula', printed.includes('Consultorio de Psicología Demo') && printed.includes('Historia clínica psicológica') && printed.includes('9876543') && printed.includes('NOM-004'), printed.slice(0, 160));
+    ok('nav hidden on the printable page', (await page.locator('nav a[href="/agenda"]').count()) === 0);
+  }
+  const den = await as('dental-demo');
+  await page.evaluate((t) => localStorage.setItem('agenda.token', t), den);
+  const dfound = await withRecord(den);
+  ok('dental demo: record follows NOM-013', dfound?.r.norm === 'NOM-013-SSA2-2015' && Boolean(dfound?.r.odontogram));
+  if (dfound) {
+    await page.goto(`http://localhost:5173/customers/${dfound.c.id}`);
+    await page.getByTestId('clinical-record').waitFor({ timeout: 8000 }).catch(() => {});
+    ok('dental record shows the current odontogram', ((await page.getByTestId('clinical-record').textContent().catch(() => '')) ?? '').includes('Odontograma actual'));
+  }
 }
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();

@@ -2,11 +2,12 @@ import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
-import { BUSINESS_TYPES, SELECTABLE_PLANS, type AuthResponse, type BusinessType, type PlanId } from '@agenda/shared';
+import { SELECTABLE_PLANS, type AuthResponse, type BusinessType, type PlanId } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
 import { PlanCards, PlanExtras } from '../components/Plans';
 import { ErrorText, Modal } from '../components/ui';
 import { GoogleButton, googleSignup } from '../components/GoogleButton';
+import { BusinessTypePicker } from '../components/BusinessTypePicker';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -280,12 +281,8 @@ export function RegisterPage() {
                 <input id="r-biz" required minLength={2} className="input" value={form.businessName} onChange={set('businessName')} />
               </div>
               <div>
-                <label className="label" htmlFor="r-type">{t('auth.businessType')}</label>
-                <select id="r-type" className="input" value={form.businessType} onChange={set('businessType')}>
-                  {BUSINESS_TYPES.map((b) => (
-                    <option key={b} value={b}>{t(`businessTypes.${b}`)}</option>
-                  ))}
-                </select>
+                <span className="label">{t('auth.businessType')}</span>
+                <BusinessTypePicker id="r-type" value={form.businessType} onChange={(b) => setForm((f) => ({ ...f, businessType: b }))} />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>

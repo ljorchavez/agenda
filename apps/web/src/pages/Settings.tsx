@@ -1,4 +1,5 @@
 import { FormsSection } from '../components/Forms';
+import { BusinessTypePicker } from '../components/BusinessTypePicker';
 import { AssignmentSettingsSection } from '../components/Assignment';
 import { SaveStatus, useAutoSave } from '../lib/autosave';
 import { OnlineSalesSection } from '../components/OnlineSales';
@@ -12,11 +13,11 @@ import { CouponsSection, RewardsSection } from '../components/Promotions';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  isHealthType,
   assignableRoles,
   assignmentSettingsOf,
   reviewsArePublic,
   salesSettingsOf,
-  BUSINESS_TYPES,
   isManager,
   isValidClabe,
   kindConfig,
@@ -94,6 +95,45 @@ function LanguageSelect() {
         <option value="en">English</option>
       </select>
     </div>
+  );
+}
+
+/** Health businesses: cédula and specialty printed under the signature of clinical documents. */
+function ProfessionalSection() {
+  const { t } = useTranslation();
+  const { user, setUser } = useAuth();
+  const p = user?.professional ?? {};
+  const [v, setV] = useState({ license: p.license ?? '', institution: p.institution ?? '', specialty: p.specialty ?? '', specialtyLicense: p.specialtyLicense ?? '' });
+  const save = useMutation({
+    mutationFn: () =>
+      api<SessionUser>('/auth/me', {
+        method: 'PATCH',
+        body: { professional: { license: v.license || null, institution: v.institution || null, specialty: v.specialty || null, specialtyLicense: v.specialtyLicense || null } },
+      }),
+    onSuccess: (u) => setUser(u),
+  });
+  const state = useAutoSave(v, () => save.mutateAsync());
+  const field = (k: keyof typeof v, label: string) => (
+    <label className="block text-sm">
+      <span className="label">{label}</span>
+      <input className="input" value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value })} data-testid={`pro-${k}`} />
+    </label>
+  );
+  return (
+    <section className="card space-y-3" data-testid="professional-section">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold">🩺 {t('clinical.professional')}</h2>
+        <SaveStatus state={state} />
+      </div>
+      <p className="text-xs text-slate-500">{t('clinical.professionalHelp')}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {field('license', t('clinical.license'))}
+        {field('institution', t('clinical.institution'))}
+        {field('specialty', t('clinical.specialty'))}
+        {field('specialtyLicense', t('clinical.specialtyLicense'))}
+      </div>
+      <ErrorText error={save.error} />
+    </section>
   );
 }
 
@@ -259,17 +299,13 @@ function BusinessSettings() {
             <label className="label">{t('auth.businessName')}</label>
             <input className="input" value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="label">{t('auth.businessType')}</label>
-              <select className="input" value={businessType} disabled={!canEdit} onChange={(e) => setBusinessType(e.target.value as typeof businessType)}>
-                {BUSINESS_TYPES.map((b) => <option key={b} value={b}>{t(`businessTypes.${b}`)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">{t('auth.phone')}</label>
-              <input className="input" value={phone} disabled={!canEdit} onChange={(e) => setPhone(e.target.value)} />
-            </div>
+          <div>
+            <span className="label">{t('auth.businessType')}</span>
+            <BusinessTypePicker value={businessType} disabled={!canEdit} onChange={setBusinessType} />
+          </div>
+          <div>
+            <label className="label">{t('auth.phone')}</label>
+            <input className="input" value={phone} disabled={!canEdit} onChange={(e) => setPhone(e.target.value)} />
           </div>
           <div className="text-sm text-slate-500">{t('settings.timezone')}: {tenant?.timezone}</div>
           <Link to="/resources" className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm hover:border-brand-500">
@@ -303,6 +339,20 @@ function BusinessSettings() {
           {saveBar}
           <div className="grid items-stretch gap-6 lg:grid-cols-2">
             <PublicProfileSection disabled={!canEdit} />
+            {isHealthType(businessType) && (
+              <section className="card space-y-3" data-testid="clinic-section">
+                <h2 className="font-semibold">📋 {t('clinical.clinicData')}</h2>
+                <p className="text-xs text-slate-500">{t('clinical.clinicHelp')}</p>
+                <label className="block text-sm">
+                  <span className="label">{t('clinical.legalName')}</span>
+                  <input className="input" disabled={!canEdit} value={settings.clinic?.legalName ?? ''} onChange={(e) => setSettings((s) => ({ ...s, clinic: { ...s.clinic, legalName: e.target.value || null } }))} />
+                </label>
+                <label className="block text-sm">
+                  <span className="label">{t('clinical.healthLicense')}</span>
+                  <input className="input" disabled={!canEdit} value={settings.clinic?.healthLicense ?? ''} onChange={(e) => setSettings((s) => ({ ...s, clinic: { ...s.clinic, healthLicense: e.target.value || null } }))} />
+                </label>
+              </section>
+            )}
           </div>
         </div>
       )}
@@ -463,6 +513,7 @@ function BusinessSettings() {
       {tab === 'account' && (
         <div className="grid items-stretch gap-6 lg:grid-cols-2">
           <AccountSection />
+          {tenant && isHealthType(tenant.businessType) && <ProfessionalSection />}
           <section className="card space-y-4">
             <LanguageSelect />
           </section>

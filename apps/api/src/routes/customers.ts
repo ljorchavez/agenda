@@ -48,6 +48,10 @@ type StatsRow = {
   email: string | null;
   notes: string | null;
   birthday: string | null;
+  sex?: string | null;
+  address?: string | null;
+  curp?: string | null;
+  archived_at?: Date | string | null;
   created_at: Date;
   visits: number | string;
   last_visit: Date | null;
@@ -77,6 +81,10 @@ function toStats(r: StatsRow): CustomerWithStats {
     email: r.email,
     notes: r.notes,
     birthday: r.birthday,
+    sex: (r.sex ?? null) as CustomerWithStats['sex'],
+    address: r.address ?? null,
+    curp: r.curp ?? null,
+    archived: Boolean(r.archived_at),
     createdAt: new Date(r.created_at).toISOString(),
     visits,
     totalSpentCents: Number(r.total_spent),
@@ -93,7 +101,7 @@ function toStats(r: StatsRow): CustomerWithStats {
  * Customers with visit/spend stats. Every subquery is scoped by tenant_id; for team members
  * the stats only count their own bookings, and (unless `anyCustomer`) only their customers are listed.
  */
-function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; scope?: Scope; anyCustomer?: boolean }) {
+function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; scope?: Scope; anyCustomer?: boolean; archived?: boolean }) {
   const scope: Scope = opts.scope ?? { all: true, locationId: null, personal: false, userId: '', resourceId: null };
   const sc = scopeSql(scope, 'a');
   const filters = [sql`c.tenant_id = ${tenantId}`];
@@ -101,12 +109,14 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
     filters.push(sql`exists (select 1 from appointments a where a.customer_id = c.id and a.tenant_id = c.tenant_id ${sc})`);
   }
   if (opts.customerId) filters.push(sql`c.id = ${opts.customerId}`);
+  // Archived customers (kept for their clinical record) only show when asked for
+  else filters.push(opts.archived ? sql`c.archived_at is not null` : sql`c.archived_at is null`);
   if (opts.q) {
     const like = `%${opts.q}%`;
     filters.push(sql`(c.name ilike ${like} or c.phone ilike ${like} or c.email ilike ${like})`);
   }
   return sql`
-    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at,
+    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.archived_at,
       coalesce(v.visits, 0) as visits, v.last_visit, v.first_visit,
       coalesce(v.no_shows, 0) as no_shows,
       v.avg_rating, coalesce(v.rating_count, 0) as rating_count,
@@ -147,7 +157,7 @@ customerRoutes.get('/customers', async (c) => {
   const anyCustomer = c.req.query('for') === 'booking' && Boolean(q);
 
   const res = await db.execute<StatsRow>(
-    sql`${statsQuery(tenantId, { q, scope, anyCustomer })} order by ${sort} limit ${limit} offset ${offset}`,
+    sql`${statsQuery(tenantId, { q, scope, anyCustomer, archived: c.req.query('archived') === '1' })} order by ${sort} limit ${limit} offset ${offset}`,
   );
   return c.json({
     items: res.rows.map(toStats),
@@ -209,10 +219,16 @@ customerRoutes.get('/customers/:id', async (c) => {
 function normalize(input: ReturnType<typeof customerInputSchema.parse>) {
   return {
     name: input.name,
-    phone: input.phone ? normalizeMxPhone(input.phone) : null,
-    email: input.email || null,
-    notes: input.notes ?? null,
-    birthday: input.birthday ?? null,
+    ...(input.phone !== undefined ? { phone: input.phone ? normalizeMxPhone(input.phone) : null } : {}),
+    // Left out of an update = keep what's saved
+    ...(input.email !== undefined ? { email: input.email || null } : {}),
+    ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
+    ...(input.birthday !== undefined ? { birthday: input.birthday ?? null } : {}),
+    // Patient data and archiving: left out of the request = keep what's saved
+    ...(input.sex !== undefined ? { sex: input.sex } : {}),
+    ...(input.address !== undefined ? { address: input.address || null } : {}),
+    ...(input.curp !== undefined ? { curp: input.curp || null } : {}),
+    ...(input.archived !== undefined ? { archivedAt: input.archived ? new Date() : null } : {}),
   };
 }
 
@@ -258,6 +274,11 @@ customerRoutes.put('/customers/:id', async (c) => {
 });
 
 customerRoutes.delete('/customers/:id', requireManager, async (c) => {
+  // Clinical records are kept 5 years after the last signed note (NOM-004 5.4): archive instead.
+  const kept = await getDb().execute(sql`
+    select 1 from clinical_notes where tenant_id = ${c.get('tenantId')} and customer_id = ${c.req.param('id')}
+      and status = 'signed' and signed_at > now() - interval '5 years' limit 1`);
+  if (kept.rows.length) throw conflict('record_retention', 'Clinical records must be kept 5 years; archive the patient instead');
   // Their record photos go too (private storage is outside the database).
   await deleteCustomerPhotos(c.get('tenantId'), c.req.param('id'));
   const [row] = await getDb()
