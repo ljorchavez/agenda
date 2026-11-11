@@ -10,7 +10,28 @@ import { DateTime } from 'luxon';
 import { DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { getDb } from './client.js';
-import { appointments, classSessions, coupons, customers, locations, memberships, payments, resources, services, tenants, users } from './schema.js';
+import {
+  appointments,
+  cashClosings,
+  classSessions,
+  coupons,
+  customerPlans,
+  customerRecords,
+  customers,
+  giftCards,
+  locations,
+  memberships,
+  offerings,
+  payments,
+  planUses,
+  recordNotes,
+  resources,
+  reviews,
+  services,
+  tenants,
+  users,
+} from './schema.js';
+import { encryptSecret } from '../lib/crypto.js';
 
 const TZ = 'America/Mexico_City';
 
@@ -205,6 +226,7 @@ export async function seedDemo() {
   await seedDoctor();
   await seedPageLooks();
   await seedDirectory();
+  await seedExtras();
   console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
 }
 
@@ -935,4 +957,230 @@ async function seedDirectory() {
     }
   }
   console.log(`Seeded ${DIRECTORY_DEMOS.length} demo directory listings`);
+}
+
+// ---------- Packages, records, commissions, cash closings and reviews ----------
+
+const REVIEW_TEXTS: [number, string | null][] = [
+  [5, 'Excelente servicio, muy puntuales.'],
+  [5, 'Me encantó, regreso seguro.'],
+  [5, null],
+  [4, 'Muy bien, solo tuve que esperar un poco.'],
+  [5, 'Súper amables y el lugar muy limpio.'],
+  [4, null],
+  [5, 'Reservar en línea fue facilísimo.'],
+  [3, 'Bien, pero el estacionamiento es complicado.'],
+  [5, 'Los recomiendo muchísimo.'],
+  [4, 'Buena atención, precio justo.'],
+];
+const REPLIES = ['¡Gracias por tu visita! Te esperamos pronto.', 'Gracias por tu comentario, ya estamos viendo lo del estacionamiento.'];
+const short = (full: string) => {
+  const [a = '', b = ''] = full.trim().split(/\s+/);
+  return b ? `${a} ${b[0]}.` : a;
+};
+
+async function tenantBySlug(slug: string) {
+  return getDb().query.tenants.findFirst({ where: eq(tenants.slug, slug) });
+}
+
+/** Completed bookings of a business with no payments yet (safe to cover with a package). */
+async function unpaidCompleted(tenantId: string, limit: number, serviceIds?: string[]) {
+  const res = await getDb().execute<{ id: string; customer_id: string; price_cents: number; starts_at: Date }>(sql`
+    select a.id, a.customer_id, a.price_cents, a.starts_at from appointments a
+    where a.tenant_id = ${tenantId} and a.status = 'completed' and a.price_cents > 0 and a.discount_cents = 0
+      and not exists (select 1 from payments p where p.appointment_id = a.id)
+      ${serviceIds?.length ? sql`and a.service_id in (${sql.join(serviceIds.map((x) => sql`${x}::uuid`), sql`, `)})` : sql``}
+      and a.starts_at > now() - interval '50 days'
+    order by a.starts_at desc limit ${limit}`);
+  return res.rows;
+}
+
+/** Sells a plan to the customers of `uses` (one plan each) and takes a session per booking. */
+async function sellAndUse(tenantId: string, o: typeof offerings.$inferSelect, uses: { id: string; customer_id: string; price_cents: number; starts_at: Date }[], perCustomer: number) {
+  const db = getDb();
+  const byCustomer = new Map<string, typeof uses>();
+  for (const u of uses) byCustomer.set(u.customer_id, [...(byCustomer.get(u.customer_id) ?? []), u]);
+  let sold = 0;
+  for (const [customerId, list] of byCustomer) {
+    const first = DateTime.fromJSDate(list[list.length - 1]!.starts_at).setZone(TZ).minus({ days: 3 });
+    const expires = o.kind === 'membership' ? first.plus({ months: 1 }).minus({ days: 1 }) : first.plus({ days: (o.validityDays ?? 60) - 1 });
+    const [plan] = await db
+      .insert(customerPlans)
+      .values({
+        tenantId, customerId, offeringId: o.id, kind: o.kind, name: o.name, serviceIds: o.serviceIds, sessionsTotal: o.sessions,
+        priceCents: o.priceCents, startsOn: first.toISODate()!, expiresOn: expires.toISODate()!, soldBy: demoOwnerId,
+      })
+      .returning();
+    await db.insert(payments).values({
+      tenantId, customerId, amountCents: o.priceCents, method: pick(['cash', 'card', 'transfer'] as const), status: 'paid',
+      paidAt: first.set({ hour: 11 }).toJSDate(), customerPlanId: plan!.id, notes: o.name,
+    });
+    for (const u of list.slice(0, perCustomer)) {
+      await db.insert(planUses).values({ tenantId, customerPlanId: plan!.id, appointmentId: u.id, sessions: 1, createdBy: demoOwnerId });
+      await db.update(appointments).set({ priceCents: 0, discountCents: u.price_cents, discountReason: 'package' }).where(eq(appointments.id, u.id));
+    }
+    sold++;
+  }
+  return sold;
+}
+
+async function seedExtras() {
+  const db = getDb();
+  // Packages: yoga and nutrition; membership: padel
+  const yoga = await tenantBySlug('yoga-demo');
+  if (yoga) {
+    const [p10, p5] = await db
+      .insert(offerings)
+      .values([
+        { tenantId: yoga.id, kind: 'package', name: 'Paquete 10 clases', priceCents: 120000, sessions: 10, validityDays: 90 },
+        { tenantId: yoga.id, kind: 'package', name: 'Paquete 5 clases', priceCents: 65000, sessions: 5, validityDays: 45 },
+        { tenantId: yoga.id, kind: 'membership', name: 'Mensual ilimitado', priceCents: 150000, sessions: null },
+      ])
+      .returning();
+    await sellAndUse(yoga.id, p10!, await unpaidCompleted(yoga.id, 40), 7);
+    await sellAndUse(yoga.id, p5!, await unpaidCompleted(yoga.id, 12), 3);
+  }
+  const nutri = await tenantBySlug('nutricion-demo');
+  if (nutri) {
+    const svc = await db.select().from(services).where(eq(services.tenantId, nutri.id));
+    const follow = svc.filter((x) => /seguimiento/i.test(x.name)).map((x) => x.id);
+    const [pk] = await db
+      .insert(offerings)
+      .values({ tenantId: nutri.id, kind: 'package', name: 'Paquete 4 seguimientos', priceCents: 160000, sessions: 4, validityDays: 120, serviceIds: follow })
+      .returning();
+    await sellAndUse(nutri.id, pk!, await unpaidCompleted(nutri.id, 8, follow), 2);
+    // Client records (no photos): allergies, conditions, consent and dated notes by the owner
+    const cs = await db.select().from(customers).where(eq(customers.tenantId, nutri.id)).limit(10);
+    const ALLERGY = ['Mariscos', null, 'Lactosa (intolerancia)', null, 'Nuez', null, 'Penicilina', null];
+    const COND = ['Hipotiroidismo; levotiroxina 50 mcg', 'Prediabetes', null, 'Hipertensión; losartán', null, 'Colitis', null, 'Ninguno'];
+    const NOTES = [
+      'Primera consulta: % grasa 31. Plan de 1,800 kcal, aumentar proteína en desayuno.',
+      'Seguimiento: bajó 1.8 kg. Ajuste de colaciones, agregar 2 L de agua.',
+      'Refiere ansiedad por la noche; cambiar cena a más temprano.',
+      'Bioimpedancia: masa muscular estable. Mantener plan dos semanas.',
+    ];
+    for (const [i, cu] of cs.entries()) {
+      await db.insert(customerRecords).values({
+        customerId: cu.id, tenantId: nutri.id,
+        allergiesEnc: ALLERGY[i % ALLERGY.length] ? encryptSecret(ALLERGY[i % ALLERGY.length]!) : null,
+        conditionsEnc: COND[i % COND.length] ? encryptSecret(COND[i % COND.length]!) : null,
+        consentAt: DateTime.now().minus({ days: 60 - i }).toJSDate(), consentBy: demoOwnerId, updatedBy: demoOwnerId,
+      });
+      for (let k = 0; k < 1 + (i % 3); k++) {
+        await db.insert(recordNotes).values({
+          tenantId: nutri.id, customerId: cu.id, bodyEnc: encryptSecret(NOTES[(i + k) % NOTES.length]!), authorId: demoOwnerId,
+          authorName: DEMO_OWNER.name, createdAt: DateTime.now().minus({ days: 40 - k * 14 - i }).toJSDate(),
+        });
+      }
+    }
+  }
+  const padel = await tenantBySlug('padel-demo');
+  if (padel) {
+    const [m8] = await db
+      .insert(offerings)
+      .values([
+        { tenantId: padel.id, kind: 'membership', name: 'Membresía 8 horas al mes', priceCents: 280000, sessions: 8 },
+        { tenantId: padel.id, kind: 'membership', name: 'Membresía ilimitada', priceCents: 450000, sessions: null },
+      ])
+      .returning();
+    await sellAndUse(padel.id, m8!, await unpaidCompleted(padel.id, 20), 5);
+  }
+  // Barbershop: commissions, a package, gift cards and two cash closings
+  const barber = await tenantBySlug('barberia-demo');
+  if (barber) {
+    const svc = await db.select().from(services).where(eq(services.tenantId, barber.id));
+    const combo = svc.find((x) => /barba/i.test(x.name) && /corte/i.test(x.name));
+    const team = await db.select().from(resources).where(eq(resources.tenantId, barber.id));
+    for (const [i, r] of team.entries()) {
+      await db
+        .update(resources)
+        .set({ commissionPct: String([40, 45, 35, 40][i % 4]), commissionByService: combo && i === 0 ? { [combo.id]: 50 } : {} })
+        .where(eq(resources.id, r.id));
+    }
+    const cuts = svc.filter((x) => /^corte$/i.test(x.name)).map((x) => x.id);
+    const [p5] = await db
+      .insert(offerings)
+      .values({ tenantId: barber.id, kind: 'package', name: '5 cortes', priceCents: 100000, sessions: 5, validityDays: 90, serviceIds: cuts })
+      .returning();
+    await sellAndUse(barber.id, p5!, await unpaidCompleted(barber.id, 9, cuts), 3);
+    const someCustomers = await db.select().from(customers).where(eq(customers.tenantId, barber.id)).limit(3);
+    for (const [i, cu] of someCustomers.entries()) {
+      const code = ['REGALO24', 'CUMPLE50', 'PAPA2026'][i]!;
+      const amount = [50000, 30000, 80000][i]!;
+      const [g] = await db
+        .insert(giftCards)
+        .values({ tenantId: barber.id, code, initialCents: amount, balanceCents: i === 1 ? 5000 : amount, customerId: cu.id, recipientName: ['Para Javier', 'Para Rodrigo', 'Para mi papá'][i], soldBy: demoOwnerId })
+        .returning();
+      await db.insert(payments).values({ tenantId: barber.id, customerId: cu.id, amountCents: amount, method: 'card', status: 'paid', paidAt: DateTime.now().minus({ days: 10 + i }).toJSDate(), soldGiftCardId: g!.id, notes: `Tarjeta de regalo ${code}` });
+    }
+    // Cash closings for the last two days at each location
+    const locs = await db.select().from(locations).where(eq(locations.tenantId, barber.id));
+    for (const l of locs) {
+      for (const back of [1, 2]) {
+        const day = DateTime.now().setZone(TZ).minus({ days: back });
+        const res = await db.execute<{ method: string; total: string }>(sql`
+          select p.method::text as method, sum(p.amount_cents) as total from payments p left join appointments a on a.id = p.appointment_id
+          where p.tenant_id = ${barber.id} and p.status = 'paid' and coalesce(p.location_id, a.location_id) = ${l.id}
+            and p.paid_at >= ${day.startOf('day').toJSDate()} and p.paid_at <= ${day.endOf('day').toJSDate()}
+          group by 1`);
+        const byMethod: Record<string, number> = { cash: 0, card: 0, transfer: 0, mercadopago: 0, spei: 0, gift_card: 0 };
+        for (const r of res.rows) byMethod[r.method] = Number(r.total);
+        const expected = byMethod.cash ?? 0;
+        await db.insert(cashClosings).values({
+          tenantId: barber.id, locationId: l.id, day: day.toISODate()!, byMethod, salesCents: 0, expectedCashCents: expected,
+          countedCashCents: back === 1 ? expected : Math.max(0, expected - 5000), notes: back === 1 ? null : 'Faltaron $50 de cambio',
+          closedBy: demoOwnerId, closedByName: DEMO_OWNER.name, createdAt: day.set({ hour: 21 }).toJSDate(),
+        });
+      }
+    }
+  }
+  await seedReviews();
+}
+
+/** Verified reviews on every business in the directory (on completed bookings). */
+async function seedReviews() {
+  const db = getDb();
+  // Only demo businesses (never real ones that are also in the directory)
+  const listed = (await db.select().from(tenants).where(eq(tenants.directoryListed, true))).filter((t) => t.slug.endsWith('-demo') || t.slug.startsWith('demo-'));
+  for (const [ti, t] of listed.entries()) {
+    let done = await db.execute<{ id: string; customer_id: string; location_id: string; name: string; starts_at: Date }>(sql`
+      select a.id, a.customer_id, a.location_id, cu.name, a.starts_at from appointments a join customers cu on cu.id = a.customer_id
+      where a.tenant_id = ${t.id} and a.status = 'completed' order by a.starts_at desc limit 40`);
+    if (!done.rows.length) {
+      // Directory-only demos: a few past visits to hang the reviews on
+      const svc = await db.query.services.findFirst({ where: eq(services.tenantId, t.id) });
+      const loc = await db.query.locations.findFirst({ where: eq(locations.tenantId, t.id) });
+      if (!svc || !loc) continue;
+      const names = ['Ana Torres', 'Luis Medina', 'Karla Ruiz', 'Diego Salas', 'Sofía Rangel'];
+      for (const [k, name] of names.slice(0, 3 + (ti % 3)).entries()) {
+        const [cu] = await db.insert(customers).values({ tenantId: t.id, name, phone: `+52331999${String(ti * 10 + k).padStart(4, '0')}` }).returning();
+        const at = DateTime.now().setZone(TZ).minus({ days: 5 + k * 9 }).set({ hour: 12, minute: 0 });
+        await db.insert(appointments).values({ tenantId: t.id, customerId: cu!.id, serviceId: svc.id, locationId: loc.id, startsAt: at.toJSDate(), endsAt: at.plus({ minutes: svc.durationMin }).toJSDate(), status: 'completed', priceCents: svc.priceCents, source: 'online' });
+      }
+      done = await db.execute(sql`
+        select a.id, a.customer_id, a.location_id, cu.name, a.starts_at from appointments a join customers cu on cu.id = a.customer_id
+        where a.tenant_id = ${t.id} and a.status = 'completed' order by a.starts_at desc limit 40`);
+    }
+    const seen = new Set<string>();
+    const howMany = 3 + ((ti * 7) % 6);
+    let n = 0;
+    for (const a of done.rows) {
+      if (n >= howMany || seen.has(a.customer_id)) continue;
+      seen.add(a.customer_id);
+      const [rating, comment] = REVIEW_TEXTS[(ti + n) % REVIEW_TEXTS.length]!;
+      const created = DateTime.fromJSDate(new Date(a.starts_at)).plus({ hours: 5 }).toJSDate();
+      await db.insert(reviews).values({
+        tenantId: t.id, appointmentId: a.id, customerId: a.customer_id, locationId: a.location_id, authorName: short(a.name), rating, comment,
+        reply: n === 0 ? REPLIES[0]! : rating === 3 ? REPLIES[1]! : null, repliedAt: n === 0 || rating === 3 ? created : null,
+        hidden: false, createdAt: created,
+      });
+      n++;
+    }
+    // One offensive review hidden by the business, to show moderation
+    if (t.slug === 'barberia-demo') {
+      const a = done.rows.find((x) => !seen.has(x.customer_id));
+      if (a) await db.insert(reviews).values({ tenantId: t.id, appointmentId: a.id, customerId: a.customer_id, locationId: a.location_id, authorName: short(a.name), rating: 1, comment: 'Comentario ofensivo (oculto por el negocio).', hidden: true });
+    }
+  }
+  console.log(`Seeded packages, records, commissions, cash closings and reviews`);
 }
