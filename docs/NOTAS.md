@@ -131,7 +131,7 @@ Necesario:
 - Bloqueos de días u horas (todo el negocio, una sucursal o un recurso) desde la agenda.
 - Fotos de equipo/espacios y servicios en Vercel Blob (store `agenda-fotos`, variable `BLOB_READ_WRITE_TOKEN`).
 - Nota y calificación interna 1–5 por cita; promedio por cliente.
-- Pendiente sugerido: que el cliente califique su visita con un enlace por WhatsApp.
+- ~~Pendiente sugerido: que el cliente califique su visita con un enlace por WhatsApp.~~ (hecho en la sección 11)
 
 
 ---
@@ -152,3 +152,102 @@ Negocio con vista previa:
 Hoy se asigna el espacio libre con menos uso, sin ver el precio: quien ve "desde $450" puede
 caer en la Cancha Central de $550. Propuesta: dar el más barato libre (repartiendo entre los del
 mismo precio) y mostrar el precio final antes de confirmar si solo queda uno más caro.
+
+
+---
+
+## 11. Paquetes, expediente, comisiones/caja, reseñas y calendario (hecho, migración 0011)
+
+**Paquetes, membresías y tarjetas de regalo** (Estándar y Premium)
+- Catálogo en Configuración → Paquetes: paquete = N sesiones con vigencia en días; membresía =
+  un mes con sesiones ilimitadas o con tope mensual. Cubren todos los servicios o los elegidos.
+- Venta desde la ficha del cliente (pago en efectivo, tarjeta o transferencia; en línea, después).
+  La membresía se renueva vendiendo otro mes.
+- Consumo: al marcar "Asistió", la ventana de la cita ofrece "Descontar sesión" de un paquete
+  vigente que cubra ese servicio, o "Cobrar normal". La cita queda cubierta (no debe). Si se
+  deshace "Asistió", la sesión regresa al paquete. Una clase con 2 lugares toma 2 sesiones.
+- Tarjeta de regalo: código de 8 caracteres, se vende al cliente que la compra (puede ser para
+  otra persona) y se usa como forma de pago al cobrar una cita (descuenta saldo).
+- El cliente ve "te quedan N sesiones" al reservar y en "gestionar mi cita".
+
+**Expediente del cliente** (Estándar y Premium)
+- Alergias, padecimientos/medicamentos, notas con fecha y autor (historial), fotos antes/después
+  con nota, y casilla de consentimiento (fecha y quién lo registró).
+- Cifrado en la base de datos (AES-256-GCM, `lib/crypto.ts`). Lo ven dueño, administradores y el
+  colaborador que atendió al cliente; recepción no.
+- Fotos en un store de Vercel Blob **privado** (`agenda-expedientes`, ya creado). Solo se sirven
+  a través de la API con sesión; nunca en páginas públicas. Comprimidas en el navegador (máx. 5 MB),
+  tope de 1 GB (Estándar) y 10 GB (Premium). Al borrar al cliente se borran sus fotos.
+- **Pendiente tuyo:** conectar el store al proyecto con el prefijo `EXPEDIENTES` (crea la variable
+  `EXPEDIENTES_READ_WRITE_TOKEN`). Mientras tanto el expediente funciona sin fotos.
+- Recomendado: crear `DATA_ENCRYPTION_KEY` **antes** de tener datos reales (hoy la llave sale de
+  `JWT_SECRET`; cambiarla después vuelve ilegibles los datos cifrados existentes).
+
+**Comisiones y corte de caja** (Estándar y Premium)
+- Porcentaje general por persona y, opcional, por servicio (Cobros → Comisiones → Porcentajes).
+- Reporte por rango de fechas con citas completadas, vendido y comisión; exporta CSV (Excel).
+  Las sesiones de paquete cuentan a precio completo; con cupón o recompensa, al precio cobrado.
+- Corte de caja por día y sucursal: cobros por forma de pago (incluye tarjeta de regalo) y ventas
+  de paquetes/membresías/tarjetas; efectivo esperado contra contado, diferencia, quién lo hizo e
+  historial. Gerente: solo su sucursal. Colaborador: solo sus comisiones, sin caja.
+
+**Reseñas verificadas** (todos los planes)
+- Enlace único por cita completada (`/r/<token>`, mismo token firmado de "gestionar mi cita");
+  1–5 estrellas y comentario, una por cita. Se publica con nombre e inicial del apellido.
+- El negocio responde en público u oculta reseñas; no puede editarlas.
+- Promedio, número y las más recientes en la página pública y en el directorio.
+- Botón "Pedir reseña por WhatsApp" en la cita completada (enlace wa.me). El envío automático
+  por WhatsApp después de la visita queda pendiente (hoy solo hay recordatorios).
+
+**Calendario por suscripción (iCal)** (todos los planes)
+- Enlace secreto del negocio, de cada sucursal y de cada persona (el colaborador solo ve el suyo),
+  en Configuración → Mi cuenta. Botón copiar, instrucciones y "Regenerar" (invalida el anterior).
+- Eventos con servicio, primer nombre y sucursal; sin teléfonos ni notas. 30 días atrás y 180 adelante.
+
+---
+
+## 12. Competencia y pendientes
+
+### Competencia real en México
+- **AgendaPro** (Chile): más de 20 mil negocios en México; levantó US$35 millones en 2025.
+  Planes MX$299 (1 profesional), $550 (2–20) y $1,500 Premium, + IVA. WhatsApp en paquetes desde
+  $100 por 50 mensajes; facturación "próximamente".
+- **Reservio** (República Checa): básico, de US$10 a 40 por usuario.
+- **Reservo** (Chile): enfocado en salud y expediente clínico.
+- **Fresha y Booksy**: marketplaces que cobran comisión por cliente nuevo (se reporta 15–20%).
+
+### Nuestras ventajas
+- Un sistema para cualquier giro: citas, mesas, canchas y clases.
+- Directorio sin comisión.
+- Precio por negocio, no por profesional.
+- Plan gratis, varias sucursales con gerentes y soporte local en Colima y Guadalajara.
+
+### Pendientes (en orden)
+1. App instalable desde el navegador (PWA) e íconos: los dueños usan el celular.
+2. Cobros: suscripción con tarjeta, y anticipo/depósito al reservar para evitar que el cliente
+   no llegue (venta en línea de paquetes y tarjetas de regalo también espera esto).
+3. Facturación CFDI: AgendaPro aún no la tiene; es nuestra mejor ventaja.
+4. Confianza: testimonios de negocios reales, dominio propio y soporte por WhatsApp.
+5. Sincronización completa con Google Calendar en los dos sentidos (OAuth):
+   - Que los eventos personales bloqueen horarios.
+   - Requiere un proyecto de Google Cloud a tu nombre y la verificación de Google (semanas).
+   - Hoy solo existe el enlace de suscripción (un sentido).
+
+### Estrategia de precios
+- No bajar precios.
+- Agregar un plan **Individual** de unos $249 + IVA (1 profesional).
+- Incluir un paquete de WhatsApp en Estándar.
+- Publicar los precios "+ IVA".
+- Vender contra las comisiones de Fresha y Booksy.
+- Entrar por los nichos débiles de la competencia: pádel, restaurantes, clases y gimnasios en
+  GDL; todos los giros en Colima, con visitas en persona.
+
+### Nombre de la marca
+- Finalistas con .com libre: **Cupolio.com, Turnoma.com, Apartadito.com, Cupoclub.com y
+  Turnoamigo.com**.
+- Falta revisar el IMPI (Marcanet, clases 42 y 35) antes de comprar el dominio y registrar la marca.
+- Evitar nombres con "Agend-" y "Reserv-": se parecen a AgendaPro, Agendio, Reservio y Reservo.
+
+### Tamaño ideal
+- 300–600 negocios pagando para operarlo con 1–2 personas de soporte.
+- WhatsApp es el costo más grande por cliente: incluirlo con tope, no ilimitado.

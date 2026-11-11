@@ -9,6 +9,18 @@ Each business (tenant) has its own plan (`tenants.plan`). Limits and prices live
 | Estándar | $399 / month        | no limit  | 500              | 1 + extras| yes (each extra) |
 | Premium  | to be defined       | no limit  | no limit         | 1 + extras| yes              |
 
+Features by plan (`PLAN_LIMITS.packages | records | cash | recordPhotosMb`):
+
+| Feature | Gratis | Estándar | Premium |
+|---|---|---|---|
+| Verified reviews, iCal calendar links | ✓ | ✓ | ✓ |
+| Packages, memberships, gift cards | – | ✓ | ✓ |
+| Client record (encrypted) | – | ✓ (1 GB photos) | ✓ (10 GB photos) |
+| Commissions and cash closing | – | ✓ | ✓ |
+
+Missing feature → **402** `plan_limit_packages | plan_limit_records | plan_limit_cash`; photo
+storage full → `plan_limit_photos`.
+
 Add-ons: extra active location $199 / month, extra business $299 / month (includes Estándar).
 Over a limit the API answers **402** with `plan_limit_customers | plan_limit_bookings |
 plan_limit_locations | plan_limit_businesses`. Logins (admins, gerentes, colaboradores) are free.
