@@ -4,6 +4,7 @@ import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { seedDemo } from './db/demo-data.js';
 import { sendDueReminders } from './jobs/reminders.js';
+import { portalRoutes } from './routes/portal.js';
 import { isRemindersWorkflow } from './lib/github-oidc.js';
 import { errorHandler } from './lib/errors.js';
 import { requireAuth, type AppEnv } from './middleware/auth.js';
@@ -73,6 +74,7 @@ export function createApp() {
   app.route('/', directoryRoutes);
   app.route('/', manageRoutes);
   app.route('/', publicRoutes);
+  app.route('/', portalRoutes);
   app.route('/', webhookRoutes);
   app.route('/', publicReviewRoutes);
   app.route('/', publicCalendarRoutes);
@@ -84,7 +86,7 @@ export function createApp() {
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();
   // Auth on explicit prefixes so unknown paths still return 404 instead of 401.
-  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections', '/coupons', '/offerings', '/customer-plans', '/gift-cards', '/cash', '/record-notes', '/record-photos', '/reviews', '/calendar-feeds', '/forms', '/clinical-notes']) {
+  for (const prefix of ['/customers', '/services', '/appointments', '/payments', '/metrics', '/reports', '/resources', '/class-sessions', '/locations', '/time-blocks', '/uploads', '/collections', '/coupons', '/offerings', '/customer-plans', '/gift-cards', '/cash', '/record-notes', '/record-photos', '/reviews', '/calendar-feeds', '/forms', '/clinical-notes', '/studies']) {
     priv.use(prefix, requireAuth);
     priv.use(`${prefix}/*`, requireAuth);
   }

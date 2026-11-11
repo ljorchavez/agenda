@@ -484,6 +484,45 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
     ok('dental record shows the current odontogram', ((await page.getByTestId('clinical-record').textContent().catch(() => '')) ?? '').includes('Odontograma actual'));
   }
 }
+// ---- Medical demo: CIE-10 search, allergy alert, prescription check page, portal, own templates
+{
+  const login = await api('/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
+  const med = (await api('/auth/switch', { tenantId: login.businesses.find((b) => b.slug === 'medico-demo').id }, login.token)).token;
+  await page.evaluate((t) => localStorage.setItem('agenda.token', t), med);
+  let target = null;
+  let rxPath = null;
+  for (const c of (await api('/customers?limit=200', null, med)).items) {
+    const r = await api(`/customers/${c.id}/clinical`, null, med);
+    if (!rxPath) rxPath = r?.notes?.find((n) => n.verifyPath)?.verifyPath ?? null;
+    if (!target && /enicil/i.test(r?.patient?.allergies ?? '')) target = c;
+    if (target && rxPath) break;
+  }
+  ok('demo patient with penicillin allergy and a prescription', Boolean(target && rxPath));
+  if (target) {
+    await page.goto(`http://localhost:5173/customers/${target.id}`);
+    await page.getByTestId('new-evolution').click();
+    await page.getByTestId('clinical-editor').waitFor({ timeout: 6000 }).catch(() => {});
+    await page.getByTestId('diagnoses').getByRole('textbox', { name: 'Diagnóstico' }).first().fill('lumbal');
+    await page.getByTestId('cie10-options').getByRole('option').first().click().catch(() => {});
+    ok('CIE-10 search fills code and title', (await page.getByTestId('diagnoses').getByRole('textbox', { name: 'CIE-10' }).first().inputValue().catch(() => '')) === 'M54.5');
+    await page.getByTestId('medications').getByRole('combobox', { name: 'Medicamento' }).first().fill('Amoxicilina 500 mg cápsulas').catch(async () => {
+      await page.getByTestId('medications').getByPlaceholder('Medicamento').first().fill('Amoxicilina 500 mg cápsulas');
+    });
+    ok('allergy alert when prescribing a penicillin', await page.getByTestId('allergy-alert').first().isVisible().catch(() => false));
+    await page.keyboard.press('Escape');
+  }
+  if (rxPath) {
+    await page.goto(`http://localhost:5173${rxPath}`);
+    await page.getByTestId('rx-page').waitFor({ timeout: 8000 }).catch(() => {});
+    const rxText = (await page.getByTestId('rx-page').textContent().catch(() => '')) ?? '';
+    ok('prescription check page with doctor and QR', rxText.includes('Metformina') && rxText.includes('9876543') && (await page.getByTestId('rx-qr').count()) === 1, rxText.slice(0, 160));
+  }
+  await page.goto('http://localhost:5173/p/medico-demo');
+  ok('patient portal asks for the email link', await page.getByTestId('portal-ask').isVisible().catch(() => false));
+  await page.goto('http://localhost:5173/settings');
+  await page.getByTestId('clinical-templates').waitFor({ timeout: 8000 }).catch(() => {});
+  ok('own clinical templates in settings', (await page.getByTestId('new-template').count()) === 1);
+}
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));

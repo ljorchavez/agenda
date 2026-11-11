@@ -543,13 +543,16 @@ export const recordPhotos = pgTable('record_photos', {
   tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
   appointmentId: uuid('appointment_id').references(() => appointments.id, { onDelete: 'set null' }),
-  kind: text('kind').$type<'before' | 'after' | 'other'>().notNull(),
+  /** before/after/other: photos; lab/imaging/document: studies in the clinical record */
+  kind: text('kind').$type<'before' | 'after' | 'other' | 'lab' | 'imaging' | 'document'>().notNull(),
   noteEnc: text('note_enc'),
   /** Random path in the private Blob store; never shown to customers */
   blobPath: text('blob_path').notNull(),
   sizeBytes: integer('size_bytes').notNull(),
   contentType: text('content_type').notNull(),
   createdBy: uuid('created_by'),
+  /** Shown to the patient in their portal since */
+  sharedAt: timestamp('shared_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -649,6 +652,8 @@ export const clinicalNotes = pgTable(
     signedAt: timestamp('signed_at', { withTimezone: true }),
     contentHash: text('content_hash'),
     amendsId: uuid('amends_id'),
+    /** Shown to the patient in their portal since */
+    sharedAt: timestamp('shared_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [index('clinical_notes_customer_idx').on(t.tenantId, t.customerId, t.createdAt)],

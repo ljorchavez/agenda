@@ -3,6 +3,7 @@ import { PurchasePage } from './components/Shop';
 import type { ReactElement } from 'react';
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { ClinicalPrintPage } from './components/ClinicalRecord';
+import { PortalPage, PrescriptionPage } from './pages/Portal';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
@@ -59,6 +60,9 @@ export function App() {
       <Route path="/c/:token" element={<ManagePage />} />
       <Route path="/r/:token" element={<ReviewPage />} />
       <Route path="/compra/:token" element={<PurchasePage />} />
+      {/* Patient/customer portal (magic link by email) and public check of a signed prescription */}
+      <Route path="/p/:slug" element={<PortalPage />} />
+      <Route path="/receta/:token" element={<PrescriptionPage />} />
       {/* Printable clinical documents: no menus, letterhead only */}
       <Route path="/customers/:id/imprimir" element={<Protected><PrintRecord /></Protected>} />
       {/* The business back office */}

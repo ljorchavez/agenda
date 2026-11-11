@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { Hono, type Context } from 'hono';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
-  CLINICAL_TEMPLATES,
+  clinicalTemplateById,
+  noteTemplate,
   CLINICAL_TEMPLATES_BY_TYPE,
   clinicalAddendumSchema,
   clinicalNormFor,
@@ -15,14 +16,24 @@ import {
   type ClinicalNoteDto,
   type ClinicalRecordDto,
   type Odontogram,
+  type StudyDto,
+  type StudyKind,
+  STUDY_KINDS,
+  STUDY_MAX_BYTES,
 } from '@agenda/shared';
+import { randomUUID } from 'node:crypto';
+import { put } from '@vercel/blob';
+import { z } from 'zod';
+import { assertPhotoRoom } from '../lib/plan.js';
+import { escapeHtml, sendEmail } from '../lib/email.js';
+import { appUrl } from '../lib/notify.js';
 import { getDb, type Db } from '../db/client.js';
-import { appointments, clinicalNotes, recordAccessLog, tenants, users, type ClinicalNote } from '../db/schema.js';
+import { appointments, clinicalNotes, customerRecords, customers, recordAccessLog, recordPhotos, tenants, users, type ClinicalNote } from '../db/schema.js';
 import { verifyPassword } from '../lib/auth.js';
-import { decryptSecret, encryptSecret } from '../lib/crypto.js';
+import { decryptSecret, encryptSecret, prescriptionToken } from '../lib/crypto.js';
 import { AppError, notFound } from '../lib/errors.js';
 import type { AppEnv } from '../middleware/auth.js';
-import { assertAccess } from './records.js';
+import { assertAccess, photoToken } from './records.js';
 
 /**
  * Clinical record of health businesses (NOM-004-SSA3-2012; dentistry NOM-013-SSA2-2015):
@@ -67,7 +78,7 @@ export const signatureHash = (o: { content: unknown; template: string; customerI
     .update(JSON.stringify({ c: o.content, t: o.template, p: o.customerId, a: o.author, s: o.signedAt.toISOString() }))
     .digest('hex');
 
-async function toDtos(db: Db, tenantId: string, rows: ClinicalNote[]): Promise<ClinicalNoteDto[]> {
+export async function toDtos(db: Db, tenantId: string, rows: ClinicalNote[]): Promise<ClinicalNoteDto[]> {
   const apptIds = [...new Set(rows.map((r) => r.appointmentId).filter((x): x is string => Boolean(x)))];
   const appts = apptIds.length
     ? (
@@ -93,6 +104,8 @@ async function toDtos(db: Db, tenantId: string, rows: ClinicalNote[]): Promise<C
       signedAt: n.signedAt?.toISOString() ?? null,
       contentHash: n.contentHash,
       amendsId: n.amendsId,
+      sharedAt: n.sharedAt?.toISOString() ?? null,
+      verifyPath: n.status === 'signed' && n.kind === 'prescription' ? `/receta/${prescriptionToken(n.id)}` : null,
       createdAt: n.createdAt.toISOString(),
     };
   });
@@ -128,6 +141,15 @@ clinicalRoutes.get('/customers/:id/clinical', async (c) => {
   const lastOdonto = notes.filter((n) => n.status === 'signed').find((n) => n.content.odontograma && Object.keys(n.content.odontograma as object).length);
   const u = await me(db, c);
   await logAccess(db, c, customerId, 'view', null, u.name);
+  const rec = await db.query.customerRecords.findFirst({ where: eq(customerRecords.customerId, customerId) });
+  let recAllergies: string | null = null;
+  try {
+    recAllergies = rec?.allergiesEnc ? decryptSecret(rec.allergiesEnc) : null;
+  } catch {
+    recAllergies = null;
+  }
+  const histAllergies = notes.find((n) => n.status === 'signed' && n.kind === 'history' && typeof n.content.alergias === 'string')?.content.alergias as string | undefined;
+  const allergies = [recAllergies, histAllergies].filter((x): x is string => Boolean(x && x.trim())).join('; ') || null;
   const body: ClinicalRecordDto = {
     norm: clinicalNormFor(t.businessType),
     patient: {
@@ -140,6 +162,7 @@ clinicalRoutes.get('/customers/:id/clinical', async (c) => {
       address: cu.address ?? null,
       curp: cu.curp ?? null,
       archived: Boolean(cu.archivedAt),
+      allergies,
     },
     clinic: {
       name: t.name,
@@ -149,6 +172,8 @@ clinicalRoutes.get('/customers/:id/clinical', async (c) => {
       phone: t.phone,
     },
     notes,
+    studies: await listStudies(db, t.id, customerId),
+    studiesEnabled: Boolean(photoToken()),
     odontogram: (lastOdonto?.content.odontograma as Odontogram | undefined) ?? null,
   };
   c.header('Cache-Control', 'private, no-store');
@@ -163,8 +188,12 @@ clinicalRoutes.post('/customers/:id/clinical-notes', async (c) => {
   const t = await healthTenant(db, c.get('tenantId'));
   const body = await c.req.json();
   const input = clinicalNoteInputSchema.parse(body);
-  const tpl = CLINICAL_TEMPLATES[input.template];
-  if (!tpl || !(CLINICAL_TEMPLATES_BY_TYPE[t.businessType] ?? []).includes(tpl.id)) throw new AppError(422, 'clinical_template', 'Unknown document for this business');
+  const custom = t.settings.clinicalTemplates ?? [];
+  const own = custom.find((x) => x.id === input.template);
+  const tpl = clinicalTemplateById(input.template, t.businessType, custom);
+  if (!tpl || (!own && !(CLINICAL_TEMPLATES_BY_TYPE[t.businessType] ?? []).includes(tpl.id))) throw new AppError(422, 'clinical_template', 'Unknown document for this business');
+  // The business's own templates travel with the document (see noteTemplate)
+  if (own) input.content.__template = own;
   if (input.appointmentId) {
     const a = await db.query.appointments.findFirst({ where: and(eq(appointments.id, input.appointmentId), eq(appointments.tenantId, t.id), eq(appointments.customerId, customerId)) });
     if (!a) throw notFound('appointment');
@@ -206,6 +235,8 @@ clinicalRoutes.put('/clinical-notes/:id', async (c) => {
   if (n.status === 'signed') throw new AppError(409, 'clinical_signed', 'A signed document cannot be changed; add a nota aclaratoria');
   if (n.authorId !== c.get('userId')) throw new AppError(403, 'forbidden', 'Only the author edits a draft');
   const input = clinicalNoteInputSchema.pick({ content: true }).parse(await c.req.json());
+  const before = decode(n);
+  if (before.__template) input.content.__template = before.__template;
   const db = getDb();
   const [row] = await db.update(clinicalNotes).set({ contentEnc: encryptSecret(JSON.stringify(input.content)), updatedAt: new Date() }).where(eq(clinicalNotes.id, n.id)).returning();
   return c.json((await toDtos(db, n.tenantId, [row!]))[0]);
@@ -219,7 +250,9 @@ clinicalRoutes.post('/clinical-notes/:id/sign', async (c) => {
   const db = getDb();
   const u = await checkPassword(db, c, password);
   const content = decode(n);
-  const miss = missingRequired(CLINICAL_TEMPLATES[n.template]!, content);
+  const t = await healthTenant(db, n.tenantId);
+  const tpl = noteTemplate({ template: n.template, content }, t.businessType, t.settings.clinicalTemplates ?? []);
+  const miss = tpl ? missingRequired(tpl, content) : null;
   if (miss) throw new AppError(422, 'clinical_incomplete', `Missing: ${miss}`, { field: miss });
   const author = authorOf(u);
   const signedAt = new Date();
@@ -277,7 +310,7 @@ clinicalRoutes.post('/customers/:id/clinical-log', async (c) => {
   const customerId = c.req.param('id');
   await assertAccess(c, customerId);
   const body = (await c.req.json().catch(() => ({}))) as { action?: string; detail?: string };
-  const action = body.action === 'export' ? 'export' : 'print';
+  const action = body.action === 'export' || body.action === 'send' ? body.action : 'print';
   const db = getDb();
   await logAccess(db, c, customerId, action, typeof body.detail === 'string' ? body.detail.slice(0, 200) : null, (await me(db, c)).name);
   return c.body(null, 204);
@@ -298,3 +331,98 @@ clinicalRoutes.get('/customers/:id/clinical-log', async (c) => {
   return c.json(out);
 });
 
+
+// ---------- Studies: lab results, imaging, documents (private storage) ----------
+
+const STUDY_TYPES: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+export async function listStudies(db: Db, tenantId: string, customerId: string, onlyShared = false): Promise<StudyDto[]> {
+  const rows = await db
+    .select()
+    .from(recordPhotos)
+    .where(and(eq(recordPhotos.tenantId, tenantId), eq(recordPhotos.customerId, customerId), inArray(recordPhotos.kind, [...STUDY_KINDS])))
+    .orderBy(desc(recordPhotos.createdAt));
+  return rows
+    .filter((r) => !onlyShared || r.sharedAt)
+    .map((r) => {
+      let title: string | null = null;
+      try {
+        title = r.noteEnc ? decryptSecret(r.noteEnc) : null;
+      } catch {
+        title = null;
+      }
+      return { id: r.id, kind: r.kind as StudyKind, title, contentType: r.contentType, sizeBytes: r.sizeBytes, sharedAt: r.sharedAt?.toISOString() ?? null, createdAt: r.createdAt.toISOString() };
+    });
+}
+
+clinicalRoutes.post('/customers/:id/clinical/studies', async (c) => {
+  const customerId = c.req.param('id');
+  await assertAccess(c, customerId);
+  const db = getDb();
+  const t = await healthTenant(db, c.get('tenantId'));
+  const token = photoToken();
+  if (!token) throw new AppError(502, 'record_photos_not_configured', 'Private file storage is not connected yet');
+  const body = await c.req.parseBody();
+  const file = body['file'];
+  if (!(file instanceof File)) throw new AppError(422, 'validation_error', 'Send the file in the "file" field');
+  const ext = STUDY_TYPES[file.type];
+  if (!ext) throw new AppError(422, 'unsupported_study', 'Use a PDF, JPG, PNG or WebP file');
+  if (file.size > STUDY_MAX_BYTES) throw new AppError(422, 'study_too_large', 'The file is larger than 10 MB');
+  const kind = (STUDY_KINDS as readonly string[]).includes(String(body['kind'])) ? (String(body['kind']) as StudyKind) : 'document';
+  const title = typeof body['title'] === 'string' && body['title'].trim() ? body['title'].trim().slice(0, 200) : null;
+  await assertPhotoRoom(db, t.id, file.size);
+  const blob = await put(`records/${t.id}/${randomUUID()}/${randomUUID()}.${ext}`, file, { access: 'private', token, contentType: file.type });
+  const [row] = await db
+    .insert(recordPhotos)
+    .values({ tenantId: t.id, customerId, kind, noteEnc: title ? encryptSecret(title) : null, blobPath: blob.url, sizeBytes: file.size, contentType: file.type, createdBy: c.get('userId') })
+    .returning();
+  const u = await me(db, c);
+  await logAccess(db, c, customerId, 'study', title ?? kind, u.name);
+  return c.json({ id: row!.id, kind, title, contentType: file.type, sizeBytes: file.size, sharedAt: null, createdAt: row!.createdAt.toISOString() } satisfies StudyDto, 201);
+});
+
+/** Show or hide a signed document in the patient's portal. */
+clinicalRoutes.post('/clinical-notes/:id/share', async (c) => {
+  const n = await loadNote(c, c.req.param('id'));
+  if (n.status !== 'signed') throw new AppError(409, 'clinical_draft', 'Sign the document before sharing it');
+  const { shared } = z.object({ shared: z.boolean() }).parse(await c.req.json());
+  const db = getDb();
+  const [row] = await db.update(clinicalNotes).set({ sharedAt: shared ? new Date() : null }).where(eq(clinicalNotes.id, n.id)).returning();
+  const u = await me(db, c);
+  await logAccess(db, c, n.customerId, shared ? 'share' : 'unshare', n.title, u.name);
+  return c.json((await toDtos(db, n.tenantId, [row!]))[0]);
+});
+
+clinicalRoutes.post('/studies/:id/share', async (c) => {
+  const db = getDb();
+  const st = await db.query.recordPhotos.findFirst({ where: and(eq(recordPhotos.id, c.req.param('id')), eq(recordPhotos.tenantId, c.get('tenantId'))) });
+  if (!st || !(STUDY_KINDS as readonly string[]).includes(st.kind)) throw notFound('study');
+  await assertAccess(c, st.customerId);
+  const { shared } = z.object({ shared: z.boolean() }).parse(await c.req.json());
+  await db.update(recordPhotos).set({ sharedAt: shared ? new Date() : null }).where(eq(recordPhotos.id, st.id));
+  const u = await me(db, c);
+  await logAccess(db, c, st.customerId, shared ? 'share' : 'unshare', 'study', u.name);
+  return c.json((await listStudies(db, st.tenantId, st.customerId)).find((x) => x.id === st.id));
+});
+
+/** Emails the patient the link to their signed prescription (with its verification page). */
+clinicalRoutes.post('/clinical-notes/:id/send', async (c) => {
+  const n = await loadNote(c, c.req.param('id'));
+  if (n.status !== 'signed' || n.kind !== 'prescription') throw new AppError(409, 'clinical_draft', 'Only signed prescriptions are sent');
+  const db = getDb();
+  const cu = await db.query.customers.findFirst({ where: eq(customers.id, n.customerId) });
+  if (!cu?.email) throw new AppError(422, 'customer_no_email', 'The patient has no email');
+  const t = (await db.query.tenants.findFirst({ where: eq(tenants.id, n.tenantId) }))!;
+  const link = `${appUrl()}/receta/${prescriptionToken(n.id)}`;
+  const first = cu.name.split(' ')[0] ?? cu.name;
+  const sent = await sendEmail({
+    to: cu.email,
+    subject: `Tu receta de ${t.name}`,
+    text: `Hola ${first}:\n\nAquí está tu receta. Puedes verla, imprimirla o mostrarla en la farmacia:\n${link}\n\n— ${t.name}`,
+    html: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Hola ${escapeHtml(first)}:</p><p>Aquí está tu receta. Puedes verla, imprimirla o mostrarla en la farmacia.</p><p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">Ver receta</a></p><p style="color:#475569">${escapeHtml(t.name)}</p></div>`,
+  });
+  if (!sent) throw new AppError(502, 'email_failed', 'The email could not be sent');
+  const u = await me(db, c);
+  await logAccess(db, c, n.customerId, 'send', `${n.title} (correo)`, u.name);
+  return c.json({ ok: true });
+});

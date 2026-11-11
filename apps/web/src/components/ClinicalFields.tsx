@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  MEDICATIONS_COMMON,
+  allergyConflict,
+  searchCie10,
   PERMANENT_TEETH,
   PRIMARY_TEETH,
   TOOTH_STATES,
@@ -80,6 +83,36 @@ export function AnthropometryInput({ value, onChange }: { value: Anthropometry |
   );
 }
 
+/** Allergies of the patient being written about, for the prescription check. */
+export const ClinicalPatientContext = createContext<{ allergies: string | null }>({ allergies: null });
+
+/** One diagnosis: type a code or words and pick from the CIE-10 list (or write your own). */
+function DiagnosisRow({ d, onChange, onRemove }: { d: Diagnosis; onChange: (p: Partial<Diagnosis>) => void; onRemove?: () => void }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const hits = open ? searchCie10(q || d.text || d.code || '', 8) : [];
+  return (
+    <div className="relative flex gap-2">
+      <input className={`${small} !w-24 font-mono uppercase`} placeholder="CIE-10" aria-label="CIE-10" value={d.code ?? ''} onChange={(e) => { onChange({ code: e.target.value.toUpperCase() }); setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 150)} />
+      <input className={small} placeholder={t('clinical.diagnosisSearch')} aria-label={t('clinical.diagnosisText')} value={d.text} onChange={(e) => { onChange({ text: e.target.value }); setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 150)} />
+      {onRemove && <button type="button" className="text-slate-400 hover:text-rose-700" aria-label={t('common.remove')} onClick={onRemove}>✕</button>}
+      {hits.length > 0 && (
+        <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm shadow-lg" role="listbox" data-testid="cie10-options">
+          {hits.map((h) => (
+            <li key={h.code}>
+              <button type="button" role="option" aria-selected={false} className="flex w-full gap-2 px-3 py-1.5 text-left hover:bg-brand-50" onMouseDown={(e) => e.preventDefault()} onClick={() => { onChange({ code: h.code, text: h.title }); setOpen(false); setQ(''); }}>
+                <b className="w-14 shrink-0 font-mono">{h.code}</b>
+                <span>{h.title}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function DiagnosesInput({ value, onChange }: { value: Diagnosis[] | undefined; onChange: (v: Diagnosis[]) => void }) {
   const { t } = useTranslation();
   const list = value?.length ? value : [{ code: '', text: '' }];
@@ -87,27 +120,23 @@ export function DiagnosesInput({ value, onChange }: { value: Diagnosis[] | undef
   return (
     <div className="space-y-1.5" data-testid="diagnoses">
       {list.map((d, i) => (
-        <div key={i} className="flex gap-2">
-          <input className={`${small} !w-24 font-mono uppercase`} placeholder="CIE-10" aria-label="CIE-10" value={d.code ?? ''} onChange={(e) => set(i, { code: e.target.value.toUpperCase() })} />
-          <input className={small} placeholder={t('clinical.diagnosisText')} aria-label={t('clinical.diagnosisText')} value={d.text} onChange={(e) => set(i, { text: e.target.value })} />
-          {list.length > 1 && <button type="button" className="text-slate-400 hover:text-rose-700" aria-label={t('common.remove')} onClick={() => onChange(list.filter((_, j) => j !== i))}>✕</button>}
-        </div>
+        <DiagnosisRow key={i} d={d} onChange={(p) => set(i, p)} onRemove={list.length > 1 ? () => onChange(list.filter((_, j) => j !== i)) : undefined} />
       ))}
       <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => onChange([...list, { code: '', text: '' }])}>+ {t('clinical.addDiagnosis')}</button>
     </div>
   );
 }
-
 const EMPTY_MED: Medication = { name: '', dose: '', route: '', frequency: '', duration: '' };
 export function MedicationsInput({ value, onChange }: { value: Medication[] | undefined; onChange: (v: Medication[]) => void }) {
   const { t } = useTranslation();
+  const { allergies } = useContext(ClinicalPatientContext);
   const list = value?.length ? value : [{ ...EMPTY_MED }];
   const set = (i: number, p: Partial<Medication>) => onChange(list.map((d, j) => (j === i ? { ...d, ...p } : d)));
   return (
     <div className="space-y-2" data-testid="medications">
       {list.map((m, i) => (
         <div key={i} className="grid grid-cols-2 gap-1.5 rounded-lg bg-slate-50 p-2 sm:grid-cols-5">
-          <input className={`${small} col-span-2 sm:col-span-1`} placeholder={t('clinical.medName')} aria-label={t('clinical.medName')} value={m.name} onChange={(e) => set(i, { name: e.target.value })} />
+          <input className={`${small} col-span-2 sm:col-span-1`} placeholder={t('clinical.medName')} aria-label={t('clinical.medName')} list="med-names" value={m.name} onChange={(e) => set(i, { name: e.target.value })} />
           <input className={small} placeholder={t('clinical.medDose')} aria-label={t('clinical.medDose')} value={m.dose} onChange={(e) => set(i, { dose: e.target.value })} />
           <input className={small} placeholder={t('clinical.medRoute')} aria-label={t('clinical.medRoute')} list="med-routes" value={m.route} onChange={(e) => set(i, { route: e.target.value })} />
           <input className={small} placeholder={t('clinical.medFrequency')} aria-label={t('clinical.medFrequency')} value={m.frequency} onChange={(e) => set(i, { frequency: e.target.value })} />
@@ -115,8 +144,16 @@ export function MedicationsInput({ value, onChange }: { value: Medication[] | un
             <input className={small} placeholder={t('clinical.medDuration')} aria-label={t('clinical.medDuration')} value={m.duration ?? ''} onChange={(e) => set(i, { duration: e.target.value })} />
             {list.length > 1 && <button type="button" className="text-slate-400 hover:text-rose-700" aria-label={t('common.remove')} onClick={() => onChange(list.filter((_, j) => j !== i))}>✕</button>}
           </span>
+          {allergyConflict(allergies, m.name) && (
+            <p className="col-span-full rounded bg-rose-50 px-2 py-1 text-xs font-medium text-rose-800" role="alert" data-testid="allergy-alert">
+              ⚠️ {t('clinical.allergyAlert', { group: allergyConflict(allergies, m.name), allergies })}
+            </p>
+          )}
         </div>
       ))}
+      <datalist id="med-names">
+        {MEDICATIONS_COMMON.map((n) => <option key={n} value={n} />)}
+      </datalist>
       <datalist id="med-routes">
         {['Oral', 'Sublingual', 'Tópica', 'Intramuscular', 'Intravenosa', 'Subcutánea', 'Inhalada', 'Oftálmica', 'Ótica', 'Rectal'].map((r) => <option key={r} value={r} />)}
       </datalist>
@@ -354,6 +391,7 @@ export function ClinicalFieldInput({ field, value, onChange }: { field: Clinical
     <span className="label" id={`${id}-l`}>
       {field.label}
       {field.required && <span className="text-rose-600"> *</span>}
+      {field.unit && <span className="ml-1 font-normal text-slate-400">({field.unit})</span>}
       {field.help && <span className="ml-1 font-normal text-slate-400">({field.help})</span>}
     </span>
   );

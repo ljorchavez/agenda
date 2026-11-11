@@ -1,4 +1,5 @@
 import { FormsSection } from '../components/Forms';
+import { ClinicalTemplatesEditor } from '../components/ClinicalTemplates';
 import { BusinessTypePicker } from '../components/BusinessTypePicker';
 import { AssignmentSettingsSection } from '../components/Assignment';
 import { SaveStatus, useAutoSave } from '../lib/autosave';
@@ -354,6 +355,9 @@ function BusinessSettings() {
               </section>
             )}
           </div>
+          {isHealthType(businessType) && (
+            <ClinicalTemplatesEditor value={settings.clinicalTemplates ?? []} disabled={!canEdit} onChange={(v) => setSettings((s) => ({ ...s, clinicalTemplates: v }))} />
+          )}
         </div>
       )}
 

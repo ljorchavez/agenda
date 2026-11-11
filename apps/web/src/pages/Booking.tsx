@@ -8,6 +8,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
 import {
   bookingPriceCents,
+  isHealthType,
   eligibleResources,
   kindConfig,
   discountCents,
@@ -125,6 +126,11 @@ export function BookingPage() {
         )}
         {!book.isSuccess && <ShopSection business={full} />}
         {!book.isSuccess && <PublicReviews summary={full.reviews} />}
+        <p className="text-center text-sm">
+          <Link to={`/p/${full.slug}`} className="text-brand-700 hover:underline" data-testid="portal-link">
+            {t(isHealthType(full.businessType) ? 'portal.myPortal' : 'portal.myAppointments')}
+          </Link>
+        </p>
       </div>
     </div>
   );

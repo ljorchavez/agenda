@@ -1,23 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  CLINICAL_TEMPLATES,
+  STUDY_KINDS,
   ageOn,
   clinicalTemplatesFor,
   missingRequired,
+  noteTemplate,
+  pregnancyFromFum,
+  type StudyDto,
+  type StudyKind,
   type ClinicalContent,
   type ClinicalLogDto,
   type ClinicalNoteDto,
   type ClinicalRecordDto,
   type ClinicalTemplate,
 } from '@agenda/shared';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateOnly, dateTime } from '../lib/format';
 import { SaveStatus, useAutoSave } from '../lib/autosave';
-import { ClinicalFieldInput, ClinicalFieldValue, OdontogramInput } from './ClinicalFields';
+import { ClinicalFieldInput, ClinicalFieldValue, ClinicalPatientContext, OdontogramInput } from './ClinicalFields';
 import { ErrorText, Modal } from './ui';
 import { UpgradeNote, useFeature } from './Sales';
 
@@ -101,10 +107,17 @@ function SignDialog({ title, onSign, onClose, pending, error }: { title: string;
 }
 
 /** Fill a document. Saved as a draft by itself; "Firmar" closes it for good. */
-function ClinicalEditor({ customerId, template, note, appointmentId, onClose }: { customerId: string; template: ClinicalTemplate; note?: ClinicalNoteDto; appointmentId?: string | null; onClose: () => void }) {
+function ClinicalEditor({ customerId, template, note, appointmentId, allergies, onClose }: { customerId: string; template: ClinicalTemplate; note?: ClinicalNoteDto; appointmentId?: string | null; allergies: string | null; onClose: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [content, setContent] = useState<ClinicalContent>(note?.content ?? {});
+  // Prenatal control: weeks and due date come from the last period
+  useEffect(() => {
+    if (typeof content.fum !== 'string' || !content.fum) return;
+    const p = pregnancyFromFum(content.fum);
+    if (p && (content.sdg !== p.sdg || content.fpp !== p.fpp) && template.sections.some((x) => x.fields.some((f) => f.id === 'sdg'))) setContent((c) => ({ ...c, sdg: p.sdg, fpp: p.fpp }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content.fum]);
   const [id, setId] = useState<string | null>(note?.id ?? null);
   const [signing, setSigning] = useState(false);
   const refresh = () => void qc.invalidateQueries({ queryKey: ['clinical', customerId] });
@@ -134,7 +147,9 @@ function ClinicalEditor({ customerId, template, note, appointmentId, onClose }: 
   const missing = missingRequired(template, content);
   return (
     <Modal open wide title={template.title} onClose={onClose}>
+      <ClinicalPatientContext.Provider value={{ allergies }}>
       <div className="space-y-5" data-testid="clinical-editor">
+        {allergies && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800">⚠️ {t('clinical.allergiesOnFile', { allergies })}</p>}
         <p className="text-xs text-slate-500">{template.norm} · {t('clinical.draftHelp')}</p>
         {template.sections.map((s) => (
           <section key={s.id} className="space-y-3">
@@ -159,15 +174,16 @@ function ClinicalEditor({ customerId, template, note, appointmentId, onClose }: 
           </div>
         </div>
       </div>
+      </ClinicalPatientContext.Provider>
       {signing && <SignDialog title={template.title} pending={sign.isPending} error={sign.error} onClose={() => setSigning(false)} onSign={(p) => sign.mutate(p)} />}
     </Modal>
   );
 }
 
 /** One document, read-only, with its signature. */
-export function ClinicalNoteView({ note, amended }: { note: ClinicalNoteDto; amended?: ClinicalNoteDto[] }) {
+export function ClinicalNoteView({ note, amended, businessType = '' }: { note: ClinicalNoteDto; amended?: ClinicalNoteDto[]; businessType?: string }) {
   const { t } = useTranslation();
-  const tpl = CLINICAL_TEMPLATES[note.template];
+  const tpl = noteTemplate(note, businessType);
   if (!tpl) return null;
   return (
     <div className="space-y-3">
@@ -262,7 +278,21 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
   const [editing, setEditing] = useState<{ template: ClinicalTemplate; note?: ClinicalNoteDto; appointmentId?: string | null } | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const [amending, setAmending] = useState<ClinicalNoteDto | null>(null);
-  const templates = clinicalTemplatesFor(tenant?.businessType ?? '');
+  const businessType = tenant?.businessType ?? '';
+  const custom = tenant?.settings.clinicalTemplates ?? [];
+  const templates = clinicalTemplatesFor(businessType, custom);
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['clinical', customerId] });
+  const share = useMutation({
+    mutationFn: (v: { id: string; shared: boolean }) => api(`/clinical-notes/${v.id}/share`, { method: 'POST', body: { shared: v.shared } }),
+    onSuccess: refresh,
+  });
+  const sendRx = useMutation({ mutationFn: (id: string) => api(`/clinical-notes/${id}/send`, { method: 'POST' }) });
+  const whatsappRx = (n: ClinicalNoteDto) => {
+    const phone = (rec.data?.patient.phone ?? '').replace(/\D/g, '');
+    const link = `${window.location.origin}${n.verifyPath}`;
+    void api(`/customers/${customerId}/clinical-log`, { method: 'POST', body: { action: 'send', detail: `${n.title} (WhatsApp)` } }).catch(() => {});
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(t('clinical.rxWhatsapp', { business: tenant?.name ?? '', link }))}`, '_blank');
+  };
   const remove = useMutation({
     mutationFn: (id: string) => api(`/clinical-notes/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['clinical', customerId] }),
@@ -357,16 +387,32 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
                 </button>
                 {viewing === n.id && (
                   <div className="space-y-3 border-t border-slate-100 px-3 py-3">
-                    <ClinicalNoteView note={n} amended={addenda.filter((a) => a.amendsId === n.id)} />
+                    <ClinicalNoteView note={n} businessType={businessType} amended={addenda.filter((a) => a.amendsId === n.id)} />
+                    {n.sharedAt && <p className="text-xs text-emerald-700">👁 {t('clinical.sharedSince', { date: dateOnly(n.sharedAt) })}</p>}
+                    <ErrorText error={sendRx.variables === n.id ? sendRx.error : null} ns="clinical" />
                     <div className="flex flex-wrap gap-3 text-xs">
                       {n.status === 'signed' ? (
                         <>
                           <Link to={`/customers/${customerId}/imprimir?doc=${n.id}`} target="_blank" className="text-brand-700 hover:underline">🖨️ {t('clinical.print')}</Link>
+                          {n.verifyPath && (
+                            <>
+                              <a href={n.verifyPath} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">🔎 {t('clinical.rxView')}</a>
+                              {d.patient.email && (
+                                <button type="button" className="text-brand-700 hover:underline disabled:opacity-50" disabled={sendRx.isPending} onClick={() => sendRx.mutate(n.id)} data-testid="rx-email">
+                                  ✉️ {sendRx.isSuccess && sendRx.variables === n.id ? t('clinical.rxSent') : t('clinical.rxEmail')}
+                                </button>
+                              )}
+                              {d.patient.phone && <button type="button" className="text-brand-700 hover:underline" onClick={() => whatsappRx(n)}>💬 WhatsApp</button>}
+                            </>
+                          )}
+                          <button type="button" className="text-slate-600 hover:underline" onClick={() => share.mutate({ id: n.id, shared: !n.sharedAt })} data-testid="share-note">
+                            {n.sharedAt ? `👁 ${t('clinical.unshare')}` : `👁 ${t('clinical.share')}`}
+                          </button>
                           <button type="button" className="text-slate-600 hover:underline" onClick={() => setAmending(n)}>{t('clinical.addAddendum')}</button>
                         </>
                       ) : n.authorId === user?.id ? (
                         <>
-                          <button type="button" className="text-brand-700 hover:underline" onClick={() => setEditing({ template: CLINICAL_TEMPLATES[n.template]!, note: n })}>{t('clinical.continue')}</button>
+                          <button type="button" className="text-brand-700 hover:underline" onClick={() => { const tp = noteTemplate(n, businessType, custom); if (tp) setEditing({ template: tp, note: n }); }}>{t('clinical.continue')}</button>
                           <button type="button" className="text-rose-700 hover:underline" onClick={() => window.confirm(t('clinical.deleteDraft')) && remove.mutate(n.id)}>{t('common.delete')}</button>
                         </>
                       ) : null}
@@ -377,11 +423,13 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
             ))}
             {main.length === 0 && <li className="text-sm text-slate-500">{t('clinical.empty')}</li>}
           </ul>
+          <GrowthChart notes={main} />
+          <StudiesSection customerId={customerId} studies={d.studies} enabled={d.studiesEnabled} />
           {(user?.role === 'owner' || user?.role === 'admin') && <AccessLog customerId={customerId} />}
           <p className="text-[11px] text-slate-400">{t('clinical.retention')}</p>
         </>
       )}
-      {editing && <ClinicalEditor customerId={customerId} template={editing.template} note={editing.note} appointmentId={editing.appointmentId} onClose={() => setEditing(null)} />}
+      {editing && <ClinicalEditor customerId={customerId} template={editing.template} note={editing.note} appointmentId={editing.appointmentId} allergies={d?.patient.allergies ?? null} onClose={() => setEditing(null)} />}
       {amending && <AddendumDialog note={amending} onClose={() => setAmending(null)} />}
     </section>
   );
@@ -431,8 +479,9 @@ export function ClinicalPrintPage({ customerId }: { customerId: string }) {
       {notes.map((n) => (
         <article key={n.id} className="mb-6 break-inside-avoid-page">
           <h2 className="text-lg font-semibold">{n.title}</h2>
-          <div className="mb-2 text-xs text-slate-500">{dateTime(n.signedAt!)}{n.serviceName ? ` · ${n.serviceName}` : ''} · {CLINICAL_TEMPLATES[n.template]?.norm}</div>
+          <div className="mb-2 text-xs text-slate-500">{dateTime(n.signedAt!)}{n.serviceName ? ` · ${n.serviceName}` : ''} · {noteTemplate(n, '')?.norm}</div>
           <ClinicalNoteView note={n} amended={addenda.filter((a) => a.amendsId === n.id)} />
+          {n.verifyPath && <RxQr path={n.verifyPath} />}
           {n.author && (
             <div className="mt-8 w-72 border-t border-slate-500 pt-1 text-center text-xs">
               <b>{n.author.name}</b>
@@ -445,6 +494,134 @@ export function ClinicalPrintPage({ customerId }: { customerId: string }) {
       ))}
       {notes.length === 0 && <p className="text-slate-500">{t('clinical.nothingToPrint')}</p>}
       <footer className="mt-6 border-t border-slate-200 pt-2 text-[10px] text-slate-500">{t('clinical.confidential')}</footer>
+    </div>
+  );
+}
+
+/** QR to the public check of a prescription (pharmacies scan it). */
+export function RxQr({ path }: { path: string }) {
+  const { t } = useTranslation();
+  const [src, setSrc] = useState<string | null>(null);
+  const url = `${window.location.origin}${path}`;
+  useEffect(() => {
+    void QRCode.toDataURL(url, { margin: 1, width: 160 }).then(setSrc).catch(() => setSrc(null));
+  }, [url]);
+  if (!src) return null;
+  return (
+    <div className="mt-3 flex items-center gap-3 text-[11px] text-slate-500" data-testid="rx-qr">
+      <img src={src} alt={t('clinical.rxQr')} width={96} height={96} />
+      <span>{t('clinical.rxQrHelp')}<br /><span className="break-all">{url}</span></span>
+    </div>
+  );
+}
+
+/** Weight and height over time, from the notes that record them (growth, nutrition, physio). */
+function GrowthChart({ notes }: { notes: ClinicalNoteDto[] }) {
+  const { t } = useTranslation();
+  const points = notes
+    .filter((n) => n.status === 'signed')
+    .map((n) => {
+      const m = (n.content.medidas ?? n.content.signos) as { peso?: number | null; talla?: number | null } | undefined;
+      return { at: n.appointmentAt ?? n.signedAt ?? n.createdAt, peso: m?.peso ?? null, talla: m?.talla ?? null };
+    })
+    .filter((p) => p.peso != null || p.talla != null)
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map((p) => ({ ...p, label: dateOnly(p.at) }));
+  if (points.length < 2) return null;
+  return (
+    <div className="rounded-lg border border-slate-200 p-3" data-testid="growth-chart">
+      <h3 className="mb-2 text-sm font-semibold">📈 {t('clinical.growth')}</h3>
+      <div className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+            <YAxis yAxisId="kg" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+            <YAxis yAxisId="cm" orientation="right" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+            <Tooltip />
+            <Line yAxisId="kg" type="monotone" dataKey="peso" name={`${t('clinical.weight')} (kg)`} stroke="#0f766e" strokeWidth={2} connectNulls dot />
+            <Line yAxisId="cm" type="monotone" dataKey="talla" name={`${t('clinical.height')} (cm)`} stroke="#7c3aed" strokeWidth={2} connectNulls dot />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/** Opens a private file (needs the session) in a new tab. */
+async function openPrivate(path: string) {
+  const win = window.open('', '_blank');
+  const res = await fetch(path, { headers: { Authorization: `Bearer ${tokenStore.get() ?? ''}` } });
+  if (!res.ok) {
+    win?.close();
+    return;
+  }
+  const url = URL.createObjectURL(await res.blob());
+  if (win) win.location.href = url;
+  else window.location.href = url;
+}
+
+const KB = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/** Lab results, imaging and other documents attached to the record (PDF or pictures). */
+function StudiesSection({ customerId, studies, enabled }: { customerId: string; studies: StudyDto[]; enabled: boolean }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const file = useRef<HTMLInputElement>(null);
+  const [kind, setKind] = useState<StudyKind>('lab');
+  const [title, setTitle] = useState('');
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['clinical', customerId] });
+  const upload = useMutation({
+    mutationFn: (f: File) => {
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('kind', kind);
+      if (title.trim()) fd.append('title', title.trim());
+      return api<StudyDto>(`/customers/${customerId}/clinical/studies`, { method: 'POST', body: fd });
+    },
+    onSuccess: () => {
+      setTitle('');
+      if (file.current) file.current.value = '';
+      refresh();
+    },
+  });
+  const share = useMutation({ mutationFn: (v: { id: string; shared: boolean }) => api(`/studies/${v.id}/share`, { method: 'POST', body: { shared: v.shared } }), onSuccess: refresh });
+  const del = useMutation({ mutationFn: (id: string) => api(`/record-photos/${id}`, { method: 'DELETE' }), onSuccess: refresh });
+  return (
+    <div className="rounded-lg border border-slate-200 p-3" data-testid="studies">
+      <h3 className="mb-2 text-sm font-semibold">🧪 {t('clinical.studies')}</h3>
+      {!enabled ? (
+        <p className="text-xs text-slate-500">{t('clinical.studiesOff')}</p>
+      ) : (
+        <div className="mb-3 flex flex-wrap items-end gap-2">
+          <select className="input !w-auto !py-1.5 text-sm" value={kind} onChange={(e) => setKind(e.target.value as StudyKind)} aria-label={t('clinical.studyKind')}>
+            {STUDY_KINDS.map((k) => <option key={k} value={k}>{t(`clinical.studyKinds.${k}`)}</option>)}
+          </select>
+          <input className="input !w-56 !py-1.5 text-sm" placeholder={t('clinical.studyTitle')} aria-label={t('clinical.studyTitle')} value={title} onChange={(e) => setTitle(e.target.value)} />
+          <label className="btn-secondary !py-1.5 text-sm">
+            {upload.isPending ? t('common.loading') : `📎 ${t('clinical.studyUpload')}`}
+            <input ref={file} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" data-testid="study-file" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
+          </label>
+        </div>
+      )}
+      <ErrorText error={upload.error} ns="clinical" />
+      <ul className="max-h-64 space-y-1 overflow-y-auto text-sm">
+        {studies.map((st) => (
+          <li key={st.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5">
+            <button type="button" className="min-w-0 text-left hover:underline" onClick={() => void openPrivate(`/api/record-photos/${st.id}`)}>
+              {st.contentType === 'application/pdf' ? '📄' : '🖼️'} <b>{st.title ?? t(`clinical.studyKinds.${st.kind}`)}</b>
+              <span className="text-xs text-slate-500"> · {t(`clinical.studyKinds.${st.kind}`)} · {dateOnly(st.createdAt)} · {KB(st.sizeBytes)}</span>
+            </button>
+            <span className="flex gap-3 text-xs">
+              <button type="button" className="text-slate-600 hover:underline" onClick={() => share.mutate({ id: st.id, shared: !st.sharedAt })}>
+                👁 {st.sharedAt ? t('clinical.unshare') : t('clinical.share')}
+              </button>
+              <button type="button" className="text-rose-700 hover:underline" onClick={() => window.confirm(t('clinical.studyDelete')) && del.mutate(st.id)}>{t('common.delete')}</button>
+            </span>
+          </li>
+        ))}
+        {studies.length === 0 && <li className="text-xs text-slate-500">{t('clinical.noStudies')}</li>}
+      </ul>
     </div>
   );
 }

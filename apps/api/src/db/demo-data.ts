@@ -1556,6 +1556,13 @@ async function seedClinical() {
           contentHash: signatureHash({ content, template: 'addendum', customerId: p.customer_id, author, signedAt }), createdAt: signedAt,
         });
       }
+      if (i === 0 && (type === 'medical' || type === 'dental')) {
+        // A prescription the patient can see in their portal
+        const meds = type === 'dental'
+          ? [{ name: 'Ibuprofeno 400 mg tabletas', dose: '1 tableta', route: 'Oral', frequency: 'Cada 8 horas', duration: '3 días' }]
+          : [{ name: 'Metformina 850 mg tabletas', dose: '1 tableta', route: 'Oral', frequency: 'Cada 12 horas con alimentos', duration: '30 días' }];
+        sign(p.customer_id, p.ids[1] ?? null, 'prescription', { medicamentos: meds, indicaciones: 'Tomar con alimentos.', diagnostico: type === 'dental' ? 'Pulpitis' : 'Diabetes mellitus tipo 2' }, at(1), { sharedAt: at(1) });
+      }
       if (i === 1 && (type === 'medical' || type === 'dental' || type === 'physiotherapy')) {
         const patient = (await db.query.customers.findFirst({ where: eq(customers.id, p.customer_id) }))!.name;
         sign(p.customer_id, p.ids[1] ?? null, 'consent', {

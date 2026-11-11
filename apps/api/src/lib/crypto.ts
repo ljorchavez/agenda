@@ -63,3 +63,33 @@ export function verifyManageToken(token: string): string | null {
   const given = Buffer.from(m[2]!);
   return expected.length === given.length && crypto.timingSafeEqual(expected, given) ? m[1]! : null;
 }
+
+/** Public link to verify a signed prescription (/receta/<token>): <noteId>.<hmac of "rx:id">. */
+export function prescriptionToken(noteId: string): string {
+  return `${noteId}.${manageSig(`rx:${noteId}`)}`;
+}
+export function verifyPrescriptionToken(token: string): string | null {
+  const m = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{24})$/.exec(token);
+  if (!m) return null;
+  const expected = Buffer.from(manageSig(`rx:${m[1]!}`));
+  const given = Buffer.from(m[2]!);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given) ? m[1]! : null;
+}
+
+/**
+ * Patient portal session (/p/<slug>?t=<token>), sent by email: <customerId>.<expires>.<hmac>.
+ * Valid 30 days; signing in again just sends a new link.
+ */
+export const PORTAL_DAYS = 30;
+export function portalToken(customerId: string, now = Date.now()): string {
+  const exp = Math.floor(now / 1000) + PORTAL_DAYS * 86400;
+  return `${customerId}.${exp}.${manageSig(`portal:${customerId}:${exp}`)}`;
+}
+export function verifyPortalToken(token: string | null | undefined, now = Date.now()): string | null {
+  const m = /^([0-9a-f-]{36})\.(\d{10})\.([A-Za-z0-9_-]{24})$/.exec(token ?? '');
+  if (!m) return null;
+  if (Number(m[2]) * 1000 < now) return null;
+  const expected = Buffer.from(manageSig(`portal:${m[1]!}:${m[2]!}`));
+  const given = Buffer.from(m[3]!);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given) ? m[1]! : null;
+}

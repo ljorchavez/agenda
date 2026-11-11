@@ -1580,6 +1580,89 @@ d('API (integration)', () => {
     expect((await call('POST', `/public/${slug}/bookings`, { serviceId: first.id, startsAt: slots[7], name: 'Paciente Cupon', phone: '5521212121', couponCode: 'BIENVENIDA' })).status).toBe(201);
   });
 
+  it('clinical catalogs: CIE-10 search and allergy check', async () => {
+    const { searchCie10, allergyConflict, pregnancyFromFum } = await import('@agenda/shared');
+    expect(searchCie10('diabetes tipo 2')[0]!.code).toMatch(/^E11/);
+    expect(searchCie10('e119')[0]!.code).toBe('E11.9');
+    expect(searchCie10('lumbalgia').map((x) => x.code)).toContain('M54.5');
+    expect(allergyConflict('Penicilina', 'Amoxicilina 500 mg cápsulas')).toBe('penicilinas');
+    expect(allergyConflict('Alérgico a sulfas', 'Trimetoprima/sulfametoxazol 160/800 mg')).toBe('sulfas');
+    expect(allergyConflict('Niega alergias', 'Amoxicilina 500 mg')).toBeNull();
+    expect(allergyConflict('Penicilina', 'Paracetamol 500 mg')).toBeNull();
+    expect(pregnancyFromFum('2026-01-01', new Date('2026-03-01T12:00:00'))).toEqual({ sdg: '8.3', fpp: '2026-10-08' });
+  });
+
+  it('clinical extras: own templates, prescription check, sharing and patient portal', async () => {
+    const { sentInTests } = await import('../src/lib/email.js');
+    const reg = (await call('POST', '/auth/register', {
+      businessName: 'Pediatria Portal', businessType: 'medical', name: 'Dr. Luis Paz', email: 'portal-doc@test.mx', password: 'password123',
+    })).body;
+    const tok = reg.token;
+    await call('PATCH', '/auth/me', { professional: { license: '7654321' } }, tok);
+    const pat = (await call('POST', '/customers', { name: 'Sofia Paciente', phone: '5577002200', email: 'sofia@correo.mx', birthday: '2020-02-02' }, tok)).body;
+    await call('PUT', `/customers/${pat.id}/record`, { allergies: 'Penicilina' }, tok);
+    expect((await call('GET', `/customers/${pat.id}/clinical`, undefined, tok)).body.patient.allergies).toContain('Penicilina');
+
+    // Own template, saved in the settings, travels with the document
+    const me = (await call('GET', '/auth/me', undefined, tok)).body.tenant.settings;
+    const own = { id: 'custom_lactancia', title: 'Valoración de lactancia', kind: 'evolution', fields: [{ id: 'agarre', label: 'Agarre', type: 'select', options: ['Bueno', 'Malo'], required: true }, { id: 'nota', label: 'Nota', type: 'longtext' }] };
+    expect((await call('PATCH', '/tenant', { settings: { ...me, clinicalTemplates: [own] } }, tok)).status).toBe(200);
+    expect((await call('POST', `/customers/${pat.id}/clinical-notes`, { template: 'custom_otra', content: {} }, tok)).body.error).toBe('clinical_template');
+    const ownNote = await call('POST', `/customers/${pat.id}/clinical-notes`, { template: 'custom_lactancia', content: {}, password: 'password123' }, tok);
+    expect(ownNote.body.error).toBe('clinical_incomplete');
+    const ownSigned = await call('POST', `/customers/${pat.id}/clinical-notes`, { template: 'custom_lactancia', content: { agarre: 'Bueno' }, password: 'password123' }, tok);
+    expect(ownSigned.body).toMatchObject({ status: 'signed', title: 'Valoración de lactancia' });
+    expect(ownSigned.body.content.__template.fields).toHaveLength(2);
+    await call('PATCH', '/tenant', { settings: { ...me, clinicalTemplates: [] } }, tok);
+    const still = (await call('GET', `/customers/${pat.id}/clinical`, undefined, tok)).body.notes.find((n: { id: string }) => n.id === ownSigned.body.id);
+    expect(still.content.agarre).toBe('Bueno');
+
+    // Pediatric and prenatal templates exist for doctors
+    const ped = await call('POST', `/customers/${pat.id}/clinical-notes`, { template: 'pediatric_visit', content: { medidas: { peso: 14, talla: 95 } } }, tok);
+    expect(ped.status).toBe(201);
+
+    // Signed prescription: public check page and email to the patient
+    const rx = await call('POST', `/customers/${pat.id}/clinical-notes`, {
+      template: 'prescription', password: 'password123',
+      content: { medicamentos: [{ name: 'Paracetamol 160 mg/5 ml', dose: '5 ml', route: 'Oral', frequency: 'Cada 8 h', duration: '3 días' }], indicaciones: 'Reposo', diagnostico: 'Faringitis' },
+    }, tok);
+    expect(rx.body.verifyPath).toMatch(/^\/receta\//);
+    const rxToken = rx.body.verifyPath.split('/').pop();
+    const check = await call('GET', `/public/prescriptions/${rxToken}`);
+    expect(check.body).toMatchObject({ doctor: { license: '7654321' }, patient: { name: 'Sofia Paciente' } });
+    expect(check.body.content.medicamentos[0].name).toContain('Paracetamol');
+    expect((await call('GET', `/public/prescriptions/${rxToken.slice(0, -2)}xx`)).status).toBe(404);
+    sentInTests.length = 0;
+    expect((await call('POST', `/clinical-notes/${rx.body.id}/send`, undefined, tok)).status).toBe(200);
+    expect(sentInTests[0]!.to).toBe('sofia@correo.mx');
+    expect(sentInTests[0]!.text).toContain('/receta/');
+
+    // Portal: link by email only for a known patient; shows only what was shared
+    sentInTests.length = 0;
+    await call('POST', `/public/${reg.tenant.slug}/portal/link`, { email: 'nadie@correo.mx' });
+    expect(sentInTests).toHaveLength(0);
+    expect((await call('POST', `/public/${reg.tenant.slug}/portal/link`, { email: 'SOFIA@correo.mx' })).body).toEqual({ ok: true });
+    expect(sentInTests).toHaveLength(1);
+    const pt = /\?t=([0-9a-f-]{36}\.\d{10}\.[A-Za-z0-9_-]{24})/.exec(sentInTests[0]!.text)![1]!;
+    const portal = async (t: string) => {
+      const res = await app.request('/api/public/portal', { headers: { 'x-portal-token': t } });
+      return { status: res.status, body: await res.json() };
+    };
+    let p = await portal(pt);
+    expect(p.status).toBe(200);
+    expect(p.body.patient.name).toBe('Sofia Paciente');
+    expect(p.body.documents).toHaveLength(0);
+    expect((await call('POST', `/clinical-notes/${ped.body.id}/share`, { shared: true }, tok)).body.error).toBe('clinical_draft');
+    await call('POST', `/clinical-notes/${rx.body.id}/share`, { shared: true }, tok);
+    p = await portal(pt);
+    expect(p.body.documents.map((d: { id: string }) => d.id)).toEqual([rx.body.id]);
+    await call('POST', `/clinical-notes/${rx.body.id}/share`, { shared: false }, tok);
+    expect((await portal(pt)).body.documents).toHaveLength(0);
+    expect((await portal(`${pt.slice(0, -2)}xx`)).status).toBe(401);
+    // Studies need the private storage
+    expect((await call('GET', `/customers/${pat.id}/clinical`, undefined, tok)).body.studiesEnabled).toBe(false);
+  });
+
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Consultorio Prueba', businessType: 'medical', name: 'Dra. Ana Ruiz', email: 'nom004@test.mx', password: 'password123',

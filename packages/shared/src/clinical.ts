@@ -547,6 +547,87 @@ export const CLINICAL_TEMPLATES: Record<string, ClinicalTemplate> = {
       { id: 'firmas', title: 'Firmas', fields: [{ id: 'firmas', label: 'Paciente (o representante), médico y dos testigos', type: 'signatures', required: true }] },
     ],
   },
+  pediatric_visit: {
+    id: 'pediatric_visit',
+    kind: 'evolution',
+    title: 'Consulta pediátrica (niño sano)',
+    norm: 'NOM-004-SSA3-2012, 6.2; NOM-031-SSA2-1999',
+    sections: [
+      {
+        id: 'crecimiento',
+        title: 'Crecimiento',
+        fields: [
+          { id: 'medidas', label: 'Peso y talla', type: 'anthropometry', required: true },
+          { id: 'perimetroCefalico', label: 'Perímetro cefálico', type: 'number', unit: 'cm' },
+          vitals(),
+        ],
+      },
+      {
+        id: 'desarrollo',
+        title: 'Desarrollo y prevención',
+        fields: [
+          { id: 'desarrollo', label: 'Desarrollo psicomotor (hitos)', type: 'longtext' },
+          { id: 'alimentacion', label: 'Alimentación', type: 'select', options: ['Lactancia materna exclusiva', 'Lactancia mixta', 'Fórmula', 'Ablactación', 'Dieta familiar'] },
+          { id: 'vacunas', label: 'Vacunas aplicadas hoy o pendientes (Cartilla Nacional de Salud)', type: 'longtext' },
+          { id: 'tamiz', label: 'Tamiz neonatal, auditivo y visual', type: 'text' },
+        ],
+      },
+      {
+        id: 'nota',
+        title: 'Nota',
+        fields: [
+          { id: 'evolucion', label: 'Padecimiento o motivo y exploración', type: 'longtext', required: true },
+          diagnoses,
+          prognosis,
+          medications(),
+          { id: 'indicaciones', label: 'Indicaciones y orientación a padres', type: 'longtext', required: true },
+        ],
+      },
+    ],
+  },
+  prenatal_visit: {
+    id: 'prenatal_visit',
+    kind: 'evolution',
+    title: 'Control prenatal',
+    norm: 'NOM-004-SSA3-2012, 6.2; NOM-007-SSA2-2016',
+    sections: [
+      {
+        id: 'embarazo',
+        title: 'Embarazo',
+        fields: [
+          { id: 'fum', label: 'Fecha de última menstruación (FUM)', type: 'date', required: true },
+          { id: 'sdg', label: 'Semanas de gestación (SDG)', type: 'text', help: 'Se calcula con la FUM' },
+          { id: 'fpp', label: 'Fecha probable de parto (FPP)', type: 'date', help: 'Se calcula con la FUM' },
+          { id: 'gestas', label: 'Gestas / partos / cesáreas / abortos', type: 'text' },
+          { id: 'riesgo', label: 'Riesgo obstétrico', type: 'select', options: ['Bajo', 'Alto'] },
+        ],
+      },
+      {
+        id: 'exploracion',
+        title: 'Exploración',
+        fields: [
+          vitals(true),
+          { id: 'alturaUterina', label: 'Altura uterina', type: 'number', unit: 'cm' },
+          { id: 'fcf', label: 'Frecuencia cardiaca fetal', type: 'number', unit: 'lpm' },
+          { id: 'movimientos', label: 'Movimientos fetales presentes', type: 'yesno' },
+          { id: 'edema', label: 'Edema', type: 'select', options: ['Sin edema', '+', '++', '+++'] },
+          { id: 'alarma', label: 'Signos de alarma (sangrado, cefalea, visión borrosa, pérdida de líquido)', type: 'longtext' },
+        ],
+      },
+      {
+        id: 'nota',
+        title: 'Nota',
+        fields: [
+          { id: 'evolucion', label: 'Evolución', type: 'longtext', required: true },
+          { id: 'resultados', label: 'Estudios (BH, EGO, glucosa, VIH, VDRL, ultrasonido)', type: 'longtext' },
+          diagnoses,
+          prognosis,
+          medications(),
+          { id: 'indicaciones', label: 'Indicaciones y próxima cita', type: 'longtext', required: true },
+        ],
+      },
+    ],
+  },
   addendum: {
     id: 'addendum',
     kind: 'addendum',
@@ -558,14 +639,66 @@ export const CLINICAL_TEMPLATES: Record<string, ClinicalTemplate> = {
 
 /** Templates each health giro uses, in menu order (history first). */
 export const CLINICAL_TEMPLATES_BY_TYPE: Record<string, string[]> = {
-  medical: ['medical_history', 'medical_evolution', 'prescription', 'interconsult', 'referral', 'consent'],
+  medical: ['medical_history', 'medical_evolution', 'pediatric_visit', 'prenatal_visit', 'prescription', 'interconsult', 'referral', 'consent'],
   dental: ['dental_history', 'dental_evolution', 'prescription', 'referral', 'consent'],
   psychology: ['psychology_history', 'psychology_session', 'referral', 'consent'],
   physiotherapy: ['physio_history', 'physio_session', 'referral', 'consent'],
   nutrition: ['nutrition_history', 'nutrition_followup', 'referral'],
 };
-export const clinicalTemplatesFor = (businessType: string): ClinicalTemplate[] =>
-  (CLINICAL_TEMPLATES_BY_TYPE[businessType] ?? []).map((id) => CLINICAL_TEMPLATES[id]!);
+/**
+ * Templates a business writes with: the ones of its giro plus its own (made in Configuración).
+ */
+export const clinicalTemplatesFor = (businessType: string, custom: CustomClinicalTemplate[] = []): ClinicalTemplate[] => [
+  ...(CLINICAL_TEMPLATES_BY_TYPE[businessType] ?? []).map((id) => CLINICAL_TEMPLATES[id]!),
+  ...custom.map((c) => customToTemplate(c, businessType)),
+];
+/** A template by id (built-in or the business's own), for reading or writing a document. */
+export const clinicalTemplateById = (id: string, businessType: string, custom: CustomClinicalTemplate[] = []): ClinicalTemplate | null =>
+  CLINICAL_TEMPLATES[id] ?? (custom.find((c) => c.id === id) ? customToTemplate(custom.find((c) => c.id === id)!, businessType) : null);
+
+// ---- The business's own templates ----
+export const CUSTOM_FIELD_TYPES = ['text', 'longtext', 'number', 'select', 'yesno', 'date', 'vitals', 'anthropometry', 'diagnoses', 'medications', 'pain'] as const;
+export const customClinicalTemplateSchema = z.object({
+  id: z.string().regex(/^custom_[a-z0-9]{4,24}$/),
+  title: z.string().trim().min(2).max(80),
+  kind: z.enum(['history', 'evolution']),
+  fields: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[a-z][a-zA-Z0-9]{0,30}$/),
+        label: z.string().trim().min(1).max(160),
+        type: z.enum(CUSTOM_FIELD_TYPES),
+        required: z.boolean().optional(),
+        options: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
+        unit: z.string().trim().max(12).optional(),
+      }),
+    )
+    .min(1)
+    .max(40),
+});
+export type CustomClinicalTemplate = z.infer<typeof customClinicalTemplateSchema>;
+export function customToTemplate(c: CustomClinicalTemplate, businessType: string): ClinicalTemplate {
+  return { id: c.id, kind: c.kind, title: c.title, norm: clinicalNormFor(businessType), sections: [{ id: 'main', title: c.title, fields: c.fields }] };
+}
+
+/**
+ * The template a saved document was written with. Documents from the business's own templates
+ * carry a copy (`__template`), so they still read right if the template is later changed.
+ */
+export function noteTemplate(note: { template: string; content: Record<string, unknown> }, businessType: string, custom: CustomClinicalTemplate[] = []): ClinicalTemplate | null {
+  const snap = note.content.__template as CustomClinicalTemplate | undefined;
+  return CLINICAL_TEMPLATES[note.template] ?? (snap ? customToTemplate(snap, businessType) : clinicalTemplateById(note.template, businessType, custom));
+}
+
+/** Weeks of pregnancy and due date from the last period (Naegele: +280 days). */
+export function pregnancyFromFum(fum: string, today = new Date()): { sdg: string; fpp: string } | null {
+  const start = new Date(`${fum}T12:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const days = Math.floor((today.getTime() - start.getTime()) / 864e5);
+  if (days < 0 || days > 320) return null;
+  const fpp = new Date(start.getTime() + 280 * 864e5).toISOString().slice(0, 10);
+  return { sdg: `${Math.floor(days / 7)}.${days % 7}`, fpp };
+}
 export const clinicalNormFor = (businessType: string) => (businessType === 'dental' ? 'NOM-013-SSA2-2015' : 'NOM-004-SSA3-2012');
 
 /** First missing required field (label), or null. */
@@ -628,7 +761,43 @@ export interface ClinicalNoteDto {
   contentHash: string | null;
   /** For a nota aclaratoria: the note it clarifies */
   amendsId: string | null;
+  /** Shown to the patient in their portal since */
+  sharedAt: string | null;
+  /** Signed prescriptions: public page to verify it (/receta/<token>), for the QR and to send it */
+  verifyPath: string | null;
   createdAt: string;
+}
+export const STUDY_KINDS = ['lab', 'imaging', 'document'] as const;
+export type StudyKind = (typeof STUDY_KINDS)[number];
+/** A study (lab result, X-ray, PDF) attached to the record. */
+export interface StudyDto {
+  id: string;
+  kind: StudyKind;
+  title: string | null;
+  contentType: string;
+  sizeBytes: number;
+  sharedAt: string | null;
+  createdAt: string;
+}
+/** Up to 10 MB: PDF, JPG, PNG or WebP. */
+export const STUDY_MAX_BYTES = 10 * 1024 * 1024;
+
+/** What a patient sees in their portal. */
+export interface PortalDto {
+  business: { name: string; slug: string; phone: string | null; address: string | null; logoUrl: string | null; businessType: string };
+  patient: { name: string };
+  appointments: { id: string; startsAt: string; status: string; serviceName: string | null; resourceName: string | null; managePath: string }[];
+  documents: ClinicalNoteDto[];
+  studies: (StudyDto & { url: string })[];
+}
+/** Public check of a signed prescription. */
+export interface PrescriptionCheckDto {
+  clinic: { name: string; legalName: string | null; healthLicense: string | null; address: string | null; phone: string | null };
+  doctor: ClinicalAuthor;
+  patient: { name: string; age: number | null };
+  signedAt: string;
+  contentHash: string;
+  content: ClinicalContent;
 }
 export interface ClinicalPatientDto {
   id: string;
@@ -640,12 +809,17 @@ export interface ClinicalPatientDto {
   address: string | null;
   curp: string | null;
   archived: boolean;
+  /** Allergies from the record and the latest signed history, for the prescription check */
+  allergies: string | null;
 }
 export interface ClinicalRecordDto {
   norm: string;
   patient: ClinicalPatientDto;
   clinic: { name: string; legalName: string | null; healthLicense: string | null; address: string | null; phone: string | null };
   notes: ClinicalNoteDto[];
+  studies: StudyDto[];
+  /** False until the private file storage is connected */
+  studiesEnabled: boolean;
   /** Latest odontogram (dental) */
   odontogram: Odontogram | null;
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { professionalSchema, type Professional } from './clinical';
+import { customClinicalTemplateSchema, professionalSchema, type Professional } from './clinical';
 
 export * from './clinical';
 
@@ -413,6 +413,8 @@ export const tenantSettingsSchema = z.object({
   reminderHoursBefore: z.number().int().min(1).max(72),
   /** Email the customer when a booking is made, moved or cancelled (default on) */
   emailConfirmations: z.boolean().optional(),
+  /** Health giros: the business's own clinical-record templates */
+  clinicalTemplates: z.array(customClinicalTemplateSchema).max(30).optional(),
   onlineBookingEnabled: z.boolean(),
   payments: paymentSettingsSchema.optional(),
   selfService: z
@@ -1932,3 +1934,4 @@ export interface PurchaseStatusDto {
   recipientName: string | null;
   plan: { sessionsLeft: number | null; expiresOn: string | null } | null;
 }
+export * from './catalogs';

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { del, put } from '@vercel/blob';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   RECORD_PHOTO_MAX_BYTES,
   recordNoteSchema,
@@ -27,7 +27,7 @@ import type { AppEnv } from '../middleware/auth.js';
  */
 export const recordRoutes = new Hono<AppEnv>();
 
-const photoToken = () => process.env.EXPEDIENTES_READ_WRITE_TOKEN;
+export const photoToken = () => process.env.EXPEDIENTES_READ_WRITE_TOKEN;
 const enc = (v: string | null | undefined) => (v ? encryptSecret(v) : null);
 const dec = (v: string | null) => {
   if (!v) return null;
@@ -68,14 +68,19 @@ recordRoutes.get('/customers/:id/record', async (c) => {
   const tenantId = c.get('tenantId');
   const rec = await db.query.customerRecords.findFirst({ where: eq(customerRecords.customerId, customerId) });
   const notes = await db.select().from(recordNotes).where(and(eq(recordNotes.tenantId, tenantId), eq(recordNotes.customerId, customerId))).orderBy(desc(recordNotes.createdAt));
-  const photos = await db.select().from(recordPhotos).where(and(eq(recordPhotos.tenantId, tenantId), eq(recordPhotos.customerId, customerId))).orderBy(desc(recordPhotos.createdAt));
+  // Studies (lab, imaging, documents) belong to the clinical record, not to the photo gallery.
+  const photos = await db
+    .select()
+    .from(recordPhotos)
+    .where(and(eq(recordPhotos.tenantId, tenantId), eq(recordPhotos.customerId, customerId), inArray(recordPhotos.kind, ['before', 'after', 'other'])))
+    .orderBy(desc(recordPhotos.createdAt));
   const body: CustomerRecordDto = {
     allergies: dec(rec?.allergiesEnc ?? null),
     conditions: dec(rec?.conditionsEnc ?? null),
     consentAt: rec?.consentAt?.toISOString() ?? null,
     consentByName: rec?.consentBy ? await userName(rec.consentBy) : null,
     notes: notes.map((n) => ({ id: n.id, body: dec(n.bodyEnc) ?? '', appointmentId: n.appointmentId, authorName: n.authorName, createdAt: n.createdAt.toISOString() })),
-    photos: photos.map((p) => ({ id: p.id, kind: p.kind, note: dec(p.noteEnc), appointmentId: p.appointmentId, sizeBytes: p.sizeBytes, createdAt: p.createdAt.toISOString() })),
+    photos: photos.map((p) => ({ id: p.id, kind: p.kind as 'before' | 'after' | 'other', note: dec(p.noteEnc), appointmentId: p.appointmentId, sizeBytes: p.sizeBytes, createdAt: p.createdAt.toISOString() })),
     photosEnabled: Boolean(photoToken()),
     responses: await listResponses(db, tenantId, { customerId }),
   };
