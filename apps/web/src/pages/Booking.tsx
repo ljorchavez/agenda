@@ -19,6 +19,7 @@ import {
   type PublicClassSessionDto,
 } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
+import { LegalFooter } from './Legal';
 import { ErrorText, Loading } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money } from '../lib/format';
@@ -131,6 +132,7 @@ export function BookingPage() {
             {t(isHealthType(full.businessType) ? 'portal.myPortal' : 'portal.myAppointments')}
           </Link>
         </p>
+        <LegalFooter className="!py-2" />
       </div>
     </div>
   );

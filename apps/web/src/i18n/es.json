@@ -1652,5 +1652,12 @@
       "0": "IVA tasa 0%",
       "exento": "Exento de IVA (servicios médicos)"
     }
+  },
+  "legal": {
+    "privacy": "Aviso de privacidad",
+    "terms": "Términos de uso",
+    "updated": "Última actualización",
+    "acceptPrefix": "Al crear tu cuenta aceptas los",
+    "and": "y el"
   }
 }

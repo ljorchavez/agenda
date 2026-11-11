@@ -532,6 +532,12 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.getByTestId('portal-code').waitFor({ timeout: 8000 }).catch(() => {});
   ok('portal then asks for the 6-digit code', await page.getByTestId('portal-code').isVisible().catch(() => false));
 }
+await page.goto('http://localhost:5173/privacidad');
+ok('privacy notice page', ((await page.getByTestId('privacy-page').textContent({ timeout: 8000 }).catch(() => '')) ?? '').includes('ARCO'));
+await page.goto('http://localhost:5173/terminos');
+ok('terms page', ((await page.getByTestId('terms-page').textContent({ timeout: 8000 }).catch(() => '')) ?? '').includes('Uso permitido'));
+await page.getByTestId('legal-footer').getByRole('link', { name: /privacidad|privacy/i }).click().catch(() => {});
+ok('footer links to the privacy notice', page.url().endsWith('/privacidad'));
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();
 console.log(out.join("\n"));

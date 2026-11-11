@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { AcceptLegal } from './Legal';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
@@ -318,6 +319,7 @@ export function RegisterPage() {
               <button className="btn-primary w-full" disabled={register.isPending}>
                 {register.isPending ? t('common.loading') : t('auth.register')}
               </button>
+              <AcceptLegal />
             </form>
           </div>
         )}

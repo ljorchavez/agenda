@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { ClinicalPrintPage } from './components/ClinicalRecord';
 import { PortalPage, PrescriptionPage } from './pages/Portal';
+import { PrivacyPage, TermsPage } from './pages/Legal';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
@@ -54,6 +55,8 @@ export function App() {
       <Route path="/registro" element={<RegisterPage />} />
       <Route path="/register" element={<Redirect to="/registro" />} />
       <Route path="/restablecer" element={<ResetPasswordPage />} />
+      <Route path="/privacidad" element={<PrivacyPage />} />
+      <Route path="/terminos" element={<TermsPage />} />
       {/* Public booking page for end customers */}
       <Route path="/b/:slug" element={<BookingPage />} />
       {/* Private link for a customer to reschedule/cancel their appointment */}

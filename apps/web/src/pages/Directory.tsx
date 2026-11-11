@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { BUSINESS_CATEGORIES, businessCategory, CATEGORY_TYPES, type BusinessCategory, type BusinessType, type DirectoryDto, type DirectoryEntryDto } from '@agenda/shared';
 import { LanguageSwitch } from '../components/Layout';
+import { LegalFooter } from './Legal';
 import { distanceKm, MapView, type MapMarker } from '../components/MapView';
 import { LoginModal } from './Auth';
 import { useAuth } from '../lib/auth';
@@ -129,7 +130,7 @@ export function DirectoryPage() {
     <div className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
-          <Link to="/" className="font-bold text-brand-700">Agenda</Link>
+          <Link to="/" className="font-bold text-brand-700">Lugali</Link>
           <div className="flex items-center gap-2">
             <LanguageSwitch />
             {user ? (
@@ -318,6 +319,7 @@ export function DirectoryPage() {
           <Link to="/registro" className="mt-3 inline-block rounded-lg bg-white px-4 py-2 font-semibold text-brand-800 sm:mt-0">{t('directory.ctaButton')}</Link>
         </div>
       </main>
+      <LegalFooter />
       {loginOpen && <LoginModal onClose={() => set({ login: null })} />}
     </div>
   );

@@ -1652,5 +1652,12 @@
       "0": "0% VAT",
       "exento": "VAT exempt (medical services)"
     }
+  },
+  "legal": {
+    "privacy": "Privacy notice",
+    "terms": "Terms of use",
+    "updated": "Last updated",
+    "acceptPrefix": "By creating your account you accept the",
+    "and": "and the"
   }
 }
