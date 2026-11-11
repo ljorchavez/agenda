@@ -1644,6 +1644,11 @@ d('API (integration)', () => {
     expect((await call('POST', `/public/${reg.tenant.slug}/portal/link`, { email: 'SOFIA@correo.mx' })).body).toEqual({ ok: true });
     expect(sentInTests).toHaveLength(1);
     const pt = /\?t=([0-9a-f-]{36}\.\d{10}\.[A-Za-z0-9_-]{24})/.exec(sentInTests[0]!.text)![1]!;
+    // Or the 6-digit code from the same email (another device)
+    const code = /(\d{6})/.exec(sentInTests[0]!.subject)![1]!;
+    expect((await call('POST', `/public/${reg.tenant.slug}/portal/code`, { email: 'sofia@correo.mx', code: code === '000000' ? '000001' : '000000' })).body.error).toBe('portal_bad_code');
+    const byCode = await call('POST', `/public/${reg.tenant.slug}/portal/code`, { email: 'sofia@correo.mx', code });
+    expect(byCode.body.token).toMatch(/^[0-9a-f-]{36}\.\d{10}\./);
     const portal = async (t: string) => {
       const res = await app.request('/api/public/portal', { headers: { 'x-portal-token': t } });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1652,6 +1657,7 @@ d('API (integration)', () => {
     let p = await portal(pt);
     expect(p.status).toBe(200);
     expect(p.body.patient.name).toBe('Sofia Paciente');
+    expect(p.body.renewedToken).toBeNull();
     expect(p.body.documents).toHaveLength(0);
     expect((await call('POST', `/clinical-notes/${ped.body.id}/share`, { shared: true }, tok)).body.error).toBe('clinical_draft');
     await call('POST', `/clinical-notes/${rx.body.id}/share`, { shared: true }, tok);
@@ -1662,6 +1668,79 @@ d('API (integration)', () => {
     expect((await portal(`${pt.slice(0, -2)}xx`)).status).toBe(401);
     // Studies need the private storage
     expect((await call('GET', `/customers/${pat.id}/clinical`, undefined, tok)).body.studiesEnabled).toBe(false);
+  });
+
+  it('CFDI invoicing with Facturapi (mocked): setup, CSD, invoice, files, cancel', async () => {
+    const { setFacturapiFetch } = await import('../src/integrations/facturapi.js');
+    const reg = (await call('POST', '/auth/register', { businessName: 'Factura Clinica', businessType: 'medical', name: 'Dra. Factura', email: 'cfdi@test.mx', password: 'password123' })).body;
+    const tok = reg.token;
+    const settings = { rfc: 'XEXX010101000', legalName: 'DRA FACTURA', taxSystem: '612', zip: '28000', series: 'F', productKey: '85121500', description: 'Consulta médica', iva: 'exento', autoEmail: false };
+    // Platform without Facturapi: data is kept, nothing else
+    delete process.env.FACTURAPI_USER_KEY;
+    let st = await call('PUT', '/invoicing', settings, tok);
+    expect(st.body).toMatchObject({ available: false, connected: false, settings: { rfc: 'XEXX010101000' } });
+    expect((await call('PUT', '/invoicing', { ...settings, rfc: 'MAL' }, tok)).status).toBe(422);
+
+    const calls: { method: string; path: string; auth: string; body: unknown }[] = [];
+    setFacturapiFetch(async (url, init) => {
+      const path = url.replace('https://www.facturapi.io/v2', '');
+      const auth = String((init.headers as Record<string, string>).Authorization);
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body ? 'form' : undefined;
+      calls.push({ method: String(init.method), path, auth, body });
+      const json = (x: unknown) => new Response(JSON.stringify(x), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (path === '/organizations') return json({ id: 'org_1' });
+      if (path.endsWith('/apikeys/test')) return json('sk_test_abc');
+      if (path.endsWith('/apikeys/live')) return json('sk_live_abc');
+      if (path.endsWith('/legal') || path.endsWith('/certificate')) return json({ ok: true });
+      if (path === '/invoices' && init.method === 'POST') return json({ id: 'inv_1', uuid: 'AAAA-BBBB', series: 'F', folio_number: 7, total: 600, status: 'valid' });
+      if (path === '/invoices/inv_1/pdf') return new Response('%PDF-1.4 test', { status: 200 });
+      if (path === '/invoices/inv_1/email') return json({ ok: true });
+      if (path.startsWith('/invoices/inv_1?motive=')) return json({ id: 'inv_1', status: 'canceled', total: 600 });
+      return new Response(JSON.stringify({ message: 'no mock' }), { status: 400 });
+    });
+    process.env.FACTURAPI_USER_KEY = 'sk_user_platform';
+    try {
+      st = await call('PUT', '/invoicing', settings, tok);
+      expect(st.body).toMatchObject({ available: true, connected: true, live: false });
+      expect(calls.find((x) => x.path === '/organizations/org_1/legal')?.body).toMatchObject({ legal_name: 'DRA FACTURA', tax_system: '612', address: { zip: '28000' } });
+      const cu = (await call('POST', '/customers', { name: 'Paciente Factura', phone: '5577003300', email: 'pf@correo.mx' }, tok)).body;
+      const pay = (await call('POST', '/payments', { customerId: cu.id, amountCents: 60000, method: 'card' }, tok)).body;
+      // Test invoice (no CSD yet), to the patient's RFC, saved for next time
+      const fiscal = { rfc: 'PAFA800101AB1', legalName: 'PACIENTE FACTURA', taxSystem: '605', zip: '28010', use: 'D01' };
+      const inv = await call('POST', `/payments/${pay.id}/invoice`, { customer: fiscal, save: true }, tok);
+      expect(inv.status).toBe(201);
+      expect(inv.body).toMatchObject({ uuid: 'AAAA-BBBB', series: 'F', folio: 7, totalCents: 60000, test: true });
+      const sent = calls.find((x) => x.path === '/invoices')!;
+      expect(sent.auth).toBe('Bearer sk_test_abc');
+      expect(sent.body).toMatchObject({ payment_form: '04', use: 'D01', customer: { tax_id: 'PAFA800101AB1', email: 'pf@correo.mx' }, items: [{ product: { product_key: '85121500', price: 600, taxes: [{ type: 'IVA', factor: 'Exento' }] } }] });
+      expect((await call('GET', `/customers/${cu.id}`, undefined, tok)).body.fiscal).toMatchObject({ rfc: 'PAFA800101AB1' });
+      expect((await call('POST', `/payments/${pay.id}/invoice`, { customer: null }, tok)).body.error).toBe('already_invoiced');
+      const listed = (await call('GET', `/payments?customerId=${cu.id}`, undefined, tok)).body;
+      expect(listed[0].invoice).toMatchObject({ id: inv.body.id, folio: 7 });
+      // PDF through the API
+      const pdf = await app.request(`/api/invoices/${inv.body.id}/pdf`, { headers: { authorization: `Bearer ${tok}` } });
+      expect(pdf.status).toBe(200);
+      expect(await pdf.text()).toContain('%PDF');
+      // CSD → live key from now on
+      const fd = new FormData();
+      fd.append('cer', new Blob(['cer']), 'a.cer');
+      fd.append('key', new Blob(['key']), 'a.key');
+      fd.append('password', 'secreto');
+      const up = await app.request('/api/invoicing/certificate', { method: 'PUT', body: fd, headers: { authorization: `Bearer ${tok}` } });
+      expect(((await up.json()) as { live: boolean }).live).toBe(true);
+      // Cancel (motive 02) → payment can be invoiced again
+      const can = await call('POST', `/invoices/${inv.body.id}/cancel`, { motive: '02' }, tok);
+      expect(can.body.status).toBe('canceled');
+      const again = await call('POST', `/payments/${pay.id}/invoice`, { customer: null }, tok);
+      expect(again.status).toBe(201);
+      expect(again.body.test).toBe(false);
+      expect(calls.filter((x) => x.path === '/invoices').pop()).toMatchObject({ auth: 'Bearer sk_live_abc', body: { use: 'S01', customer: { tax_id: 'XAXX010101000', tax_system: '616' } } });
+      // Keys never reach the browser
+      expect(JSON.stringify((await call('GET', '/invoicing', undefined, tok)).body)).not.toContain('sk_');
+    } finally {
+      setFacturapiFetch(null);
+      delete process.env.FACTURAPI_USER_KEY;
+    }
   });
 
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {

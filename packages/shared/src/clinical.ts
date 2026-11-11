@@ -789,6 +789,8 @@ export interface PortalDto {
   appointments: { id: string; startsAt: string; status: string; serviceName: string | null; resourceName: string | null; managePath: string }[];
   documents: ClinicalNoteDto[];
   studies: (StudyDto & { url: string })[];
+  /** New session token when the current one is getting old (store it) */
+  renewedToken: string | null;
 }
 /** Public check of a signed prescription. */
 export interface PrescriptionCheckDto {

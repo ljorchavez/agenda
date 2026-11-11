@@ -8,6 +8,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
   echo "Applying database migrations…"
   pnpm --filter @agenda/api db:migrate
   pnpm --filter @agenda/api db:seed-missing || echo "Demo seed skipped"
+  pnpm --filter @agenda/api whatsapp:setup || echo "WhatsApp templates skipped"
 else
   echo "DATABASE_URL not set: skipping migrations"
 fi

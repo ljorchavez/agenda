@@ -1,5 +1,6 @@
 import { FormsSection } from '../components/Forms';
 import { ClinicalTemplatesEditor } from '../components/ClinicalTemplates';
+import { InvoicingSection } from '../components/Invoicing';
 import { BusinessTypePicker } from '../components/BusinessTypePicker';
 import { AssignmentSettingsSection } from '../components/Assignment';
 import { SaveStatus, useAutoSave } from '../lib/autosave';
@@ -257,6 +258,7 @@ function BusinessSettings() {
     { id: 'business', label: t('settings.tabs.business') },
     { id: 'booking', label: t('settings.tabs.booking') },
     { id: 'payments', label: t('settings.tabs.payments') },
+    ...(businessManager ? [{ id: 'invoicing', label: t('settings.tabs.invoicing') }] : []),
     ...(businessManager ? [{ id: 'promos', label: t('settings.tabs.promos') }] : []),
     { id: 'packages', label: t('settings.tabs.packages') },
     { id: 'forms', label: t('settings.tabs.forms') },
@@ -456,6 +458,10 @@ function BusinessSettings() {
             <input type="checkbox" disabled={!canEdit} checked={settings.emailConfirmations !== false} onChange={(e) => setSettings({ ...settings, emailConfirmations: e.target.checked })} data-testid="email-confirmations" />
             {t('settings.emailConfirmations')}
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!canEdit} checked={settings.whatsappConfirmations === true} onChange={(e) => setSettings({ ...settings, whatsappConfirmations: e.target.checked })} data-testid="whatsapp-confirmations" />
+            {t('settings.whatsappConfirmations')}
+          </label>
           <p className="text-xs text-slate-500">{t('settings.notifyHelp')}</p>
           <div className="max-w-48">
             <label className="label">{t('settings.reminderHoursBefore')}</label>
@@ -491,6 +497,7 @@ function BusinessSettings() {
         </div>
       )}
 
+      {tab === 'invoicing' && <InvoicingSection canEdit={isOwner} />}
       {tab === 'locations' && <LocationsSection editable={businessManager} />}
       {tab === 'users' && <UsersSection kind={kind} />}
       {tab === 'plan' && <PlanSection canChange={isOwner} />}

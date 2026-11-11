@@ -4,17 +4,19 @@
  */
 import { sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { businessKind, type BusinessType } from '@agenda/shared';
+import { businessKind, isHealthType, type BusinessType } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { messageLogs } from '../db/schema.js';
-import { manageToken } from './crypto.js';
+import { manageToken, portalToken } from './crypto.js';
 import { escapeHtml, sendEmail } from './email.js';
+import { isWhatsAppConfigured, sendTemplate, WHATSAPP_TEMPLATES } from '../integrations/whatsapp.js';
 
 export type AppointmentEmail = 'booked' | 'rescheduled' | 'cancelled' | 'reminder';
 
 type Row = {
   id: string;
   tenant_id: string;
+  customer_id: string;
   starts_at: Date | string;
   party_size: number | null;
   customer_name: string;
@@ -23,7 +25,8 @@ type Row = {
   business_type: BusinessType;
   timezone: string;
   locale: string;
-  settings: { emailConfirmations?: boolean } | null;
+  settings: { emailConfirmations?: boolean; whatsappConfirmations?: boolean } | null;
+  customer_phone: string | null;
   service_name: string | null;
   resource_name: string | null;
   address: string | null;
@@ -39,7 +42,7 @@ export const appUrl = () => (process.env.APP_URL ?? 'https://agenda-crm-rouge.ve
 
 async function load(appointmentId: string): Promise<Row | undefined> {
   const r = await getDb().execute<Row>(sql`
-    select a.id, a.tenant_id, a.starts_at, a.party_size, c.name as customer_name, c.email as customer_email,
+    select a.id, a.tenant_id, a.customer_id, a.starts_at, a.party_size, c.name as customer_name, c.email as customer_email, c.phone as customer_phone,
            t.name as business_name, t.business_type, t.timezone, t.locale, t.settings, t.slug,
            s.name as service_name, r.name as resource_name,
            coalesce(l.address, t.address) as address, coalesce(l.phone, t.phone) as phone
@@ -70,6 +73,8 @@ const COPY = {
     people: (n: number) => `${n} personas`,
     where: 'Dónde',
     manage: 'Ver, cambiar o cancelar',
+    portal: 'Ver todas mis citas',
+    portalHealth: 'Mis citas, recetas y estudios',
     bookAgain: 'Reservar otra vez',
     footer: 'Este correo se envió automáticamente; para dudas contacta al negocio.',
     word: (k: string) => (k === 'appointments' ? 'cita' : 'reserva'),
@@ -91,6 +96,8 @@ const COPY = {
     people: (n: number) => `${n} people`,
     where: 'Where',
     manage: 'View, change or cancel',
+    portal: 'See all my appointments',
+    portalHealth: 'My appointments, prescriptions and studies',
     bookAgain: 'Book again',
     footer: 'This email was sent automatically; contact the business with any questions.',
     word: (k: string) => (k === 'appointments' ? 'appointment' : 'booking'),
@@ -116,7 +123,9 @@ export function appointmentEmail(r: Row, kind: AppointmentEmail) {
   const link = kind === 'cancelled' ? `${appUrl()}/b/${r.slug}` : `${appUrl()}/c/${manageToken(r.id)}`;
   const button = kind === 'cancelled' ? t.bookAgain : t.manage;
   const subject = t[kind](r.business_name, word);
-  const text = [t.hello(first), '', t.lead[kind], ...lines, '', `${button}: ${link}`, '', `— ${r.business_name}`].join('\n');
+  const portal = `${appUrl()}/p/${r.slug}?t=${portalToken(r.customer_id)}`;
+  const portalText = isHealthType(r.business_type) ? t.portalHealth : t.portal;
+  const text = [t.hello(first), '', t.lead[kind], ...lines, '', `${button}: ${link}`, `${portalText}: ${portal}`, '', `— ${r.business_name}`].join('\n');
   const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:520px">
 <p>${escapeHtml(t.hello(first))}</p>
 <p>${escapeHtml(t.lead[kind])}</p>
@@ -124,6 +133,7 @@ export function appointmentEmail(r: Row, kind: AppointmentEmail) {
 ${lines.map((l, i) => `<div style="${i < 2 ? 'font-weight:600;' : 'color:#475569;'}margin:2px 0">${escapeHtml(l)}</div>`).join('\n')}
 </div>
 <p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">${escapeHtml(button)}</a></p>
+<p><a href="${portal}" style="color:#0f766e">${escapeHtml(portalText)}</a></p>
 <p style="color:#475569">${escapeHtml(r.business_name)}</p>
 <p style="color:#94a3b8;font-size:12px">${escapeHtml(t.footer)}</p>
 </div>`;
@@ -138,7 +148,9 @@ ${lines.map((l, i) => `<div style="${i < 2 ? 'font-weight:600;' : 'color:#475569
 export async function notifyAppointment(appointmentId: string, kind: AppointmentEmail): Promise<boolean> {
   try {
     const r = await load(appointmentId);
-    if (!r?.customer_email || isUndeliverable(r.customer_email)) return false;
+    if (!r) return false;
+    if (kind === 'booked' || kind === 'rescheduled') await whatsappConfirmation(r);
+    if (!r.customer_email || isUndeliverable(r.customer_email)) return false;
     if (kind !== 'reminder' && r.settings?.emailConfirmations === false) return false;
     const msg = appointmentEmail(r, kind);
     const ok = await sendEmail({ to: r.customer_email, ...msg });
@@ -151,4 +163,21 @@ export async function notifyAppointment(appointmentId: string, kind: Appointment
     console.error('[notify]', err);
     return false;
   }
+}
+
+/** WhatsApp confirmation (template with a button to the manage page), if the business turned it on. */
+async function whatsappConfirmation(r: Row) {
+  if (!r.customer_phone || !r.settings?.whatsappConfirmations || !isWhatsAppConfigured()) return;
+  const start = DateTime.fromJSDate(new Date(r.starts_at)).setZone(r.timezone).setLocale(r.locale === 'en' ? 'en' : 'es');
+  const tpl = WHATSAPP_TEMPLATES[1]!.name;
+  const res = await sendTemplate({
+    to: r.customer_phone,
+    template: tpl,
+    params: [r.customer_name.split(' ')[0] ?? r.customer_name, r.business_name, start.toFormat(r.locale === 'en' ? 'cccc, LLLL d' : "cccc d 'de' LLLL"), start.toFormat(r.locale === 'en' ? 'h:mm a' : 'HH:mm')],
+    urlSuffix: manageToken(r.id),
+  });
+  await getDb()
+    .insert(messageLogs)
+    .values({ tenantId: r.tenant_id, appointmentId: r.id, template: tpl, toPhone: r.customer_phone, status: res.status, providerMessageId: res.providerMessageId ?? null, error: res.error ?? null })
+    .catch(() => {});
 }

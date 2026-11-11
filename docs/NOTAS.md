@@ -301,6 +301,21 @@ Las mesas de restaurante siguen asignándose por tamaño de grupo.
 - Portal del paciente `/p/<slug>`: enlace mágico por correo (30 días); ve sus citas y solo lo que el
   médico comparte (👁 Mostrar en el portal).
 
+## 11i. WhatsApp, Facturapi y portal (migración 0017)
+- **Portal:** el enlace mágico solo es la primera entrada. La sesión dura 90 días y se renueva sola
+  en cada visita; también se entra con un código de 6 dígitos que llega por correo (sirve si el
+  correo se abre en otro aparato). Cada correo de confirmación/recordatorio trae un enlace directo.
+- **WhatsApp (Cloud API de Meta):** variables en Vercel `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+  `WHATSAPP_WABA_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`. Al publicar se crean las
+  plantillas `appointment_reminder` y `appointment_booked` (utilidad, es_MX) si faltan. Webhook:
+  `/api/webhooks/whatsapp`. Recordatorios por WhatsApp siempre que esté configurado; confirmación
+  por WhatsApp si el negocio la activa (Configuración → Reservas). Costo Meta MX ~US$0.0085/mensaje.
+- **Facturapi (CFDI 4.0):** listo pero apagado hasta poner `FACTURAPI_USER_KEY` en Vercel
+  (licencia $299/mes + $0.60/timbre). Cada negocio: Configuración → Facturación (datos fiscales →
+  crea su emisor con facturas de prueba; subir CSD → facturas reales). En Cobros → Movimientos,
+  columna "Factura": facturar a RFC o público en general, PDF/XML, correo, cancelar (motivo 02).
+  Las claves de cada emisor se guardan cifradas (`tenants.invoicing_enc`).
+
 ## 12. Competencia y pendientes
 
 ### Competencia real en México

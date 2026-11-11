@@ -6,6 +6,7 @@ import {
   normalizeMxPhone,
   type CustomerWithStats,
 } from '@agenda/shared';
+import type { CustomerFiscal } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { customers } from '../db/schema.js';
 import { conflict, notFound } from '../lib/errors.js';
@@ -51,6 +52,7 @@ type StatsRow = {
   sex?: string | null;
   address?: string | null;
   curp?: string | null;
+  fiscal?: CustomerFiscal | null;
   archived_at?: Date | string | null;
   created_at: Date;
   visits: number | string;
@@ -84,6 +86,7 @@ function toStats(r: StatsRow): CustomerWithStats {
     sex: (r.sex ?? null) as CustomerWithStats['sex'],
     address: r.address ?? null,
     curp: r.curp ?? null,
+    fiscal: r.fiscal ?? null,
     archived: Boolean(r.archived_at),
     createdAt: new Date(r.created_at).toISOString(),
     visits,
@@ -116,7 +119,7 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
     filters.push(sql`(c.name ilike ${like} or c.phone ilike ${like} or c.email ilike ${like})`);
   }
   return sql`
-    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.archived_at,
+    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.fiscal, c.archived_at,
       coalesce(v.visits, 0) as visits, v.last_visit, v.first_visit,
       coalesce(v.no_shows, 0) as no_shows,
       v.avg_rating, coalesce(v.rating_count, 0) as rating_count,

@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { Hono } from 'hono';
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   collectionState,
@@ -8,6 +8,7 @@ import {
   ONLINE_METHODS,
   paymentCreateSchema,
   type CollectionDto,
+  type PaymentDto,
   type PaymentMethod,
   type TenantSettings,
   paymentLinkSchema,
@@ -15,7 +16,7 @@ import {
   PAYMENT_STATUSES,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, locations, memberships, payments, services, tenants } from '../db/schema.js';
+import { appointments, customers, invoices, locations, memberships, payments, services, tenants } from '../db/schema.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { apiBaseUrl, createOnlinePayment } from '../lib/online-payments.js';
 import { toPaymentDto } from '../lib/mappers.js';
@@ -57,6 +58,14 @@ paymentRoutes.get('/payments', async (c) => {
       locationId: appointments.locationId,
       locationName: locations.name,
       serviceName: services.name,
+      invoice: {
+        id: invoices.id,
+        uuid: invoices.uuid,
+        series: invoices.series,
+        folio: invoices.folio,
+        status: invoices.status,
+        test: invoices.test,
+      },
     })
     .from(payments)
     .innerJoin(customers, eq(customers.id, payments.customerId))
@@ -64,6 +73,7 @@ paymentRoutes.get('/payments', async (c) => {
     .leftJoin(appointments, eq(appointments.id, payments.appointmentId))
     .leftJoin(locations, eq(locations.id, appointments.locationId))
     .leftJoin(services, eq(services.id, appointments.serviceId))
+    .leftJoin(invoices, and(eq(invoices.paymentId, payments.id), ne(invoices.status, 'canceled')))
     .where(and(...filters))
     .orderBy(desc(when))
     .limit(5000); // the page warns when it gets exactly this many
@@ -75,6 +85,8 @@ paymentRoutes.get('/payments', async (c) => {
       locationId: r.locationId,
       locationName: r.locationName,
       serviceName: r.serviceName,
+      // Left join: all-null when the payment has no invoice
+      invoice: r.invoice?.id ? (r.invoice as unknown as PaymentDto['invoice']) : null,
     })),
   );
 });

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ageOn, isHealthType, type PortalDto, type PrescriptionCheckDto } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { clinicalNotes, customers, recordAccessLog, recordPhotos, tenants } from '../db/schema.js';
-import { decryptSecret, manageToken, portalToken, verifyPortalToken, verifyPrescriptionToken } from '../lib/crypto.js';
+import { decryptSecret, manageToken, PORTAL_DAYS, portalCode, portalToken, portalTokenExpiry, verifyPortalCode, verifyPortalToken, verifyPrescriptionToken } from '../lib/crypto.js';
 import { escapeHtml, sendEmail } from '../lib/email.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { appUrl, isUndeliverable } from '../lib/notify.js';
@@ -40,17 +40,39 @@ portalRoutes.post('/public/:slug/portal/link', async (c) => {
   });
   if (cu && !isUndeliverable(email)) {
     const link = `${appUrl()}/p/${tenant.slug}?t=${portalToken(cu.id)}`;
+    const code = portalCode(cu.id);
     const first = cu.name.split(' ')[0] ?? cu.name;
     const word = isHealthType(tenant.businessType) ? 'tus citas, recetas y estudios' : 'tus citas';
     await sendEmail({
       to: email,
-      subject: `Tu acceso a ${tenant.name}`,
-      text: `Hola ${first}:\n\nEntra a tu portal para ver ${word}:\n${link}\n\nEl enlace dura 30 días. Si no lo pediste, ignora este correo.\n\n— ${tenant.name}`,
-      html: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Hola ${escapeHtml(first)}:</p><p>Entra a tu portal para ver ${escapeHtml(word)}.</p><p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">Entrar a mi portal</a></p><p style="color:#64748b;font-size:13px">El enlace dura 30 días. Si no lo pediste, ignora este correo.</p><p style="color:#475569">${escapeHtml(tenant.name)}</p></div>`,
+      subject: `Tu código de acceso a ${tenant.name}: ${code}`,
+      text: `Hola ${first}:\n\nTu código para entrar es ${code} (vale 10 minutos).\n\nO entra directo con este enlace para ver ${word}:\n${link}\n\nUna vez dentro, tu teléfono recuerda tu sesión. Si no lo pediste, ignora este correo.\n\n— ${tenant.name}`,
+      html: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Hola ${escapeHtml(first)}:</p><p>Tu código para entrar es</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p style="color:#64748b;font-size:13px">Vale 10 minutos.</p><p>O entra directo para ver ${escapeHtml(word)}:</p><p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">Entrar a mi portal</a></p><p style="color:#64748b;font-size:13px">Una vez dentro, tu teléfono recuerda tu sesión. Si no lo pediste, ignora este correo.</p><p style="color:#475569">${escapeHtml(tenant.name)}</p></div>`,
     });
   }
   // Same answer either way: nobody can find out who is a patient here.
   return c.json({ ok: true });
+});
+
+/** Signs in with the 6-digit code from the email (when the link opens on another device). */
+portalRoutes.post('/public/:slug/portal/code', async (c) => {
+  const tenant = await getTenantBySlug(c.req.param('slug'));
+  const { email, code } = z.object({ email: z.string().trim().toLowerCase().email().max(200), code: z.string().trim().regex(/^\d{6}$/) }).parse(await c.req.json());
+  const db = getDb();
+  const limits = [
+    { key: `portal-code:${email}`, max: 5, minutes: 15 },
+    { key: `portal-code-ip:${clientIp(c)}`, max: 20, minutes: 15 },
+  ];
+  await assertNotLimited(db, limits);
+  const cu = await db.query.customers.findFirst({
+    where: and(eq(customers.tenantId, tenant.id), sql`lower(${customers.email}) = ${email}`),
+    orderBy: desc(customers.createdAt),
+  });
+  if (!cu || !verifyPortalCode(cu.id, code)) {
+    await recordAttempt(db, limits);
+    throw new AppError(422, 'portal_bad_code', 'The code is not valid or expired');
+  }
+  return c.json({ token: portalToken(cu.id) });
 });
 
 async function portalCustomer(c: Parameters<typeof tokenOf>[0]) {
@@ -101,6 +123,8 @@ portalRoutes.get('/public/portal', async (c) => {
     })),
     documents: await toDtos(db, t.id, shared),
     studies: studies.map((s) => ({ ...s, url: `/api/public/portal/files/${s.id}?t=${encodeURIComponent(token)}` })),
+    // Sliding session: a visit after a month gets a fresh 90-day token
+    renewedToken: (portalTokenExpiry(token) ?? 0) - Date.now() < (PORTAL_DAYS - 30) * 864e5 ? portalToken(cu.id) : null,
   };
   c.header('Cache-Control', 'private, no-store');
   return c.json(body);

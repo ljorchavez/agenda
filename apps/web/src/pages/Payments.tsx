@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { InvoiceCell, useInvoicing } from '../components/Invoicing';
 import { addDays, addMonths, format, startOfDay, startOfMonth, startOfYear } from 'date-fns';
 import {
   MANUAL_METHODS,
@@ -64,6 +65,9 @@ const EMPTY_FILTERS = { business: 'current', location: '', method: '', status: '
  * and customer. Totals follow the filters.
  */
 function MovementsTab() {
+  const { manager } = useAccess();
+  const inv = useInvoicing(manager);
+  const invoicing = Boolean(inv.data?.available && inv.data.connected);
   const { t } = useTranslation();
   const { tenant, businesses } = useAuth();
   const [preset, setPreset] = useState<Preset>('thisMonth');
@@ -216,6 +220,7 @@ function MovementsTab() {
                 <SortTh label={t('payments.method')} k="method" sort={sort} onSort={toggle} />
                 <SortTh label={t('payments.status')} k="status" sort={sort} onSort={toggle} />
                 <SortTh label={t('payments.amount')} k="amount" sort={sort} onSort={toggle} align="right" />
+                {invoicing && <th className="px-4 py-3 text-right font-medium">{t('invoicing.column')}</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -240,6 +245,7 @@ function MovementsTab() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium">{money(p.amountCents)}</td>
+                  {invoicing && <td className="whitespace-nowrap px-4 py-3 text-right">{(!p.tenantId || p.tenantId === tenant?.id) && <InvoiceCell payment={p} />}</td>}
                 </tr>
               ))}
             </tbody>

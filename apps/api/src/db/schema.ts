@@ -26,6 +26,7 @@ import {
   type FormField,
   type OnlinePurchase,
   type ClinicalAuthor,
+  type CustomerFiscal,
   type Professional,
   type PlanId,
   type WorkHours,
@@ -64,6 +65,8 @@ export const tenants = pgTable(
     mpAccessTokenEnc: text('mp_access_token_enc'),
     /** Mercado Pago account nickname/email shown in settings */
     mpAccount: text('mp_account'),
+    /** Facturapi issuer {orgId, testKey, liveKey}, AES-256-GCM encrypted. Never sent to clients. */
+    invoicingEnc: text('invoicing_enc'),
     // Public profile (booking page + directory)
     description: text('description'),
     address: text('address'),
@@ -191,6 +194,8 @@ export const customers = pgTable(
     curp: text('curp'),
     /** Hidden from lists; clinical records must be kept 5 years (NOM-004 5.4) */
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    /** Fiscal data to invoice them (RFC, razón social, régimen, CP, uso CFDI) */
+    fiscal: jsonb('fiscal').$type<CustomerFiscal>(),
     ...timestamps,
   },
   (t) => [
@@ -675,3 +680,28 @@ export const recordAccessLog = pgTable(
   },
   (t) => [index('record_access_log_customer_idx').on(t.tenantId, t.customerId, t.createdAt)],
 );
+
+// ---------- Electronic invoicing (CFDI with Facturapi) ----------
+
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    paymentId: uuid('payment_id').references(() => payments.id, { onDelete: 'set null' }),
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
+    facturapiId: text('facturapi_id').notNull(),
+    uuid: text('uuid'),
+    series: text('series'),
+    folio: integer('folio'),
+    totalCents: integer('total_cents').notNull(),
+    status: text('status').$type<'valid' | 'canceled' | 'pending'>().notNull().default('valid'),
+    test: boolean('test').notNull().default(false),
+    receiverRfc: text('receiver_rfc'),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+  },
+  (t) => [index('invoices_tenant_idx').on(t.tenantId, t.createdAt), index('invoices_payment_idx').on(t.paymentId)],
+);
+export type Invoice = typeof invoices.$inferSelect;

@@ -398,14 +398,16 @@
       "promos": "Promociones",
       "packages": "Paquetes",
       "reviews": "Reseñas",
-      "forms": "Cuestionarios"
+      "forms": "Cuestionarios",
+      "invoicing": "Facturación"
     },
     "changePassword": "Cambiar contraseña",
     "passwordChanged": "Contraseña cambiada",
     "reviewsPublic": "Mostrar reseñas en mi página y en el directorio",
     "reviewsPublicHelp": "Se publican a partir de 3 reseñas. Si lo apagas, tus clientes pueden seguir calificando y solo tú las ves.",
     "emailConfirmations": "Enviar confirmación por correo al agendar, cambiar o cancelar",
-    "notifyHelp": "Se envían al correo del cliente, si lo tiene registrado."
+    "notifyHelp": "El correo llega si el cliente lo tiene registrado; WhatsApp, a su celular. El recordatorio sale por los dos.",
+    "whatsappConfirmations": "Enviar también la confirmación por WhatsApp"
   },
   "booking": {
     "chooseService": "Elige un servicio",
@@ -1569,9 +1571,9 @@
   "portal": {
     "title": "Mi portal",
     "subtitle": "Tus citas y documentos",
-    "askHelp": "Escribe el correo que diste al negocio y te mandamos un enlace para entrar (sin contraseña).",
-    "sendLink": "Enviarme el enlace",
-    "sent": "Listo. Si tu correo está registrado, te llegará un enlace en unos minutos.",
+    "askHelp": "Escribe el correo que diste al negocio. Te mandamos un código (o un enlace) para entrar, sin contraseña. Después tu teléfono recuerda tu sesión.",
+    "sendLink": "Enviarme el código",
+    "sent": "Listo. Si tu correo está registrado, te llegará un código y un enlace en unos minutos.",
     "book": "Agendar una cita",
     "hello": "Hola {{name}}",
     "signOut": "Salir",
@@ -1586,7 +1588,11 @@
     "myPortal": "Mi portal: mis citas, recetas y estudios",
     "portal_expired": "Tu enlace venció. Pide uno nuevo.",
     "too_many_attempts": "Demasiados intentos. Intenta más tarde.",
-    "myAppointments": "Mis citas"
+    "myAppointments": "Mis citas",
+    "code": "Código de 6 dígitos",
+    "enter": "Entrar",
+    "otherEmail": "Usar otro correo",
+    "portal_bad_code": "El código no es válido o ya venció."
   },
   "rx": {
     "notFound": "Esta receta no existe o el enlace no es válido.",
@@ -1596,5 +1602,55 @@
     "date": "Fecha",
     "diagnosis": "Diagnóstico",
     "footer": "Documento firmado electrónicamente; la autenticidad se comprueba en esta misma página."
+  },
+  "invoicing": {
+    "title": "Facturación electrónica (CFDI 4.0)",
+    "live": "Facturas reales",
+    "test": "Modo de pruebas",
+    "unavailable": "La facturación electrónica estará disponible pronto. Puedes ir llenando tus datos fiscales.",
+    "help": "Usa los datos de tu Constancia de Situación Fiscal. Cada factura que emitas consume un timbre.",
+    "zip": "Código postal fiscal",
+    "legalName": "Razón social o nombre (como en el SAT)",
+    "legalNameHelp": "Sin «S.A. de C.V.» ni régimen de capital",
+    "taxSystem": "Régimen fiscal",
+    "productKey": "Clave de producto o servicio (SAT)",
+    "description": "Concepto en la factura",
+    "series": "Serie",
+    "keyHelp": "La clave y el IVA vienen sugeridos según tu giro; confírmalos con tu contador.",
+    "autoEmail": "Mandar la factura por correo al cliente al emitirla",
+    "saveData": "Guardar datos fiscales",
+    "connect": "Guardar y activar facturación",
+    "csd": "Certificado de sello digital (CSD)",
+    "csdHelp": "Mientras no subas tu CSD, las facturas son de prueba (no van al SAT). Lo tramitas en el SAT con tu e.firma.",
+    "csdDone": "CSD cargado: tus facturas son reales. Súbelo de nuevo cuando lo renueves.",
+    "cer": "Archivo .cer",
+    "key": "Archivo .key",
+    "password": "Contraseña del CSD",
+    "upload": "Subir CSD",
+    "column": "Factura",
+    "invoice": "Factura",
+    "testShort": "prueba",
+    "cancelPending": "cancelación pendiente",
+    "sent": "Enviada",
+    "email": "Enviar por correo",
+    "cancel": "Cancelar factura",
+    "cancelConfirm": "¿Cancelar esta factura ante el SAT?",
+    "issue": "Facturar",
+    "issueTitle": "Facturar {{amount}}",
+    "testNotice": "Modo de pruebas: la factura no se envía al SAT hasta que subas tu CSD.",
+    "public": "Público en general",
+    "withRfc": "Con RFC",
+    "use": "Uso del CFDI",
+    "saveFiscal": "Guardar estos datos para la próxima",
+    "invoicing_unavailable": "La facturación electrónica aún no está disponible.",
+    "invoicing_not_set": "Primero configura la facturación en Configuración.",
+    "already_invoiced": "Este pago ya tiene factura.",
+    "payment_not_paid": "Solo se facturan pagos cobrados.",
+    "facturapi_unreachable": "No se pudo conectar con el servicio de facturación.",
+    "iva": {
+      "16": "IVA 16% incluido en el precio",
+      "0": "IVA tasa 0%",
+      "exento": "Exento de IVA (servicios médicos)"
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { customClinicalTemplateSchema, professionalSchema, type Professional } from './clinical';
+import { invoicingSettingsSchema, type CustomerFiscal, type InvoiceDto } from './invoicing';
 
 export * from './clinical';
 
@@ -413,8 +414,12 @@ export const tenantSettingsSchema = z.object({
   reminderHoursBefore: z.number().int().min(1).max(72),
   /** Email the customer when a booking is made, moved or cancelled (default on) */
   emailConfirmations: z.boolean().optional(),
+  /** Also confirm by WhatsApp (each message has a cost from Meta; off by default) */
+  whatsappConfirmations: z.boolean().optional(),
   /** Health giros: the business's own clinical-record templates */
   clinicalTemplates: z.array(customClinicalTemplateSchema).max(30).optional(),
+  /** Electronic invoicing (CFDI) with Facturapi */
+  invoicing: invoicingSettingsSchema.optional(),
   onlineBookingEnabled: z.boolean(),
   payments: paymentSettingsSchema.optional(),
   selfService: z
@@ -1257,6 +1262,8 @@ export interface CustomerDto {
   sex: 'F' | 'M' | 'X' | null;
   address: string | null;
   curp: string | null;
+  /** Fiscal data for CFDI invoices */
+  fiscal?: CustomerFiscal | null;
   archived: boolean;
   createdAt: string;
 }
@@ -1327,6 +1334,8 @@ export interface PaymentDto {
   locationId?: string | null;
   locationName?: string | null;
   serviceName?: string | null;
+  /** Its CFDI, if one was issued (canceled ones excluded) */
+  invoice?: Pick<InvoiceDto, 'id' | 'uuid' | 'series' | 'folio' | 'status' | 'test'> | null;
 }
 
 export interface DashboardDto {
@@ -1935,3 +1944,4 @@ export interface PurchaseStatusDto {
   plan: { sessionsLeft: number | null; expiresOn: string | null } | null;
 }
 export * from './catalogs';
+export * from './invoicing';

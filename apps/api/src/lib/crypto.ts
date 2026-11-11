@@ -77,10 +77,11 @@ export function verifyPrescriptionToken(token: string): string | null {
 }
 
 /**
- * Patient portal session (/p/<slug>?t=<token>), sent by email: <customerId>.<expires>.<hmac>.
- * Valid 30 days; signing in again just sends a new link.
+ * Patient portal session (/p/<slug>?t=<token>): <customerId>.<expires>.<hmac>. Valid 90 days and
+ * renewed on each visit, so a patient who comes back stays signed in on their phone. Every
+ * confirmation and reminder email carries a fresh one too.
  */
-export const PORTAL_DAYS = 30;
+export const PORTAL_DAYS = 90;
 export function portalToken(customerId: string, now = Date.now()): string {
   const exp = Math.floor(now / 1000) + PORTAL_DAYS * 86400;
   return `${customerId}.${exp}.${manageSig(`portal:${customerId}:${exp}`)}`;
@@ -92,4 +93,32 @@ export function verifyPortalToken(token: string | null | undefined, now = Date.n
   const expected = Buffer.from(manageSig(`portal:${m[1]!}:${m[2]!}`));
   const given = Buffer.from(m[3]!);
   return expected.length === given.length && crypto.timingSafeEqual(expected, given) ? m[1]! : null;
+}
+
+/** Expiry (ms) of a portal token, or null. */
+export function portalTokenExpiry(token: string | null | undefined): number | null {
+  const m = /^[0-9a-f-]{36}\.(\d{10})\./.exec(token ?? '');
+  return m ? Number(m[1]) * 1000 : null;
+}
+
+/**
+ * 6-digit sign-in code for the portal (sent with the link, for when the email opens on another
+ * device). Stateless: derived from the customer and a 10-minute window; the current and the
+ * previous window are accepted, so a code lasts 10-20 minutes.
+ */
+const CODE_WINDOW_MS = 10 * 60 * 1000;
+function codeFor(customerId: string, window: number): string {
+  const h = crypto.createHmac('sha256', manageKey()).update(`portal-code:${customerId}:${window}`).digest();
+  return String(h.readUInt32BE(0) % 1_000_000).padStart(6, '0');
+}
+export function portalCode(customerId: string, now = Date.now()): string {
+  return codeFor(customerId, Math.floor(now / CODE_WINDOW_MS));
+}
+export function verifyPortalCode(customerId: string, code: string, now = Date.now()): boolean {
+  const w = Math.floor(now / CODE_WINDOW_MS);
+  const given = Buffer.from(code.trim());
+  return [w, w - 1].some((x) => {
+    const expected = Buffer.from(codeFor(customerId, x));
+    return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+  });
 }

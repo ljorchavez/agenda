@@ -49,6 +49,18 @@ export function PortalPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const q = useQuery({ queryKey: ['portal', slug, token], queryFn: () => portalFetch<PortalDto>('/public/portal', token!), enabled: Boolean(token), retry: false });
+  const keep = (tok: string) => {
+    try {
+      localStorage.setItem(storeKey(slug), tok);
+    } catch {
+      /* private mode: memory only */
+    }
+  };
+  // Sliding session: keep the fresh token the server hands out
+  useEffect(() => {
+    if (q.data?.renewedToken) keep(q.data.renewedToken);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.data?.renewedToken]);
   const signOut = () => {
     try {
       localStorage.removeItem(storeKey(slug));
@@ -72,26 +84,41 @@ export function PortalPage() {
           </div>
           <LanguageSwitch />
         </div>
-        {!token ? <AskLink slug={slug} /> : q.isLoading ? <Loading /> : q.data ? <PortalBody data={q.data} onSignOut={signOut} /> : <ErrorText error={q.error} ns="portal" />}
+        {!token ? <AskLink slug={slug} onToken={(tok) => { keep(tok); setToken(tok); }} /> : q.isLoading ? <Loading /> : q.data ? <PortalBody data={q.data} onSignOut={signOut} /> : <ErrorText error={q.error} ns="portal" />}
       </div>
     </div>
   );
 }
 
-function AskLink({ slug }: { slug: string }) {
+function AskLink({ slug, onToken }: { slug: string; onToken: (token: string) => void }) {
   const { t } = useTranslation();
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const ask = useMutation({ mutationFn: () => api(`/public/${slug}/portal/link`, { method: 'POST', body: { email } }) });
+  const enter = useMutation({
+    mutationFn: () => api<{ token: string }>(`/public/${slug}/portal/code`, { method: 'POST', body: { email, code } }),
+    onSuccess: (r) => onToken(r.token),
+  });
+  if (ask.isSuccess) {
+    return (
+      <form className="card space-y-3" onSubmit={(e) => { e.preventDefault(); enter.mutate(); }} data-testid="portal-code">
+        <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{t('portal.sent')}</p>
+        <label className="block text-sm">
+          <span className="label">{t('portal.code')}</span>
+          <input inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} required className="input text-center font-mono text-2xl tracking-[0.4em]" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} aria-label={t('portal.code')} />
+        </label>
+        <ErrorText error={enter.error} ns="portal" />
+        <button className="btn-primary w-full" disabled={enter.isPending || code.length !== 6}>{t('portal.enter')}</button>
+        <button type="button" className="w-full text-sm text-slate-500 hover:underline" onClick={() => { ask.reset(); setCode(''); }}>{t('portal.otherEmail')}</button>
+      </form>
+    );
+  }
   return (
     <form className="card space-y-3" onSubmit={(e) => { e.preventDefault(); ask.mutate(); }} data-testid="portal-ask">
       <p className="text-sm text-slate-600">{t('portal.askHelp')}</p>
       <input type="email" required className="input" placeholder={t('customers.email')} aria-label={t('customers.email')} value={email} onChange={(e) => setEmail(e.target.value)} />
       <ErrorText error={ask.error} ns="portal" />
-      {ask.isSuccess ? (
-        <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{t('portal.sent')}</p>
-      ) : (
-        <button className="btn-primary w-full" disabled={ask.isPending}>{t('portal.sendLink')}</button>
-      )}
+      <button className="btn-primary w-full" disabled={ask.isPending}>{t('portal.sendLink')}</button>
       <p className="text-center text-sm"><Link to={`/b/${slug}`} className="text-brand-700 hover:underline">{t('portal.book')}</Link></p>
     </form>
   );

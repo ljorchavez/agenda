@@ -14,7 +14,8 @@
     "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "db:seed-missing": "tsx --env-file-if-exists=.env src/db/seed-missing.ts",
     "reminders:run": "tsx --env-file-if-exists=.env src/jobs/run-reminders.ts",
-    "build:vercel": "esbuild src/vercel.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-vercel/index.mjs --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --external:pg-native --external:@aws-sdk/*"
+    "build:vercel": "esbuild src/vercel.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-vercel/index.mjs --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --external:pg-native --external:@aws-sdk/*",
+    "whatsapp:setup": "tsx --env-file-if-exists=.env src/integrations/whatsapp-setup.ts"
   },
   "dependencies": {
     "@agenda/shared": "workspace:*",

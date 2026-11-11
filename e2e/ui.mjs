@@ -522,6 +522,13 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.goto('http://localhost:5173/settings');
   await page.getByTestId('clinical-templates').waitFor({ timeout: 8000 }).catch(() => {});
   ok('own clinical templates in settings', (await page.getByTestId('new-template').count()) === 1);
+  await page.goto('http://localhost:5173/settings?tab=invoicing');
+  await page.getByTestId('invoicing-section').waitFor({ timeout: 8000 }).catch(() => {});
+  ok('invoicing settings tab (CFDI)', (await page.getByTestId('invoicing-section').count()) === 1 && ((await page.getByTestId('invoicing-section').textContent()) ?? '').includes('85121500'));
+  await page.goto('http://localhost:5173/p/medico-demo');
+  await page.getByTestId('portal-ask').locator('input[type=email]').fill('nadie@example.com');
+  await page.getByTestId('portal-ask').getByRole('button').first().click();
+  ok('portal then asks for the 6-digit code', await page.getByTestId('portal-code').isVisible().catch(() => false));
 }
 ok('no page errors', errors.length === 0, errors.join(' / '));
 await browser.close();

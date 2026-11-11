@@ -8,7 +8,7 @@ import {
   fetchStatus,
   verifyMercadoPagoSignature,
 } from '../integrations/mercadopago.js';
-import { verifyWhatsAppSignature, type WhatsAppWebhook } from '../integrations/whatsapp.js';
+import { samePhone, verifyWhatsAppSignature, type WhatsAppWebhook } from '../integrations/whatsapp.js';
 import { fulfilPurchase } from '../lib/online-sales.js';
 
 /** Webhooks from WhatsApp (Meta) and Mercado Pago. Always verify signatures first. */
@@ -58,7 +58,7 @@ webhookRoutes.post('/webhooks/whatsapp', async (c) => {
         const customer = await db.query.customers.findFirst({
           where: eq(customers.id, appt.customerId),
         });
-        if (!customer?.phone || customer.phone.replace(/\D/g, '') !== msg.from.replace(/\D/g, '')) {
+        if (!customer?.phone || !samePhone(customer.phone, msg.from)) {
           continue;
         }
         await db

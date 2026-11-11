@@ -398,14 +398,16 @@
       "promos": "Promotions",
       "packages": "Packages",
       "reviews": "Reviews",
-      "forms": "Questionnaires"
+      "forms": "Questionnaires",
+      "invoicing": "Invoicing"
     },
     "changePassword": "Change password",
     "passwordChanged": "Password changed",
     "reviewsPublic": "Show reviews on my page and in the directory",
     "reviewsPublicHelp": "They're published from 3 reviews on. If you turn it off, customers can still rate you and only you see them.",
     "emailConfirmations": "Email a confirmation when a booking is made, moved or cancelled",
-    "notifyHelp": "Sent to the customer's email, if they have one."
+    "notifyHelp": "Email goes to the customer's email if on file; WhatsApp to their mobile. The reminder goes by both.",
+    "whatsappConfirmations": "Also send the confirmation by WhatsApp"
   },
   "booking": {
     "chooseService": "Choose a service",
@@ -1569,9 +1571,9 @@
   "portal": {
     "title": "My portal",
     "subtitle": "Your appointments and documents",
-    "askHelp": "Type the email you gave the business and we'll send you a link to get in (no password).",
-    "sendLink": "Send me the link",
-    "sent": "Done. If your email is on file, a link will arrive in a few minutes.",
+    "askHelp": "Type the email you gave the business. We'll send you a code (or a link) to get in, no password. Then your phone remembers you.",
+    "sendLink": "Send me the code",
+    "sent": "Done. If your email is on file, a code and a link will arrive in a few minutes.",
     "book": "Book an appointment",
     "hello": "Hi {{name}}",
     "signOut": "Sign out",
@@ -1586,7 +1588,11 @@
     "myPortal": "My portal: appointments, prescriptions and studies",
     "portal_expired": "Your link expired. Ask for a new one.",
     "too_many_attempts": "Too many attempts. Try later.",
-    "myAppointments": "My appointments"
+    "myAppointments": "My appointments",
+    "code": "6-digit code",
+    "enter": "Sign in",
+    "otherEmail": "Use another email",
+    "portal_bad_code": "The code is not valid or expired."
   },
   "rx": {
     "notFound": "This prescription doesn't exist or the link isn't valid.",
@@ -1596,5 +1602,55 @@
     "date": "Date",
     "diagnosis": "Diagnosis",
     "footer": "Electronically signed document; authenticity is checked on this same page."
+  },
+  "invoicing": {
+    "title": "Electronic invoicing (CFDI 4.0)",
+    "live": "Real invoices",
+    "test": "Test mode",
+    "unavailable": "Electronic invoicing will be available soon. You can fill in your tax data meanwhile.",
+    "help": "Use the data on your Constancia de Situación Fiscal. Each invoice uses one timbre.",
+    "zip": "Tax ZIP code",
+    "legalName": "Legal name (as in the SAT)",
+    "legalNameHelp": "Without «S.A. de C.V.»",
+    "taxSystem": "Tax regime",
+    "productKey": "Product or service key (SAT)",
+    "description": "Invoice concept",
+    "series": "Series",
+    "keyHelp": "Key and VAT are suggested for your business type; confirm them with your accountant.",
+    "autoEmail": "Email the invoice to the customer when issued",
+    "saveData": "Save tax data",
+    "connect": "Save and turn on invoicing",
+    "csd": "Digital seal certificate (CSD)",
+    "csdHelp": "Until you upload your CSD, invoices are tests (not sent to the SAT).",
+    "csdDone": "CSD uploaded: your invoices are real. Upload it again when you renew it.",
+    "cer": ".cer file",
+    "key": ".key file",
+    "password": "CSD password",
+    "upload": "Upload CSD",
+    "column": "Invoice",
+    "invoice": "Invoice",
+    "testShort": "test",
+    "cancelPending": "cancellation pending",
+    "sent": "Sent",
+    "email": "Send by email",
+    "cancel": "Cancel invoice",
+    "cancelConfirm": "Cancel this invoice before the SAT?",
+    "issue": "Invoice",
+    "issueTitle": "Invoice {{amount}}",
+    "testNotice": "Test mode: the invoice isn't sent to the SAT until you upload your CSD.",
+    "public": "General public",
+    "withRfc": "With RFC",
+    "use": "CFDI use",
+    "saveFiscal": "Save this data for next time",
+    "invoicing_unavailable": "Electronic invoicing isn't available yet.",
+    "invoicing_not_set": "Set up invoicing first in Settings.",
+    "already_invoiced": "This payment already has an invoice.",
+    "payment_not_paid": "Only paid payments are invoiced.",
+    "facturapi_unreachable": "Could not reach the invoicing service.",
+    "iva": {
+      "16": "16% VAT included in the price",
+      "0": "0% VAT",
+      "exento": "VAT exempt (medical services)"
+    }
   }
 }
