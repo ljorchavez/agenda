@@ -7,15 +7,21 @@ Flujo de trabajo: todo directo a `main`, sin pull requests (por ahora).
 
 ---
 
-## 1. Planes y límites (hecho, precios provisionales)
+## 1. Planes y límites (hecho)
 
-| Plan     | Precio        | Negocios | Sucursales | Clientes | Reservas / mes |
-|----------|---------------|----------|------------|----------|----------------|
-| Gratis   | $0            | 1        | 1          | 5        | sin límite     |
-| Estándar | $399 / mes    | 1        | 1          | sin límite | 500          |
-| Premium  | Próximamente  | –        | –          | sin límite | sin límite   |
+Precios **+ IVA**.
 
-Extras (Estándar en adelante):
+| Plan       | Precio       | Agendas (personas/espacios) | Sucursales incluidas | Clientes   | Reservas / mes |
+|------------|--------------|-----------------------------|----------------------|------------|----------------|
+| Gratis     | $0           | sin límite                  | 1                    | 5          | sin límite     |
+| Individual | $249 / mes   | 1                           | 1 (sin extras)       | sin límite | 500            |
+| Estándar   | $399 / mes   | sin límite                  | 1                    | sin límite | 500            |
+| Premium    | $799 / mes   | sin límite                  | 2                    | sin límite | sin límite     |
+
+- Individual, Estándar y Premium incluyen paquetes, expediente y cuestionarios, comisiones y caja.
+- Fotos del expediente: 1 GB (Individual y Estándar), 10 GB (Premium). Premium: soporte prioritario.
+
+Extras (Estándar y Premium):
 - Sucursal extra: **$199 / mes**
 - Negocio extra: **$299 / mes**
 
@@ -24,7 +30,7 @@ Extras (Estándar en adelante):
 - Los usuarios (admins, gerentes, colaboradores) no cuestan.
 - Negocios demo: Premium (para que su historial no choque con límites).
 
-**Pendiente:** definir Premium (precio y qué incluye) y confirmar precios finales.
+**Decidido (nov 2026):** Individual $249 y Premium $799, todo + IVA.
 
 ---
 
@@ -106,12 +112,13 @@ Necesario:
 ---
 
 ## 6. Otros pendientes
-- **Iniciar sesión con Google** (recomendado; mejor con dominio propio). Requiere crear un cliente
-  OAuth gratis en Google Cloud. SSO empresarial (Okta/Entra) no por ahora.
+- **Iniciar sesión con Google:** ya programado (entrar y crear cuenta). Se activa al poner
+  `GOOGLE_CLIENT_ID` en Vercel: crear gratis un "ID de cliente de OAuth" tipo *Aplicación web* en
+  Google Cloud con el origen `https://agenda-crm-rouge.vercel.app` (y el dominio propio cuando
+  exista). No necesita secreto. SSO empresarial (Okta/Entra) no por ahora.
 - **Correos del sistema:** cuenta en Resend, verificar el dominio y poner `RESEND_API_KEY` y
   `EMAIL_FROM` en Vercel. Sin eso, "¿Olvidaste tu contraseña?" no envía el correo. Poner también `APP_URL`.
 - Dominio propio.
-- Definir Premium.
 - ~~Conectar GitHub ↔ Vercel~~ (hecho: cada push a `main` se publica solo).
 
 ---
@@ -136,7 +143,7 @@ Necesario:
 
 ---
 
-## 9. Página pública personalizada (hecho, salvo la vista previa al compartir)
+## 9. Página pública personalizada (hecho)
 Cada negocio ya tiene su página `/b/<slug>`. Agregar personalización sencilla, para todos los
 planes, guardada en la configuración del negocio (sin migración) y editable en Configuración →
 Negocio con vista previa:
@@ -144,14 +151,16 @@ Negocio con vista previa:
 - Galería sencilla del lugar (4–8 fotos), para todos los planes.
 - Redes (Instagram, Facebook, TikTok) y botón de WhatsApp.
 - Aviso destacado opcional ("Cerramos el 24", "2x1 los martes").
-- **Pendiente:** vista previa al compartir la liga en WhatsApp con su banner y nombre.
+- Vista previa al compartir la liga en WhatsApp con su banner, nombre y colonia (hecho).
 - **Mismos colores de Agenda para todos** (sin color de marca ni plantillas).
 - Después: dominio propio por negocio (Premium).
 
-## 10. Precio con "Cualquiera disponible" (por decidir)
-Hoy se asigna el espacio libre con menos uso, sin ver el precio: quien ve "desde $450" puede
-caer en la Cancha Central de $550. Propuesta: dar el más barato libre (repartiendo entre los del
-mismo precio) y mostrar el precio final antes de confirmar si solo queda uno más caro.
+## 10. "Cualquiera disponible" (hecho)
+Lo decide cada negocio en Configuración → Reservas:
+- **Menos uso** (como era antes): reparte el trabajo.
+- **El más barato libre**: el cliente paga el precio "desde" que vio.
+- **Mis favoritos en orden**: el primero libre de una lista que acomoda el negocio.
+Las mesas de restaurante siguen asignándose por tamaño de grupo.
 
 
 ---
@@ -234,7 +243,8 @@ mismo precio) y mostrar el precio final antes de confirmar si solo queda uno má
 - Plan gratis, varias sucursales con gerentes y soporte local en Colima y Guadalajara.
 
 ### Pendientes (en orden)
-1. App instalable desde el navegador (PWA) e íconos: los dueños usan el celular.
+1. ~~App instalable desde el navegador (PWA) e íconos~~ (hecho: aviso "Instala Agenda" en el
+   celular, atajos "Nueva cita" y "Clientes", página sin conexión).
 2. Cobros: suscripción con tarjeta (falta proveedor). El anticipo al reservar ya está hecho;
    falta vender paquetes y tarjetas de regalo en línea.
 3. Facturación CFDI: AgendaPro aún no la tiene; es nuestra mejor ventaja.

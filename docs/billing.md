@@ -11,14 +11,17 @@ Each business (tenant) has its own plan (`tenants.plan`). Limits and prices live
 
 Features by plan (`PLAN_LIMITS.packages | records | cash | recordPhotosMb`):
 
-| Feature | Gratis | Estándar | Premium |
-|---|---|---|---|
-| Verified reviews, iCal calendar links | ✓ | ✓ | ✓ |
-| Packages, memberships, gift cards | – | ✓ | ✓ |
-| Client record (encrypted) + questionnaires per booking type | – | ✓ (1 GB photos) | ✓ (10 GB photos) |
-| Commissions and cash closing | – | ✓ | ✓ |
+| Feature | Gratis | Individual | Estándar | Premium |
+|---|---|---|---|---|
+| Verified reviews, iCal calendar links | ✓ | ✓ | ✓ | ✓ |
+| Packages, memberships, gift cards | – | ✓ | ✓ | ✓ |
+| Client record (encrypted) + questionnaires per booking type | – | ✓ (1 GB photos) | ✓ (1 GB photos) | ✓ (10 GB photos) |
+| Commissions and cash closing | – | ✓ | ✓ | ✓ |
+| Agendas (people/spaces) | ∞ | 1 | ∞ | ∞ |
+| Locations included | 1 | 1 | 1 (+extras) | 2 (+extras) |
+| Price / month (+ IVA) | $0 | $249 | $399 | $799 |
 
-Missing feature → **402** `plan_limit_packages | plan_limit_records | plan_limit_cash`; photo
+Missing feature → **402** `plan_limit_packages | plan_limit_records | plan_limit_cash`; Individual over one agenda → `plan_limit_resources`; photo
 storage full → `plan_limit_photos`.
 
 Add-ons: extra active location $199 / month, extra business $299 / month (includes Estándar).

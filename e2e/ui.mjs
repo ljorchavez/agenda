@@ -306,6 +306,17 @@ if (toReview) {
   await page.getByTestId('review-done').waitFor({ timeout: 6000 }).catch(() => {});
   ok('customer leaves a verified review', await page.getByTestId('review-done').isVisible().catch(() => false));
 } else ok('a completed booking to review exists', false);
+// ---- "Any available" rule and the four plans (barbershop demo)
+await page.goto('http://localhost:5173/settings?tab=booking');
+await page.getByTestId('assignment-settings').waitFor({ timeout: 8000 }).catch(() => {});
+await page.getByTestId('assignment-settings').getByText('Mis favoritos, en este orden').click().catch(() => {});
+ok('booking settings let the business pick who gets "any available"', (await page.getByTestId('preferred-order').locator('li').count()) >= 2);
+await page.goto('http://localhost:5173/settings?tab=plan');
+await page.getByRole('button', { name: 'Cambiar plan' }).click().catch(() => {});
+await page.getByTestId('plan-individual').waitFor({ timeout: 8000 }).catch(() => {});
+const indText = (await page.getByTestId('plan-individual').textContent().catch(() => '')) ?? '';
+const premText = (await page.getByTestId('plan-premium').textContent().catch(() => '')) ?? '';
+ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && indText.includes('IVA') && premText.includes('799') && premText.includes('2 sucursales'), `${indText.slice(0, 80)} | ${premText.slice(0, 80)}`);
 // ---- Questionnaires (nutrition demo): builder, asked when booking online, answers in the record
 {
   const login = await api('/auth/login', { email: 'demo@agenda.mx', password: 'demo1234' });
