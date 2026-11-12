@@ -31,7 +31,8 @@
     "payments": "Cobros",
     "settings": "Configuración",
     "logout": "Cerrar sesión",
-    "reports": "Reportes"
+    "reports": "Reportes",
+    "pos": "Punto de venta"
   },
   "auth": {
     "tagline": "Agenda, recordatorios por WhatsApp y cobros para tu negocio.",
@@ -497,7 +498,8 @@
     "services": "Servicios",
     "payments": "Cobros",
     "reports": "Reportes",
-    "settings": "Ajustes"
+    "settings": "Ajustes",
+    "pos": "Vender"
   },
   "reports": {
     "title": "Reportes",

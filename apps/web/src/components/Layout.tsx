@@ -1,7 +1,7 @@
 import { InstallAppBanner } from './InstallApp';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { isManager, kindConfig, type BusinessKind } from '@agenda/shared';
+import { isManager, kindConfig, PLAN_LIMITS, type BusinessKind } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 
 type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
@@ -13,6 +13,7 @@ const NAV: NavItem[] = [
   { to: '/services', key: 'services', icon: '✂' },
   { to: '/resources', key: 'resources', icon: '♟', desktopOnly: true },
   { to: '/payments', key: 'payments', icon: '$' },
+  { to: '/pos', key: 'pos', icon: '▣' },
   { to: '/reports', key: 'reports', icon: '▤' },
   { to: '/settings', key: 'settings', icon: '⚙' },
 ];
@@ -21,12 +22,14 @@ const NAV: NavItem[] = [
  * Same sections for every kind of business; only the wording changes (i18n `kinds.<kind>.*`).
  * Kinds that book without choosing a service (party size, duration) don't need the catalogue.
  */
-function navFor(kind: BusinessKind, manager: boolean): (NavItem & { label: string; short: string })[] {
+function navFor(kind: BusinessKind, manager: boolean, pos: boolean): (NavItem & { label: string; short: string })[] {
   const cfg = kindConfig(kind);
   return NAV.filter((n) => {
     // Team members (colaboradores) work their own book; catalogue and resources stay with managers.
     if (!manager && (n.key === 'services' || n.key === 'resources')) return false;
     if (n.key === 'services' && (cfg.partySize || cfg.durations)) return false;
+    // Point of sale comes with the plans that include the cash closing
+    if (n.key === 'pos' && !pos) return false;
     return true;
   }).map((n) => {
     const perKind = ['calendar', 'services', 'resources'].includes(n.key);
@@ -81,7 +84,7 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
 export function Layout() {
   const { t } = useTranslation();
   const { tenant, user, logout } = useAuth();
-  const nav = navFor(tenant?.kind ?? 'appointments', isManager(user?.role));
+  const nav = navFor(tenant?.kind ?? 'appointments', isManager(user?.role), PLAN_LIMITS[tenant?.plan ?? 'free'].cash);
   const mobileNav = nav.filter((n) => !n.desktopOnly);
   const navigate = useNavigate();
 
@@ -95,7 +98,7 @@ export function Layout() {
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-slate-200 bg-white p-4 md:flex">
         <div className="mb-6 px-2">
-          <div className="mb-1 text-lg font-bold text-brand-700">Agenda</div>
+          <div className="mb-1 text-lg font-bold text-brand-700">Lugali</div>
           <BusinessSwitcher />
         </div>
         <nav className="flex flex-1 flex-col gap-1">
@@ -128,7 +131,7 @@ export function Layout() {
 
       {/* Mobile top bar */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
-        <div className="font-bold text-brand-700">Agenda</div>
+        <div className="font-bold text-brand-700">Lugali</div>
         <BusinessSwitcher className="mx-2 min-w-0 flex-1" />
         <LanguageSwitch />
       </header>

@@ -151,7 +151,7 @@ export function ResetPasswordPage() {
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-6">
       <div className="mx-auto max-w-md">
         <div className="mb-6 flex items-center justify-between">
-          <Link to="/" className="text-2xl font-bold text-brand-700">Agenda</Link>
+          <Link to="/" className="text-2xl font-bold text-brand-700">Lugali</Link>
           <LanguageSwitch />
         </div>
         <div className="card">
@@ -248,7 +248,7 @@ export function RegisterPage() {
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-6">
       <div className={`mx-auto ${plan ? 'max-w-md' : 'max-w-5xl'}`}>
         <div className="mb-6 flex items-center justify-between">
-          <Link to="/" className="text-2xl font-bold text-brand-700">Agenda</Link>
+          <Link to="/" className="text-2xl font-bold text-brand-700">Lugali</Link>
           <LanguageSwitch />
         </div>
         {!plan ? (

@@ -5,6 +5,7 @@ import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-do
 import { ClinicalPrintPage } from './components/ClinicalRecord';
 import { PortalPage, PrescriptionPage } from './pages/Portal';
 import { PrivacyPage, TermsPage } from './pages/Legal';
+import { PosPage } from './components/Pos';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
@@ -83,6 +84,7 @@ export function App() {
         <Route path="customers/:id" element={<CustomerDetailPage />} />
         <Route path="services" element={<ServicesPage />} />
         <Route path="payments" element={<PaymentsPage />} />
+        <Route path="pos" element={<PosPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="resources" element={<ResourcesPage />} />
         {/* Old per-kind pages, now one calendar and one resources page */}

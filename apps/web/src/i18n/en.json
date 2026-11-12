@@ -31,7 +31,8 @@
     "payments": "Collections",
     "settings": "Settings",
     "logout": "Log out",
-    "reports": "Reports"
+    "reports": "Reports",
+    "pos": "Point of sale"
   },
   "auth": {
     "tagline": "Bookings, WhatsApp reminders and payments for your business.",
@@ -497,7 +498,8 @@
     "services": "Services",
     "payments": "Collections",
     "reports": "Reports",
-    "settings": "Settings"
+    "settings": "Settings",
+    "pos": "Sell"
   },
   "reports": {
     "title": "Reports",

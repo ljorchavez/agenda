@@ -546,6 +546,8 @@ await page.getByTestId('pos-done').waitFor({ timeout: 8000 }).catch(() => {});
 ok('POS: sale charged', await page.getByTestId('pos-done').isVisible().catch(() => false));
 await page.keyboard.press('Escape');
 ok('POS: shows in today sales', ((await page.getByTestId('pos-sales').textContent().catch(() => '')) ?? '').includes('Amoxicilina'));
+await page.goto('http://localhost:5173/pos');
+ok('Punto de venta in the menu opens the counter', (await page.locator('nav a[href="/pos"]').count()) >= 1 && (await page.getByTestId('pos-tab').count()) === 1);
 await page.goto('http://localhost:5173/payments?tab=products');
 await page.getByTestId('products-tab').waitFor({ timeout: 8000 }).catch(() => {});
 ok('products tab lists the catalog with stock', (await page.getByTestId('product-row').count()) >= 3);

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import {
   IVA_OPTIONS,
+  isHealthType,
   POS_METHODS,
   saleTotal,
   type PosMethod,
@@ -13,13 +14,19 @@ import {
   type StockMoveDto,
 } from '@agenda/shared';
 import { api } from '../lib/api';
-import { useAccess } from '../lib/auth';
+import { useAccess, useAuth } from '../lib/auth';
 import { dateTime, money, toCents } from '../lib/format';
 import { useMyLocations } from '../lib/queries';
 import { CustomerPicker } from './CustomerPicker';
 import { InvoiceModal, useInvoicing } from './Invoicing';
 import { UpgradeNote, useFeature } from './Sales';
 import { ErrorText, Loading, Modal } from './ui';
+
+/** Prescriptions only matter in health businesses (doctors, dentists…). */
+const useHealth = () => {
+  const { tenant } = useAuth();
+  return Boolean(tenant && isHealthType(tenant.businessType));
+};
 
 type Line = { key: string; productId: string | null; name: string; qty: number; unitCents: number; rx?: boolean; max?: number | null };
 
@@ -52,6 +59,7 @@ export function PosTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { manager } = useAccess();
+  const health = useHealth();
   const enabled = useFeature('cash');
   const { locationId, picker } = useLocationChoice();
   const products = useProducts(locationId, false, enabled);
@@ -85,7 +93,7 @@ export function PosTab() {
     setLines((ls) => {
       const i = ls.findIndex((l) => l.productId === p.id);
       if (i >= 0) return ls.map((l, k) => (k === i ? { ...l, qty: l.qty + 1 } : l));
-      return [...ls, { key: p.id, productId: p.id, name: p.name, qty: 1, unitCents: p.priceCents, rx: p.requiresPrescription, max: p.trackStock ? p.stock : null }];
+      return [...ls, { key: p.id, productId: p.id, name: p.name, qty: 1, unitCents: p.priceCents, rx: health && p.requiresPrescription, max: p.trackStock ? p.stock : null }];
     });
   const setQty = (key: string, qty: number) => setLines((ls) => (qty <= 0 ? ls.filter((l) => l.key !== key) : ls.map((l) => (l.key === key ? { ...l, qty } : l))));
   const reset = () => {
@@ -146,7 +154,7 @@ export function PosTab() {
                     <span className="text-sm font-semibold text-brand-700">{money(p.priceCents)}</span>
                     <span className={`text-xs ${out ? 'text-rose-700' : p.low ? 'text-amber-700' : 'text-slate-500'}`}>
                       {p.trackStock ? (out ? t('pos.outOfStock') : t('pos.inStock', { n: p.stock })) : t('pos.noTracking')}
-                      {p.requiresPrescription ? ` · ${t('pos.rx')}` : ''}
+                      {health && p.requiresPrescription ? ` · ${t('pos.rx')}` : ''}
                     </span>
                   </button>
                 </li>
@@ -356,6 +364,7 @@ export function ProductsTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { businessManager } = useAccess();
+  const health = useHealth();
   const enabled = useFeature('cash');
   const { locationId, picker } = useLocationChoice();
   const products = useProducts(locationId, true, enabled);
@@ -399,7 +408,7 @@ export function ProductsTab() {
                   <td className="py-2 pr-3">
                     <div className="font-medium">{p.name}</div>
                     <div className="text-xs text-slate-500">
-                      {[p.category, p.sku, p.requiresPrescription ? t('pos.rx') : null, p.iva === 'exento' ? t('pos.ivaExempt') : `IVA ${p.iva}%`].filter(Boolean).join(' · ')}
+                      {[p.category, p.sku, health && p.requiresPrescription ? t('pos.rx') : null, p.iva === 'exento' ? t('pos.ivaExempt') : `IVA ${p.iva}%`].filter(Boolean).join(' · ')}
                     </div>
                   </td>
                   <td className="py-2 pr-3 text-right">{money(p.priceCents)}</td>
@@ -429,6 +438,7 @@ export function ProductsTab() {
 
 function ProductModal({ value, id, locationId, onClose, onDone }: { value: ProductInput; id: string | null; locationId: string; onClose: () => void; onDone: () => void }) {
   const { t } = useTranslation();
+  const health = useHealth();
   const [v, setV] = useState<ProductInput>(value);
   const [price, setPrice] = useState(value.priceCents ? String(value.priceCents / 100) : '');
   const [cost, setCost] = useState(value.costCents != null ? String(value.costCents / 100) : '');
@@ -446,7 +456,7 @@ function ProductModal({ value, id, locationId, onClose, onDone }: { value: Produ
         minStock: v.minStock ?? null,
         iva: v.iva,
         satKey: v.satKey || null,
-        requiresPrescription: v.requiresPrescription,
+        requiresPrescription: health && Boolean(v.requiresPrescription),
         active: v.active,
         ...(id ? {} : { initialStock: initial === '' ? undefined : Number(initial), locationId }),
       };
@@ -479,7 +489,9 @@ function ProductModal({ value, id, locationId, onClose, onDone }: { value: Produ
           </select>
         </label>
         <label className="block text-sm"><span className="label">{t('pos.satKey')}</span><input className="input font-mono" inputMode="numeric" maxLength={8} placeholder="01010101" value={v.satKey ?? ''} onChange={(e) => set({ satKey: e.target.value.replace(/\D/g, '') })} /></label>
-        <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={Boolean(v.requiresPrescription)} onChange={(e) => set({ requiresPrescription: e.target.checked })} /> {t('pos.requiresRx')}</label>
+        {health && (
+          <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={Boolean(v.requiresPrescription)} onChange={(e) => set({ requiresPrescription: e.target.checked })} /> {t('pos.requiresRx')}</label>
+        )}
         {id && <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={v.active !== false} onChange={(e) => set({ active: e.target.checked })} /> {t('pos.active')}</label>}
         <div className="sm:col-span-2"><ErrorText error={save.error} ns="pos" /></div>
         <div className="flex justify-end gap-2 sm:col-span-2">
@@ -543,5 +555,27 @@ function MovesModal({ product, locationId, onClose }: { product: ProductDto; loc
         </ul>
       )}
     </Modal>
+  );
+}
+
+/** Punto de venta in the menu: selling, and the catalog for managers. */
+export function PosPage() {
+  const { t } = useTranslation();
+  const { manager } = useAccess();
+  const [tab, setTab] = useState<'sell' | 'products'>(() => (new URLSearchParams(window.location.search).get('tab') === 'products' ? 'products' : 'sell'));
+  const btn = (k: 'sell' | 'products') => `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
+  return (
+    <>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-slate-900">{t('nav.pos')}</h1>
+        {manager && (
+          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'sell'} className={btn('sell')} onClick={() => setTab('sell')}>{t('payments.tabs.pos')}</button>
+            <button type="button" role="tab" aria-selected={tab === 'products'} className={btn('products')} onClick={() => setTab('products')}>{t('payments.tabs.products')}</button>
+          </div>
+        )}
+      </div>
+      {tab === 'products' && manager ? <ProductsTab /> : <PosTab />}
+    </>
   );
 }
