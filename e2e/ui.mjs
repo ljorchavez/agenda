@@ -527,7 +527,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.goto('http://localhost:5173/p/medico-demo');
   ok('patient portal asks for the email link', await page.getByTestId('portal-ask').isVisible().catch(() => false));
   await page.goto('http://localhost:5173/settings');
-  await page.getByTestId('clinical-templates').waitFor({ timeout: 8000 }).catch(() => {});
+  await page.getByTestId('clinical-templates').waitFor({ timeout: 8000 }).catch((e) => console.log('waitFor clinical-templates:', e.message.split('\n').slice(0, 3).join(' | ')));
   ok('own clinical templates in settings', (await page.getByTestId('new-template').count()) === 1);
   await page.goto('http://localhost:5173/settings?tab=invoicing');
   await page.getByTestId('invoicing-section').waitFor({ timeout: 8000 }).catch(() => {});
@@ -541,7 +541,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
 }
 // Point of sale (still on the doctor's demo): sell a medicine with cash and change, then the catalog
 await page.goto('http://localhost:5173/payments?tab=pos');
-await page.getByTestId('pos-products').waitFor({ timeout: 8000 }).catch(() => {});
+await page.getByTestId('pos-products').waitFor({ timeout: 8000 }).catch((e) => console.log('waitFor pos-products:', e.message.split('\n').slice(0, 3).join(' | ')));
 await page.getByTestId('pos-products').getByRole('button', { name: /Amoxicilina/ }).click().catch(() => {});
 ok('POS: prescription notice for a prescription medicine', await page.getByTestId('pos-rx').isVisible().catch(() => false));
 const posTotal = (await page.getByTestId('pos-total').textContent().catch(() => '')) ?? '';

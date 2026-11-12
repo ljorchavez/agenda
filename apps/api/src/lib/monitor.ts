@@ -32,7 +32,7 @@ export function fingerprint(r: ErrorReport): string {
 export function isNoise(r: ErrorReport): boolean {
   const m = r.message;
   return (
-    /ResizeObserver loop|Script error\.?$|Non-Error promise rejection captured|Load failed|Failed to fetch|NetworkError|AbortError|The operation was aborted/i.test(m) ||
+    /_leaflet_pos|ResizeObserver loop|Script error\.?$|Non-Error promise rejection captured|Load failed|Failed to fetch|NetworkError|AbortError|The operation was aborted/i.test(m) ||
     /chrome-extension:|moz-extension:|safari-extension:/i.test(r.stack ?? '')
   );
 }
