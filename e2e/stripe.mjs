@@ -38,11 +38,30 @@ async function payInBrowser(label, token, checkoutUrl) {
   await page.goto(WEB + '/');
   await page.evaluate(() => localStorage.setItem('agenda.session', '1'));
   await page.goto(checkoutUrl);
-  await page.locator('#cardNumber').waitFor({ timeout: 60_000 }).catch(async () => {
-    // Some layouts show payment methods as an accordion first
-    await page.locator('[data-testid="card-accordion-item-button"]').click();
-    await page.locator('#cardNumber').waitFor({ timeout: 30_000 });
+  const card = page.locator('#cardNumber');
+  for (let attempt = 0; attempt < 4 && !(await card.isVisible()); attempt++) {
+    await page.waitForTimeout(5000);
+    if (await card.isVisible()) break;
+    // Some Checkout layouts list payment methods first: open "Tarjeta"
+    for (const sel of ['[data-testid="card-accordion-item-button"]', '#payment-method-accordion-item-title-card', 'button:has-text("Tarjeta")', 'label:has-text("Tarjeta")']) {
+      const el = page.locator(sel).first();
+      if (await el.isVisible().catch(() => false)) {
+        await el.click().catch(() => undefined);
+        break;
+      }
+    }
+  }
+  await card.waitFor({ timeout: 30_000 }).catch(async (e) => {
+    await page.screenshot({ path: `${OUT}/fail-${label}.png` });
+    log(`      Página: ${(await page.locator('body').innerText()).slice(0, 700).replace(/\n/g, ' | ')}`);
+    throw e;
   });
+  // Adaptive Pricing offers the visitor's currency (USD from this US test machine): pay in pesos
+  const mxn = page.getByRole('button', { name: 'MXN', exact: true });
+  if (await mxn.count()) {
+    await mxn.click();
+    await page.waitForTimeout(1500);
+  }
   await page.screenshot({ path: `${OUT}/${String(++shot).padStart(2, '0')}-${label}-checkout.png`, fullPage: true });
   await page.fill('#cardNumber', '4242424242424242');
   await page.fill('#cardExpiry', '12 / 34');
@@ -80,7 +99,7 @@ const csOf = (url) => /(cs_test_[A-Za-z0-9]+)/.exec(url)?.[1];
 /** Subscribes with the card and checks Stripe and Lugali agree. Returns the subscription. */
 async function subscribe(label, token, plan, expectedCents) {
   const go = await api('/tenant/plan', { plan }, token, 'PUT');
-  ok(`${label}: Lugali abre Stripe Checkout`, Boolean(go.body?.checkoutUrl), JSON.stringify(go.body).slice(0, 200));
+  ok(`${label}: Lugali abre Stripe Checkout`, Boolean(go.body?.checkoutUrl), go.body?.checkoutUrl ? '' : JSON.stringify(go.body).slice(0, 200));
   const cs = csOf(go.body.checkoutUrl);
   const back = await payInBrowser(label, token, go.body.checkoutUrl);
   ok(`${label}: regresa a Lugali con confirmación`, back.paid, back.url);

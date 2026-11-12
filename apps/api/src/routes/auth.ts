@@ -482,7 +482,7 @@ authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
 /** Back from Stripe Checkout: confirms the payment now instead of waiting for the webhook. */
 authRoutes.post('/tenant/billing/confirm', requireAuth, requireOwner, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { sessionId?: unknown };
-  const sessionId = typeof body.sessionId === 'string' && /^cs_[A-Za-z0-9_]{8,200}$/.test(body.sessionId) ? body.sessionId : null;
+  const sessionId = typeof body.sessionId === 'string' && /^cs_[A-Za-z0-9_]{1,250}$/.test(body.sessionId) ? body.sessionId : null;
   if (!sessionId) throw new AppError(422, 'invalid_session', 'Invalid checkout session');
   const db = getDb();
   const tenantId = c.get('tenantId');
