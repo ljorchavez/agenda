@@ -131,6 +131,7 @@ export function toPaymentDto(p: Payment & { customerName?: string }): PaymentDto
     paidAt: iso(p.paidAt),
     createdAt: iso(p.createdAt)!,
     notes: p.notes,
+    saleId: p.saleId ?? null,
   };
 }
 

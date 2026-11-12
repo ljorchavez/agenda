@@ -1,0 +1,146 @@
+import { z } from 'zod';
+import { IVA_OPTIONS } from './invoicing';
+
+/**
+ * Light point of sale: a product catalog with stock per location and counter sales with several
+ * lines and split payments. Sales go into the cash closing and can be invoiced (CFDI) as a whole.
+ */
+
+/** Ways to pay at the counter (online methods and gift cards have their own flows). */
+export const POS_METHODS = ['cash', 'card', 'transfer'] as const;
+export type PosMethod = (typeof POS_METHODS)[number];
+
+/** SAT "No existe en el catálogo": used when a product has no clave de producto. */
+export const DEFAULT_PRODUCT_SAT_KEY = '01010101';
+
+const money = z.number().int().min(0).max(100_000_000);
+const optText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullish()
+    .transform((v) => (v ? v : null));
+
+export const productInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  sku: optText(60),
+  category: optText(60),
+  priceCents: money,
+  costCents: money.nullish().transform((v) => v ?? null),
+  trackStock: z.boolean().default(true),
+  minStock: z.number().int().min(0).max(100_000).nullish().transform((v) => v ?? null),
+  iva: z.enum(IVA_OPTIONS).default('16'),
+  satKey: z
+    .string()
+    .trim()
+    .regex(/^\d{8}$/, 'sat_key_format')
+    .nullish()
+    .or(z.literal('').transform(() => null))
+    .transform((v) => v ?? null),
+  requiresPrescription: z.boolean().default(false),
+  active: z.boolean().default(true),
+  /** Only when creating: units on hand at `locationId` (or the main location) */
+  initialStock: z.number().int().min(0).max(100_000).optional(),
+  locationId: z.string().uuid().optional(),
+});
+export type ProductInput = z.input<typeof productInputSchema>;
+
+export interface ProductDto {
+  id: string;
+  name: string;
+  sku: string | null;
+  category: string | null;
+  priceCents: number;
+  costCents: number | null;
+  trackStock: boolean;
+  minStock: number | null;
+  iva: (typeof IVA_OPTIONS)[number];
+  satKey: string | null;
+  requiresPrescription: boolean;
+  active: boolean;
+  /** Units at the requested location (or across all of them when none was asked) */
+  stock: number;
+  stockByLocation: Record<string, number>;
+  /** At or below the minimum (only when it tracks stock and has one) */
+  low: boolean;
+}
+
+export const STOCK_REASONS = ['in', 'adjust', 'sale', 'return'] as const;
+export type StockReason = (typeof STOCK_REASONS)[number];
+
+export const stockAdjustSchema = z.object({
+  locationId: z.string().uuid().optional(),
+  /** `in`: add what arrived; `set`: the count on hand now (physical count) */
+  mode: z.enum(['in', 'set']),
+  qty: z.number().int().min(0).max(100_000),
+  note: optText(200),
+});
+
+export interface StockMoveDto {
+  id: string;
+  locationId: string;
+  qtyChange: number;
+  qtyAfter: number;
+  reason: StockReason;
+  saleNumber: number | null;
+  note: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export const saleItemInputSchema = z
+  .object({
+    productId: z.string().uuid().optional(),
+    /** Free line (a service without booking, a misc. charge) */
+    name: z.string().trim().min(1).max(120).optional(),
+    qty: z.number().int().min(1).max(999),
+    /** Price per unit; defaults to the product's price */
+    unitCents: money.optional(),
+  })
+  .refine((i) => i.productId || (i.name && i.unitCents != null), { message: 'item_needs_product_or_name' });
+
+export const saleCreateSchema = z.object({
+  locationId: z.string().uuid().optional(),
+  customerId: z.string().uuid().nullish(),
+  items: z.array(saleItemInputSchema).min(1).max(50),
+  payments: z
+    .array(z.object({ method: z.enum(POS_METHODS), amountCents: money }))
+    .min(1)
+    .max(3),
+  notes: optText(300),
+});
+export type SaleCreateInput = z.input<typeof saleCreateSchema>;
+
+export interface SaleItem {
+  productId: string | null;
+  name: string;
+  qty: number;
+  unitCents: number;
+  totalCents: number;
+  iva: (typeof IVA_OPTIONS)[number];
+  satKey: string | null;
+}
+
+export interface SaleDto {
+  id: string;
+  number: number;
+  locationId: string;
+  locationName: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  /** Customer on its payments (the hidden counter customer when none was chosen) */
+  payerCustomerId: string | null;
+  items: SaleItem[];
+  totalCents: number;
+  payments: { id: string; method: string; amountCents: number }[];
+  status: 'paid' | 'canceled';
+  notes: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  /** Its valid invoice, if any */
+  invoice: { id: string; series: string | null; folio: number | null; test: boolean } | null;
+}
+
+/** Sums the lines; prices are integers (cents). */
+export const saleTotal = (items: { qty: number; unitCents: number }[]) => items.reduce((a, i) => a + i.qty * i.unitCents, 0);

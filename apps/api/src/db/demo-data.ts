@@ -26,6 +26,9 @@ import {
   locations,
   memberships,
   offerings,
+  productStock,
+  products,
+  stockMoves,
   payments,
   planUses,
   recordNotes,
@@ -236,6 +239,7 @@ export async function seedDemo() {
   await seedDirectory();
   await seedExtras();
   await seedClinical();
+  await seedProducts();
   console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
 }
 
@@ -1590,4 +1594,40 @@ async function seedClinical() {
     total += notes.length;
   }
   console.log(`Seeded ${total} clinical documents (NOM-004 / NOM-013)`);
+}
+
+/** Products to sell at the counter (POS) in the demos where it makes sense; one runs low. */
+export async function seedProducts() {
+  const db = getDb();
+  const catalog: Record<string, { name: string; category: string; priceCents: number; costCents: number; stock: number; minStock: number; iva?: '16' | '0'; rx?: boolean; satKey?: string }[]> = {
+    'barberia-demo': [
+      { name: 'Pomada mate 100 g', category: 'Estilizado', priceCents: 25000, costCents: 12000, stock: 18, minStock: 5 },
+      { name: 'Aceite para barba 30 ml', category: 'Barba', priceCents: 22000, costCents: 9000, stock: 4, minStock: 5 },
+      { name: 'Shampoo anticaída 250 ml', category: 'Cabello', priceCents: 28000, costCents: 13000, stock: 10, minStock: 3 },
+      { name: 'Bebida hidratante 600 ml', category: 'Bebidas', priceCents: 3500, costCents: 1800, stock: 24, minStock: 6 },
+    ],
+    'nutricion-demo': [
+      { name: 'Proteína whey 1 kg', category: 'Suplementos', priceCents: 89000, costCents: 52000, stock: 8, minStock: 3 },
+      { name: 'Creatina 300 g', category: 'Suplementos', priceCents: 52000, costCents: 28000, stock: 6, minStock: 2 },
+      { name: 'Bebida hidratante 600 ml', category: 'Bebidas', priceCents: 3500, costCents: 1800, stock: 2, minStock: 6 },
+      { name: 'Barra de proteína', category: 'Snacks', priceCents: 4500, costCents: 2200, stock: 30, minStock: 10 },
+    ],
+    'medico-demo': [
+      { name: 'Paracetamol 500 mg (10 tabletas)', category: 'Medicamentos', priceCents: 4500, costCents: 1500, stock: 40, minStock: 10, iva: '0' },
+      { name: 'Amoxicilina 500 mg (12 cápsulas)', category: 'Medicamentos', priceCents: 12000, costCents: 5000, stock: 15, minStock: 5, iva: '0', rx: true },
+      { name: 'Suero oral 500 ml', category: 'Medicamentos', priceCents: 3800, costCents: 1700, stock: 20, minStock: 5, iva: '0' },
+    ],
+  };
+  for (const [slug, list] of Object.entries(catalog)) {
+    const t = await tenantBySlug(slug);
+    if (!t) continue;
+    const [loc] = await db.select().from(locations).where(and(eq(locations.tenantId, t.id), eq(locations.isPrimary, true))).limit(1);
+    if (!loc) continue;
+    const rows = await db
+      .insert(products)
+      .values(list.map((p) => ({ tenantId: t.id, name: p.name, category: p.category, priceCents: p.priceCents, costCents: p.costCents, minStock: p.minStock, iva: p.iva ?? '16', requiresPrescription: Boolean(p.rx), satKey: p.satKey ?? null })))
+      .returning();
+    await db.insert(productStock).values(rows.map((r, i) => ({ productId: r.id, locationId: loc.id, tenantId: t.id, qty: list[i]!.stock })));
+    await db.insert(stockMoves).values(rows.map((r, i) => ({ tenantId: t.id, productId: r.id, locationId: loc.id, qtyChange: list[i]!.stock, qtyAfter: list[i]!.stock, reason: 'in' as const, note: 'Existencia inicial' })));
+  }
 }

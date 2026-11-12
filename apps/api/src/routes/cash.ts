@@ -118,7 +118,8 @@ async function summary(db: Db, tenantId: string, tz: string, day: string, locati
   const to = DateTime.fromISO(day, { zone: tz }).endOf('day').toJSDate();
   const res = await db.execute<{ method: string; total: string; sale: string | null }>(sql`
     select p.method::text as method, sum(p.amount_cents) as total,
-           case when p.sold_gift_card_id is not null then 'gift_cards'
+           case when p.sale_id is not null then 'products'
+                when p.sold_gift_card_id is not null then 'gift_cards'
                 when cp.kind = 'membership' then 'memberships'
                 when cp.kind = 'package' then 'packages' end as sale
     from payments p
@@ -128,14 +129,15 @@ async function summary(db: Db, tenantId: string, tz: string, day: string, locati
       and coalesce(p.location_id, a.location_id) = ${locationId}
     group by 1, 3`);
   const byMethod: Record<string, number> = Object.fromEntries(CASH_METHODS.map((m) => [m, 0]));
-  const salesByKind = { packages: 0, memberships: 0, giftCards: 0 };
+  const salesByKind = { packages: 0, memberships: 0, giftCards: 0, products: 0 };
   for (const r of res.rows) {
     byMethod[r.method] = (byMethod[r.method] ?? 0) + Number(r.total);
     if (r.sale === 'packages') salesByKind.packages += Number(r.total);
     if (r.sale === 'memberships') salesByKind.memberships += Number(r.total);
     if (r.sale === 'gift_cards') salesByKind.giftCards += Number(r.total);
+    if (r.sale === 'products') salesByKind.products += Number(r.total);
   }
-  const salesCents = salesByKind.packages + salesByKind.memberships + salesByKind.giftCards;
+  const salesCents = salesByKind.packages + salesByKind.memberships + salesByKind.giftCards + salesByKind.products;
   // Gift card payments are listed but aren't new money (it came in when the card was sold).
   const totalCents = Object.entries(byMethod).reduce((a, [m, v]) => (m === 'gift_card' ? a : a + v), 0);
   return { day, locationId, byMethod, salesCents, salesByKind, expectedCashCents: byMethod.cash ?? 0, totalCents };

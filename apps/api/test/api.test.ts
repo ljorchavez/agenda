@@ -1743,6 +1743,101 @@ d('API (integration)', () => {
     }
   });
 
+  it('point of sale: products, stock per location, counter sales, cash closing, cancel and invoice', async () => {
+    const { setFacturapiFetch } = await import('../src/integrations/facturapi.js');
+    const reg = (await call('POST', '/auth/register', { businessName: 'Barberia POS', businessType: 'barbershop', name: 'Dueño POS', email: 'pos@test.mx', password: 'password123' })).body;
+    const tok = reg.token;
+    // Not on the free plan
+    await call('PUT', '/tenant/plan', { plan: 'free' }, tok);
+    expect((await call('POST', '/products', { name: 'Pomada', priceCents: 25000 }, tok)).status).toBe(402);
+    await call('PUT', '/tenant/plan', { plan: 'standard' }, tok);
+    expect((await call('POST', '/products', { name: 'Mala', priceCents: 100, satKey: '123' }, tok)).status).toBe(422);
+    const pomada = (await call('POST', '/products', { name: 'Pomada', category: 'Estilizado', priceCents: 25000, minStock: 2, initialStock: 3 }, tok)).body;
+    expect(pomada).toMatchObject({ stock: 3, low: false, trackStock: true, iva: '16' });
+    const med = (await call('POST', '/products', { name: 'Amoxicilina', priceCents: 12000, iva: '0', requiresPrescription: true, initialStock: 10, satKey: '51101500' }, tok)).body;
+    const agua = (await call('POST', '/products', { name: 'Agua', priceCents: 2000, trackStock: false }, tok)).body;
+
+    // Payments must add up; stock can't go below zero
+    const items = [{ productId: pomada.id, qty: 2 }, { productId: agua.id, qty: 1 }, { name: 'Lavado sin cita', qty: 1, unitCents: 8000 }];
+    expect((await call('POST', '/sales', { items, payments: [{ method: 'cash', amountCents: 100 }] }, tok)).body.error).toBe('payments_mismatch');
+    expect((await call('POST', '/sales', { items: [{ productId: pomada.id, qty: 5 }], payments: [{ method: 'cash', amountCents: 125000 }] }, tok)).body.error).toBe('insufficient_stock');
+    // 2×250 + 20 + 80 = 600, split cash/card, no customer
+    const sale = await call('POST', '/sales', { items, payments: [{ method: 'cash', amountCents: 40000 }, { method: 'card', amountCents: 20000 }] }, tok);
+    expect(sale.status).toBe(201);
+    expect(sale.body).toMatchObject({ number: 1, totalCents: 60000, status: 'paid', customerId: null });
+    expect(sale.body.payments.map((x: { method: string }) => x.method).sort()).toEqual(['card', 'cash']);
+    let list = (await call('GET', '/products', undefined, tok)).body as { id: string; stock: number; low: boolean }[];
+    expect(list.find((x) => x.id === pomada.id)).toMatchObject({ stock: 1, low: true });
+    // The hidden counter customer doesn't show in the customer list
+    expect((await call('GET', '/customers', undefined, tok)).body.items.some((x: { name: string }) => x.name === 'Venta de mostrador')).toBe(false);
+    expect((await call('GET', '/customers?archived=1', undefined, tok)).body.items.some((x: { name: string }) => x.name === 'Venta de mostrador')).toBe(false);
+    // Cash closing counts the sale
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    const sum = (await call('GET', `/cash/summary?day=${day}`, undefined, tok)).body;
+    expect(sum.byMethod.cash).toBe(40000);
+    expect(sum.salesByKind.products).toBe(60000);
+    // Receive and count stock; history keeps every move
+    expect((await call('POST', `/products/${pomada.id}/stock`, { mode: 'in', qty: 5, note: 'Proveedor' }, tok)).body.qty).toBe(6);
+    expect((await call('POST', `/products/${pomada.id}/stock`, { mode: 'set', qty: 4 }, tok)).body.qty).toBe(4);
+    const moves = (await call('GET', `/products/${pomada.id}/moves`, undefined, tok)).body as { reason: string; qtyChange: number; saleNumber: number | null }[];
+    expect(moves.map((m) => [m.reason, m.qtyChange])).toEqual([['adjust', -2], ['in', 5], ['sale', -2], ['in', 3]]);
+    expect(moves[2]!.saleNumber).toBe(1);
+
+    // Invoice the whole sale from one of its payments (mocked Facturapi)
+    process.env.FACTURAPI_USER_KEY = 'sk_user_platform';
+    const sent: { path: string; body: any }[] = [];
+    setFacturapiFetch(async (url, init) => {
+      const path = url.replace('https://www.facturapi.io/v2', '');
+      if (typeof init.body === 'string') sent.push({ path, body: JSON.parse(init.body) });
+      const json = (x: unknown) => new Response(JSON.stringify(x), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (path === '/organizations') return json({ id: 'org_p' });
+      if (path.endsWith('/apikeys/test')) return json('sk_test_p');
+      if (path.endsWith('/legal')) return json({ ok: true });
+      if (path === '/invoices') return json({ id: 'inv_p', uuid: 'U-P', series: 'F', folio_number: 1, total: 600, status: 'valid' });
+      return new Response('{}', { status: 400 });
+    });
+    try {
+      await call('PUT', '/invoicing', { rfc: 'XEXX010101000', legalName: 'BARBERIA', taxSystem: '626', zip: '28000', series: 'F', productKey: '85121500', description: 'Servicio', iva: '16', autoEmail: false }, tok);
+      const inv = await call('POST', `/payments/${sale.body.payments[1].id}/invoice`, { customer: null }, tok);
+      expect(inv.status).toBe(201);
+      const body = sent.find((x) => x.path === '/invoices')!.body;
+      expect(body.payment_form).toBe('01'); // largest payment was cash
+      expect(body.items.map((i: any) => [i.quantity, i.product.description, i.product.product_key, i.product.price])).toEqual([
+        [2, 'Pomada', '01010101', 250],
+        [1, 'Agua', '01010101', 20],
+        [1, 'Lavado sin cita', '85121500', 80],
+      ]);
+      expect((await call('POST', `/payments/${sale.body.payments[0].id}/invoice`, { customer: null }, tok)).body.error).toBe('already_invoiced');
+      // Invoiced sales are canceled only after canceling the invoice
+      expect((await call('POST', `/sales/${sale.body.id}/cancel`, {}, tok)).body.error).toBe('cancel_invoice_first');
+    } finally {
+      setFacturapiFetch(null);
+      delete process.env.FACTURAPI_USER_KEY;
+    }
+
+    // A second sale with a customer and a prescription product, then canceled: stock and money go back
+    const cu = (await call('POST', '/customers', { name: 'Cliente POS', phone: '5577001122' }, tok)).body;
+    const s2 = (await call('POST', '/sales', { customerId: cu.id, items: [{ productId: med.id, qty: 2, unitCents: 11000 }], payments: [{ method: 'transfer', amountCents: 22000 }] }, tok)).body;
+    expect(s2).toMatchObject({ number: 2, customerName: 'Cliente POS', totalCents: 22000 });
+    expect(s2.items[0]).toMatchObject({ iva: '0', satKey: '51101500', unitCents: 11000 });
+    expect((await call('POST', `/sales/${s2.id}/cancel`, {}, tok)).status).toBe(200);
+    expect((await call('POST', `/sales/${s2.id}/cancel`, {}, tok)).body.error).toBe('already_canceled');
+    list = (await call('GET', '/products', undefined, tok)).body;
+    expect(list.find((x) => x.id === med.id)!.stock).toBe(10);
+    const pays = (await call('GET', `/payments?customerId=${cu.id}`, undefined, tok)).body;
+    expect(pays[0]).toMatchObject({ status: 'refunded', saleId: s2.id });
+    const sales = (await call('GET', '/sales', undefined, tok)).body as { number: number; status: string }[];
+    expect(sales.map((x) => [x.number, x.status])).toEqual([[2, 'canceled'], [1, 'paid']]);
+    // Sold products are only hidden
+    expect((await call('DELETE', `/products/${pomada.id}`, undefined, tok)).body).toEqual({ deactivated: true });
+    expect((await call('GET', '/products', undefined, tok)).body.some((x: { id: string }) => x.id === pomada.id)).toBe(false);
+    // Another business can't see them
+    const other = (await call('POST', '/auth/register', { businessName: 'Otra POS', businessType: 'barbershop', name: 'Otro', email: 'pos2@test.mx', password: 'password123' })).body.token;
+    expect((await call('GET', '/products', undefined, other)).body).toEqual([]);
+    expect((await call('POST', `/sales/${s2.id}/cancel`, {}, other)).status).toBe(404);
+    expect((await call('POST', '/sales', { items: [{ productId: med.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 12000 }] }, other)).status).toBe(404);
+  });
+
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Consultorio Prueba', businessType: 'medical', name: 'Dra. Ana Ruiz', email: 'nom004@test.mx', password: 'password123',

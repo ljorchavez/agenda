@@ -9,6 +9,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -27,6 +28,8 @@ import {
   type OnlinePurchase,
   type ClinicalAuthor,
   type CustomerFiscal,
+  type SaleItem,
+  type StockReason,
   type Professional,
   type PlanId,
   type WorkHours,
@@ -385,6 +388,8 @@ export const payments = pgTable(
     giftCardId: uuid('gift_card_id'),
     /** Online sale: what this payment buys; fulfilled when it is paid (lib/online-sales) */
     purchase: jsonb('purchase').$type<OnlinePurchase | null>(),
+    /** Counter sale (POS) this payment belongs to */
+    saleId: uuid('sale_id'),
     ...timestamps,
   },
   (t) => [
@@ -682,6 +687,83 @@ export const recordAccessLog = pgTable(
 );
 
 // ---------- Electronic invoicing (CFDI with Facturapi) ----------
+
+// ---------- Point of sale ----------
+
+export const products = pgTable(
+  'products',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    sku: text('sku'),
+    category: text('category'),
+    priceCents: integer('price_cents').notNull(),
+    costCents: integer('cost_cents'),
+    trackStock: boolean('track_stock').notNull().default(true),
+    minStock: integer('min_stock'),
+    iva: text('iva').$type<'16' | '0' | 'exento'>().notNull().default('16'),
+    satKey: text('sat_key'),
+    requiresPrescription: boolean('requires_prescription').notNull().default(false),
+    active: boolean('active').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [index('products_tenant_idx').on(t.tenantId)],
+);
+export type Product = typeof products.$inferSelect;
+
+export const productStock = pgTable(
+  'product_stock',
+  {
+    productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull().references(() => locations.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    qty: integer('qty').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.productId, t.locationId] })],
+);
+
+export const sales = pgTable(
+  'sales',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull().references(() => locations.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
+    items: jsonb('items').$type<SaleItem[]>().notNull(),
+    totalCents: integer('total_cents').notNull(),
+    status: text('status').$type<'paid' | 'canceled'>().notNull().default('paid'),
+    notes: text('notes'),
+    createdBy: uuid('created_by'),
+    createdByName: text('created_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    canceledBy: uuid('canceled_by'),
+  },
+  (t) => [uniqueIndex('sales_tenant_number_idx').on(t.tenantId, t.number), index('sales_tenant_created_idx').on(t.tenantId, t.createdAt)],
+);
+export type Sale = typeof sales.$inferSelect;
+
+export const stockMoves = pgTable(
+  'stock_moves',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull().references(() => locations.id, { onDelete: 'cascade' }),
+    qtyChange: integer('qty_change').notNull(),
+    qtyAfter: integer('qty_after').notNull(),
+    reason: text('reason').$type<StockReason>().notNull(),
+    saleId: uuid('sale_id').references(() => sales.id, { onDelete: 'set null' }),
+    note: text('note'),
+    createdBy: uuid('created_by'),
+    createdByName: text('created_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('stock_moves_product_idx').on(t.productId, t.createdAt)],
+);
 
 export const invoices = pgTable(
   'invoices',

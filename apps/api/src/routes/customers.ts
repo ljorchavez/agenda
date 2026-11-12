@@ -113,7 +113,7 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
   }
   if (opts.customerId) filters.push(sql`c.id = ${opts.customerId}`);
   // Archived customers (kept for their clinical record) only show when asked for
-  else filters.push(opts.archived ? sql`c.archived_at is not null` : sql`c.archived_at is null`);
+  else filters.push(opts.archived ? sql`c.archived_at is not null and c.notes is distinct from '__venta_mostrador__'` : sql`c.archived_at is null`);
   if (opts.q) {
     const like = `%${opts.q}%`;
     filters.push(sql`(c.name ilike ${like} or c.phone ilike ${like} or c.email ilike ${like})`);

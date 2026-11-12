@@ -104,7 +104,7 @@ metricsRoutes.get('/metrics/dashboard', async (c) => {
              and a.status = 'completed' and a.starts_at >= ${F} and a.starts_at < ${T} ${sa}) as visits,
           coalesce(sum(p.amount_cents), 0) as total
         from customers c join payments p on p.customer_id = c.id and p.tenant_id = c.tenant_id
-        where c.tenant_id = ${tenantId} and p.status = 'paid' and p.paid_at >= ${F} and p.paid_at < ${T} ${sp}
+        where c.tenant_id = ${tenantId} and p.status = 'paid' and c.notes is distinct from '__venta_mostrador__' and p.paid_at >= ${F} and p.paid_at < ${T} ${sp}
         group by c.id order by total desc limit 5`),
       db.execute(sql`
         select s.id, s.name, count(a.id) as count, coalesce(sum(a.price_cents), 0) as revenue

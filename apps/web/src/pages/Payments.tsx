@@ -16,6 +16,7 @@ import {
 } from '@agenda/shared';
 import { Empty, ErrorText, Loading, Modal, PageHeader, usePaged } from '../components/ui';
 import { CashTab, CommissionsTab } from '../components/Cash';
+import { PosTab, ProductsTab } from '../components/Pos';
 import { useAccess } from '../lib/auth';
 import { COLLECTION_PILL, PAYMENT_PILL, PAYMENT_PILL_TEXT } from '../lib/status';
 import { api } from '../lib/api';
@@ -262,8 +263,15 @@ export function PaymentsPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const { manager, scoped } = useAccess();
-  type Tab = 'bookings' | 'movements' | 'commissions' | 'cash';
-  const tabs: Tab[] = ['bookings', 'movements', ...(manager || scoped ? (['commissions'] as Tab[]) : []), ...(manager ? (['cash'] as Tab[]) : [])];
+  type Tab = 'bookings' | 'pos' | 'movements' | 'products' | 'commissions' | 'cash';
+  const tabs: Tab[] = [
+    'bookings',
+    'pos',
+    'movements',
+    ...(manager ? (['products'] as Tab[]) : []),
+    ...(manager || scoped ? (['commissions'] as Tab[]) : []),
+    ...(manager ? (['cash'] as Tab[]) : []),
+  ];
   const asked = params.get('tab') as Tab | null;
   const tab: Tab = asked && tabs.includes(asked) ? asked : 'bookings';
   const tabBtn = (k: Tab) =>
@@ -282,7 +290,19 @@ export function PaymentsPage() {
           </div>
         }
       />
-      {tab === 'bookings' ? <CollectionsTab /> : tab === 'movements' ? <MovementsTab /> : tab === 'commissions' ? <CommissionsTab /> : <CashTab />}
+      {tab === 'bookings' ? (
+        <CollectionsTab />
+      ) : tab === 'pos' ? (
+        <PosTab />
+      ) : tab === 'movements' ? (
+        <MovementsTab />
+      ) : tab === 'products' ? (
+        <ProductsTab />
+      ) : tab === 'commissions' ? (
+        <CommissionsTab />
+      ) : (
+        <CashTab />
+      )}
     </>
   );
 }

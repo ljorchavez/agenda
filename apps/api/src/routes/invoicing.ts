@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import { and, desc, eq, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import {
+  DEFAULT_PRODUCT_SAT_KEY,
   PAYMENT_FORMS,
   PUBLIC_RFC,
   invoiceCancelSchema,
@@ -28,6 +29,7 @@ import {
   uploadCertificate,
   type InvoiceInput,
 } from '../integrations/facturapi.js';
+import { saleForInvoice } from './pos.js';
 import { requireManager, requireOwner, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -137,7 +139,10 @@ invoicingRoutes.post('/payments/:id/invoice', requireManager, async (c) => {
   const p = await db.query.payments.findFirst({ where: and(eq(payments.id, c.req.param('id')), eq(payments.tenantId, t.id)) });
   if (!p) throw notFound('payment');
   if (p.status !== 'paid') throw new AppError(422, 'payment_not_paid', 'Only paid payments are invoiced');
-  const existing = await db.query.invoices.findFirst({ where: and(eq(invoices.paymentId, p.id), ne(invoices.status, 'canceled')) });
+  // A counter sale is invoiced as a whole (its lines, all its payments), from any of its payments.
+  const sale = p.saleId ? await saleForInvoice(db, t.id, p.saleId) : null;
+  const paymentIds = sale ? sale.payments.map((x) => x.id) : [p.id];
+  const existing = await db.query.invoices.findFirst({ where: and(inArray(invoices.paymentId, paymentIds), ne(invoices.status, 'canceled')) });
   if (existing) throw new AppError(409, 'already_invoiced', 'This payment already has an invoice');
   const input = invoiceRequestSchema.parse(await c.req.json());
   const cu = await db.query.customers.findFirst({ where: eq(customers.id, p.customerId) });
@@ -148,8 +153,21 @@ invoicingRoutes.post('/payments/:id/invoice', requireManager, async (c) => {
   const live = Boolean(keys.liveKey);
   const inv = await createInvoice((keys.liveKey ?? keys.testKey) as string, {
     customer: receiver,
-    items: [{ quantity: 1, product: { description: cfg.description, product_key: cfg.productKey, price: p.amountCents / 100, tax_included: true, taxes: taxesFor(cfg.iva) } }],
-    payment_form: PAYMENT_FORMS[p.method] ?? '99',
+    items: sale
+      ? sale.sale.items.map((i) => ({
+          quantity: i.qty,
+          product: {
+            description: i.name,
+            // Free lines are services, invoiced like the business's services
+            product_key: i.productId ? i.satKey ?? DEFAULT_PRODUCT_SAT_KEY : cfg.productKey,
+            price: i.unitCents / 100,
+            tax_included: true,
+            taxes: taxesFor(i.productId ? i.iva : cfg.iva),
+          },
+        }))
+      : [{ quantity: 1, product: { description: cfg.description, product_key: cfg.productKey, price: p.amountCents / 100, tax_included: true, taxes: taxesFor(cfg.iva) } }],
+    // With split payments, the SAT asks for the form used for the largest amount
+    payment_form: PAYMENT_FORMS[sale ? [...sale.payments].sort((a, b) => b.amountCents - a.amountCents)[0]!.method : p.method] ?? '99',
     payment_method: 'PUE',
     use: f ? f.use : 'S01',
     ...(cfg.series ? { series: cfg.series } : {}),

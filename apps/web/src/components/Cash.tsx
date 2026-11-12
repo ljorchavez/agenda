@@ -207,7 +207,7 @@ export function CashTab() {
             </ul>
             {s.salesCents > 0 && (
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                {t('cash.salesIncluded')}: {t('sales.kind.package')} {money(s.salesByKind.packages)} · {t('sales.kind.membership')} {money(s.salesByKind.memberships)} · {t('sales.giftCards')} {money(s.salesByKind.giftCards)}
+                {t('cash.salesIncluded')}: {t('sales.kind.package')} {money(s.salesByKind.packages)} · {t('sales.kind.membership')} {money(s.salesByKind.memberships)} · {t('sales.giftCards')} {money(s.salesByKind.giftCards)} · {t('pos.products')} {money(s.salesByKind.products)}
               </p>
             )}
             <form className="space-y-2 border-t border-slate-100 pt-3" onSubmit={(e) => { e.preventDefault(); close.mutate(); }}>

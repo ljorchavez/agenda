@@ -235,7 +235,7 @@ reportRoutes.get('/reports', async (c) => {
         (select count(*) from appointments a where a.tenant_id = c.tenant_id and a.customer_id = c.id
            and a.status = 'completed' and a.starts_at >= ${F}::timestamptz and a.starts_at < ${T}::timestamptz ${f}) as visits
       from customers c join payments p on p.customer_id = c.id and p.tenant_id = c.tenant_id
-      where c.tenant_id = ${tenantId} and p.status = 'paid'
+      where c.tenant_id = ${tenantId} and p.status = 'paid' and c.notes is distinct from '__venta_mostrador__'
         and p.paid_at >= ${F}::timestamptz and p.paid_at < ${T}::timestamptz ${paymentFilter(q, f)}
       group by c.id order by total desc limit 10`),
     db.execute(sql`

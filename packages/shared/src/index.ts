@@ -1334,6 +1334,8 @@ export interface PaymentDto {
   locationId?: string | null;
   locationName?: string | null;
   serviceName?: string | null;
+  /** Counter sale (POS) it belongs to */
+  saleId?: string | null;
   /** Its CFDI, if one was issued (canceled ones excluded) */
   invoice?: Pick<InvoiceDto, 'id' | 'uuid' | 'series' | 'folio' | 'status' | 'test'> | null;
 }
@@ -1707,9 +1709,9 @@ export interface CashSummaryDto {
   locationId: string;
   /** Money taken for bookings, per method */
   byMethod: Record<string, number>;
-  /** Sales of packages, memberships and gift cards (included in byMethod) */
+  /** Sales of packages, memberships, gift cards and counter sales (included in byMethod) */
   salesCents: number;
-  salesByKind: { packages: number; memberships: number; giftCards: number };
+  salesByKind: { packages: number; memberships: number; giftCards: number; products: number };
   expectedCashCents: number;
   totalCents: number;
 }
@@ -1945,3 +1947,4 @@ export interface PurchaseStatusDto {
 }
 export * from './catalogs';
 export * from './invoicing';
+export * from './pos';

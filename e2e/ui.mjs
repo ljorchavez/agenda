@@ -532,6 +532,23 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.getByTestId('portal-code').waitFor({ timeout: 8000 }).catch(() => {});
   ok('portal then asks for the 6-digit code', await page.getByTestId('portal-code').isVisible().catch(() => false));
 }
+// Point of sale (still on the doctor's demo): sell a medicine with cash and change, then the catalog
+await page.goto('http://localhost:5173/payments?tab=pos');
+await page.getByTestId('pos-products').waitFor({ timeout: 8000 }).catch(() => {});
+await page.getByTestId('pos-products').getByRole('button', { name: /Amoxicilina/ }).click().catch(() => {});
+ok('POS: prescription notice for a prescription medicine', await page.getByTestId('pos-rx').isVisible().catch(() => false));
+const posTotal = (await page.getByTestId('pos-total').textContent().catch(() => '')) ?? '';
+ok('POS: ticket total', /120/.test(posTotal), posTotal);
+await page.getByTestId('pos-received').fill('200').catch(() => {});
+ok('POS: change for cash', /80/.test((await page.getByTestId('pos-change').textContent().catch(() => '')) ?? ''));
+await page.getByTestId('pos-charge').click().catch(() => {});
+await page.getByTestId('pos-done').waitFor({ timeout: 8000 }).catch(() => {});
+ok('POS: sale charged', await page.getByTestId('pos-done').isVisible().catch(() => false));
+await page.keyboard.press('Escape');
+ok('POS: shows in today sales', ((await page.getByTestId('pos-sales').textContent().catch(() => '')) ?? '').includes('Amoxicilina'));
+await page.goto('http://localhost:5173/payments?tab=products');
+await page.getByTestId('products-tab').waitFor({ timeout: 8000 }).catch(() => {});
+ok('products tab lists the catalog with stock', (await page.getByTestId('product-row').count()) >= 3);
 await page.goto('http://localhost:5173/privacidad');
 ok('privacy notice page', ((await page.getByTestId('privacy-page').textContent({ timeout: 8000 }).catch(() => '')) ?? '').includes('ARCO'));
 await page.goto('http://localhost:5173/terminos');

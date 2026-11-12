@@ -188,7 +188,8 @@ export function InvoiceCell({ payment }: { payment: PaymentDto }) {
   );
 }
 
-function InvoiceModal({ payment, onClose, onDone }: { payment: PaymentDto; onClose: () => void; onDone: () => void }) {
+/** Issues the CFDI of a payment (for a counter sale, of the whole sale: pass its total). */
+export function InvoiceModal({ payment, onClose, onDone, amountCents }: { payment: Pick<PaymentDto, 'id' | 'customerId' | 'amountCents'>; onClose: () => void; onDone: () => void; amountCents?: number }) {
   const { t } = useTranslation();
   const status = useInvoicing();
   const cu = useQuery({ queryKey: ['customer', payment.customerId], queryFn: () => api<CustomerWithStats>(`/customers/${payment.customerId}`) });
@@ -206,7 +207,7 @@ function InvoiceModal({ payment, onClose, onDone }: { payment: PaymentDto; onClo
     },
   });
   return (
-    <Modal open title={t('invoicing.issueTitle', { amount: money(payment.amountCents) })} onClose={onClose}>
+    <Modal open title={t('invoicing.issueTitle', { amount: money(amountCents ?? payment.amountCents) })} onClose={onClose}>
       <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); issue.mutate(); }} data-testid="invoice-modal">
         {!status.data?.live && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">{t('invoicing.testNotice')}</p>}
         <div className="flex gap-2 text-sm">
