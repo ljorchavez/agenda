@@ -139,8 +139,11 @@ async function changeInUi(label, token, plan, { cancelFirst = false } = {}) {
     await pick();
     await dialog.waitFor({ timeout: 10_000 });
   }
-  if (shown) await page.getByTestId('confirm-plan-yes').click();
-  await page.waitForTimeout(3000);
+  if (shown) {
+    await page.getByTestId('confirm-plan-yes').click();
+    // Stripe updates the subscription and charges the difference before the dialog closes
+    await dialog.waitFor({ state: 'detached', timeout: 45_000 }).catch(() => undefined);
+  }
   await ctx.close();
   return { shown, text, cancelledOk };
 }
