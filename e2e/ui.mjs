@@ -500,7 +500,8 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   let rxPath = null;
   for (const c of (await api('/customers?limit=200', null, med)).items) {
     const r = await api(`/customers/${c.id}/clinical`, null, med);
-    if (!rxPath) rxPath = r?.notes?.find((n) => n.verifyPath)?.verifyPath ?? null;
+    // The first patient's prescription (metformin); others have their own treatments
+    if (!rxPath) rxPath = r?.notes?.find((n) => n.verifyPath && JSON.stringify(n).includes('Metformina'))?.verifyPath ?? null;
     if (!target && /enicil/i.test(r?.patient?.allergies ?? '')) target = c;
     if (target && rxPath) break;
   }
