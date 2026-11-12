@@ -17,12 +17,15 @@ export function CustomerPicker({
   forBooking,
   newCustomer,
   onNewCustomer,
+  optional,
 }: {
   value: string;
   onChange: (id: string) => void;
   forBooking: boolean;
   newCustomer?: NewCustomer | null;
   onNewCustomer?: (c: NewCustomer | null) => void;
+  /** Not required (e.g. a counter sale): the list only shows once something is typed */
+  optional?: boolean;
 }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState(newCustomer?.name ?? '');
@@ -119,7 +122,7 @@ export function CustomerPicker({
             </button>
           )}
         </div>
-      ) : (
+      ) : optional && !typed ? null : (
         <ul className="mt-2 max-h-44 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200" role="listbox" aria-label={t('agenda.customer')}>
           {customers.isLoading && <li className="px-3 py-2 text-sm text-slate-500">{t('common.loading')}</li>}
           {!customers.isLoading && items.length === 0 && <li className="px-3 py-2 text-sm text-slate-500">{onNewCustomer ? t('agenda.typeToCreate') : t('agenda.noCustomerFound')}</li>}
@@ -141,7 +144,7 @@ export function CustomerPicker({
         </ul>
       )}
       {/* Keeps the form from submitting without a customer (the native "required" message). */}
-      {!isNew && <input tabIndex={-1} aria-hidden required value={value} onChange={() => undefined} className="pointer-events-none h-0 w-full opacity-0" />}
+      {!isNew && !optional && <input tabIndex={-1} aria-hidden required value={value} onChange={() => undefined} className="pointer-events-none h-0 w-full opacity-0" />}
     </div>
   );
 }

@@ -206,7 +206,7 @@ export function PosTab() {
         </div>
         <div>
           <span className="label">{t('pos.customer')}</span>
-          <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={false} />
+          <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={false} optional />
         </div>
         <div>
           <span className="label">{t('payments.method')}</span>
