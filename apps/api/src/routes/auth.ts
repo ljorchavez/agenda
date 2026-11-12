@@ -35,7 +35,7 @@ import {
   type UserDto,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { assertNotLimited, clearAttempts, clientIp, loginLimits, recordAttempt } from '../lib/throttle.js';
+import { assertNotLimited, clearAttempts, clientIp, limitPublic, loginLimits, recordAttempt } from '../lib/throttle.js';
 import { memberships, resources, services, tenants, users, type Tenant, type User } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { starterResources } from '../lib/resources.js';
@@ -163,14 +163,11 @@ async function createBusiness(
   return tenant!;
 }
 
-/** Sign-ups per device: enough for a front desk opening several businesses, not for a bot. */
-const registerLimits = (ip: string) => [{ key: `register-ip:${ip}`, max: 10, minutes: 60 }];
-
 authRoutes.post('/auth/register', async (c) => {
   const input = registerSchema.parse(await c.req.json());
   const db = getDb();
-  const ip = clientIp(c);
-  await assertNotLimited(db, registerLimits(ip));
+  // Sign-ups per device: enough for someone opening several businesses, not for a bot.
+  await limitPublic(db, c, 'register', 10);
   await assertCaptcha(c);
   // With Google the verified Google email is the login; a random password is kept (reset works).
   if (input.googleCredential) input.email = (await verifyGoogleCredential(input.googleCredential)).email;
@@ -178,7 +175,6 @@ authRoutes.post('/auth/register', async (c) => {
 
   const existing = await db.query.users.findFirst({ where: eq(users.email, input.email) });
   if (existing) throw conflict('email_taken', 'Email already registered');
-  await recordAttempt(db, registerLimits(ip));
 
   // With card billing on, a paid plan starts once the card is in: the business opens on Gratis and
   // the app sends the owner to pay right away (PUT /tenant/plan).
