@@ -1734,5 +1734,23 @@
     "cancel_invoice_first": "Primero cancela la factura de esta venta.",
     "already_canceled": "Esta venta ya estaba cancelada.",
     "sat_key_format": "La clave SAT tiene 8 dígitos."
+  },
+  "ticket": {
+    "ticket": "Ticket",
+    "print": "Imprimir ticket",
+    "paper": "Papel:",
+    "location": "Sucursal",
+    "sale": "Venta",
+    "servedBy": "Atendió",
+    "customer": "Cliente",
+    "canceled": "CANCELADA",
+    "each": "c/u",
+    "total": "TOTAL",
+    "change": "Cambio",
+    "vatIncluded": "Precios con IVA incluido.",
+    "notFiscal": "Este ticket no es un comprobante fiscal.",
+    "askInvoice": "Si necesitas factura, pídela en caja.",
+    "thanks": "¡Gracias por su compra!",
+    "autoPrint": "Imprimir ticket al cobrar"
   }
 }

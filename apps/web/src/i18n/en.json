@@ -1734,5 +1734,23 @@
     "cancel_invoice_first": "Cancel this sale's invoice first.",
     "already_canceled": "This sale was already canceled.",
     "sat_key_format": "The SAT key has 8 digits."
+  },
+  "ticket": {
+    "ticket": "Ticket",
+    "print": "Print ticket",
+    "paper": "Paper:",
+    "location": "Location",
+    "sale": "Sale",
+    "servedBy": "Served by",
+    "customer": "Customer",
+    "canceled": "CANCELED",
+    "each": "each",
+    "total": "TOTAL",
+    "change": "Change",
+    "vatIncluded": "Prices include VAT.",
+    "notFiscal": "This ticket is not a tax receipt.",
+    "askInvoice": "Need an invoice? Ask at the counter.",
+    "thanks": "Thank you for your purchase!",
+    "autoPrint": "Print ticket when charging"
   }
 }

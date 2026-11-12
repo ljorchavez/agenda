@@ -144,3 +144,15 @@ export interface SaleDto {
 
 /** Sums the lines; prices are integers (cents). */
 export const saleTotal = (items: { qty: number; unitCents: number }[]) => items.reduce((a, i) => a + i.qty * i.unitCents, 0);
+
+/** Everything a printed ticket shows (sale + who sells: business, fiscal data, address). */
+export interface SaleTicketDto {
+  business: { name: string; legalName: string | null; rfc: string | null; address: string | null; phone: string | null };
+  locationName: string | null;
+  /** Several locations: show which one */
+  multiLocation: boolean;
+  timezone: string;
+  /** The business can invoice (shows "ask for your invoice") */
+  invoicing: boolean;
+  sale: SaleDto;
+}

@@ -1820,6 +1820,8 @@ d('API (integration)', () => {
     const s2 = (await call('POST', '/sales', { customerId: cu.id, items: [{ productId: med.id, qty: 2, unitCents: 11000 }], payments: [{ method: 'transfer', amountCents: 22000 }] }, tok)).body;
     expect(s2).toMatchObject({ number: 2, customerName: 'Cliente POS', totalCents: 22000 });
     expect(s2.items[0]).toMatchObject({ iva: '0', satKey: '51101500', unitCents: 11000 });
+    const ticket = (await call('GET', `/sales/${s2.id}/ticket`, undefined, tok)).body;
+    expect(ticket).toMatchObject({ business: { name: 'Barberia POS', rfc: 'XEXX010101000', legalName: 'BARBERIA' }, multiLocation: false, invoicing: true, sale: { number: 2, customerName: 'Cliente POS' } });
     expect((await call('POST', `/sales/${s2.id}/cancel`, {}, tok)).status).toBe(200);
     expect((await call('POST', `/sales/${s2.id}/cancel`, {}, tok)).body.error).toBe('already_canceled');
     list = (await call('GET', '/products', undefined, tok)).body;
@@ -1835,6 +1837,7 @@ d('API (integration)', () => {
     const other = (await call('POST', '/auth/register', { businessName: 'Otra POS', businessType: 'barbershop', name: 'Otro', email: 'pos2@test.mx', password: 'password123' })).body.token;
     expect((await call('GET', '/products', undefined, other)).body).toEqual([]);
     expect((await call('POST', `/sales/${s2.id}/cancel`, {}, other)).status).toBe(404);
+    expect((await call('GET', `/sales/${s2.id}/ticket`, undefined, other)).status).toBe(404);
     expect((await call('POST', '/sales', { items: [{ productId: med.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 12000 }] }, other)).status).toBe(404);
   });
 

@@ -6,6 +6,7 @@ import { ClinicalPrintPage } from './components/ClinicalRecord';
 import { PortalPage, PrescriptionPage } from './pages/Portal';
 import { PrivacyPage, TermsPage } from './pages/Legal';
 import { PosPage } from './components/Pos';
+import { TicketPage } from './pages/Ticket';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
 import { useAuth } from './lib/auth';
@@ -69,6 +70,7 @@ export function App() {
       <Route path="/receta/:token" element={<PrescriptionPage />} />
       {/* Printable clinical documents: no menus, letterhead only */}
       <Route path="/customers/:id/imprimir" element={<Protected><PrintRecord /></Protected>} />
+      <Route path="/ticket/:id" element={<Protected><TicketPage /></Protected>} />
       {/* The business back office */}
       <Route
         element={

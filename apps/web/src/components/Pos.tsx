@@ -20,6 +20,7 @@ import { useMyLocations } from '../lib/queries';
 import { CustomerPicker } from './CustomerPicker';
 import { InvoiceModal, useInvoicing } from './Invoicing';
 import { UpgradeNote, useFeature } from './Sales';
+import { openTicket } from '../pages/Ticket';
 import { ErrorText, Loading, Modal } from './ui';
 
 /** Prescriptions only matter in health businesses (doctors, dentists…). */
@@ -71,6 +72,21 @@ export function PosTab() {
   const [received, setReceived] = useState('');
   const [free, setFree] = useState<{ name: string; price: string } | null>(null);
   const [done, setDone] = useState<{ sale: SaleDto; changeCents: number } | null>(null);
+  const [autoPrint, setAutoPrint] = useState(() => {
+    try {
+      return localStorage.getItem('agenda.pos.autoPrint') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleAutoPrint = (v: boolean) => {
+    setAutoPrint(v);
+    try {
+      localStorage.setItem('agenda.pos.autoPrint', v ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
   const today = format(new Date(), 'yyyy-MM-dd');
   const sales = useQuery({
     queryKey: ['sales', locationId, today],
@@ -105,7 +121,8 @@ export function PosTab() {
   };
 
   const charge = useMutation({
-    mutationFn: () =>
+    // `win`: a window opened on the click (browsers block opening one later) for the ticket
+    mutationFn: (_win: Window | null) =>
       api<SaleDto>('/sales', {
         method: 'POST',
         body: {
@@ -115,13 +132,15 @@ export function PosTab() {
           payments: pays.filter((p) => p.amountCents > 0 || pays.length === 1),
         },
       }),
-    onSuccess: (sale) => {
+    onSuccess: (sale, win) => {
+      if (win) openTicket(sale.id, { print: true, changeCents: Math.max(changeCents, 0), win });
       setDone({ sale, changeCents: Math.max(changeCents, 0) });
       reset();
       void qc.invalidateQueries({ queryKey: ['products'] });
       void qc.invalidateQueries({ queryKey: ['sales'] });
       void qc.invalidateQueries({ queryKey: ['payments'] });
     },
+    onError: (_e, win) => win?.close(),
   });
 
   if (!enabled) return <UpgradeNote feature="cash" />;
@@ -251,11 +270,14 @@ export function PosTab() {
           type="button"
           className="btn-primary w-full !py-3 text-base"
           disabled={!lines.length || charge.isPending || Boolean(shortStock) || (cashDue > 0 && received !== '' && changeCents < 0)}
-          onClick={() => charge.mutate()}
+          onClick={() => charge.mutate(autoPrint ? window.open('', '_blank') : null)}
           data-testid="pos-charge"
         >
           {charge.isPending ? t('common.loading') : t('pos.charge', { amount: money(total) })}
         </button>
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <input type="checkbox" checked={autoPrint} onChange={(e) => toggleAutoPrint(e.target.checked)} data-testid="pos-autoprint" /> {t('ticket.autoPrint')}
+        </label>
       </section>
 
       <section className="card lg:col-span-5">
@@ -289,7 +311,8 @@ export function PosTab() {
             <p className="text-2xl font-semibold">{money(done.sale.totalCents)}</p>
             {done.changeCents > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-lg font-semibold text-emerald-800">{t('pos.change', { amount: money(done.changeCents) })}</p>}
             <SaleActions sale={done.sale} />
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => openTicket(done.sale.id, { print: true, changeCents: done.changeCents })} data-testid="pos-print">🖨️ {t('ticket.print')}</button>
               <button type="button" className="btn-primary" onClick={() => setDone(null)}>{t('pos.newSale')}</button>
             </div>
           </div>
@@ -315,6 +338,7 @@ function SaleActions({ sale }: { sale: SaleDto }) {
   const canInvoice = manager && inv.data?.available && inv.data.connected && sale.status === 'paid' && !sale.invoice && sale.payments[0];
   return (
     <span className="inline-flex flex-wrap items-center gap-3">
+      <button type="button" className="text-brand-700 hover:underline" onClick={() => openTicket(sale.id)} data-testid="pos-ticket">{t('ticket.ticket')}</button>
       {sale.invoice && <span className="text-xs text-slate-600">🧾 {`${sale.invoice.series ?? ''}${sale.invoice.folio ?? ''}`}{sale.invoice.test ? ` (${t('invoicing.testShort')})` : ''}</span>}
       {canInvoice && <button type="button" className="text-brand-700 hover:underline" onClick={() => setInvoicing(true)}>{t('invoicing.issue')}</button>}
       {manager && sale.status === 'paid' && !sale.invoice && (

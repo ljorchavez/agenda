@@ -7,12 +7,13 @@ import {
   stockAdjustSchema,
   type ProductDto,
   type SaleDto,
+  type SaleTicketDto,
   type SaleItem,
   type StockMoveDto,
   type StockReason,
 } from '@agenda/shared';
 import { getDb, type Db } from '../db/client.js';
-import { customers, invoices, locations, payments, productStock, products, sales, stockMoves, users, type Product, type Sale } from '../db/schema.js';
+import { customers, invoices, locations, payments, productStock, products, sales, stockMoves, tenants, users, type Product, type Sale } from '../db/schema.js';
 import { getScope } from '../lib/access.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { guardRow, locationForWrite } from '../lib/locations.js';
@@ -347,6 +348,33 @@ posRoutes.post('/sales', async (c) => {
   const loc = await db.query.locations.findFirst({ where: eq(locations.id, locationId), columns: { name: true } });
   const [dto] = await saleDtos(db, tenantId, [{ ...sale, locationName: loc?.name ?? null, customerName: customer?.name ?? null }]);
   return c.json(dto, 201);
+});
+
+/** Data for the printed ticket of a sale. */
+posRoutes.get('/sales/:id/ticket', async (c) => {
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const scope = await getScope(db, c);
+  const [row] = await saleSelect(db).where(and(eq(sales.id, c.req.param('id')), eq(sales.tenantId, tenantId))).limit(1);
+  if (!row) throw notFound('sale');
+  if (scope.personal && row.s.createdBy !== scope.userId) throw notFound('sale');
+  const t = (await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
+  const loc = await db.query.locations.findFirst({ where: eq(locations.id, row.s.locationId) });
+  const active = await db.select({ id: locations.id }).from(locations).where(and(eq(locations.tenantId, tenantId), eq(locations.active, true)));
+  // The location's own address, else the business profile's
+  const src = loc && (loc.address || !loc.isPrimary) ? loc : t;
+  const address = [src.address, src.neighborhood, src.city, src.state].filter(Boolean).join(', ') || null;
+  const inv = t.settings.invoicing;
+  const [sale] = await saleDtos(db, tenantId, [{ ...row.s, locationName: row.locationName, customerName: row.customerName }]);
+  const out: SaleTicketDto = {
+    business: { name: t.name, legalName: inv?.legalName || null, rfc: inv?.rfc || null, address, phone: loc?.phone ?? t.phone },
+    locationName: loc?.name ?? null,
+    multiLocation: active.length > 1,
+    timezone: t.timezone,
+    invoicing: Boolean(t.invoicingEnc),
+    sale: sale!,
+  };
+  return c.json(out);
 });
 
 /** Cancels a sale: its payments become refunded and the products go back to stock. */
