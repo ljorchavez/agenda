@@ -191,7 +191,8 @@ async function posKpis(db: Db, tenantId: string, r: Range, loc: SQL): Promise<Po
     select count(distinct sale_id) as sales, coalesce(sum(total), 0) as revenue, coalesce(sum(qty) filter (where product_id is not null), 0) as units,
            coalesce(sum(total - qty * cost_cents) filter (where cost_cents is not null), 0) as profit,
            coalesce(sum(total) filter (where cost_cents is not null), 0) as costed,
-           coalesce(sum(total) filter (where product_id is not null), 0) as products`);
+           coalesce(sum(total) filter (where product_id is not null), 0) as products
+    from l`);
   const x = res.rows[0] ?? {};
   const sales = n(x.sales);
   return {
