@@ -1806,6 +1806,7 @@
     "verify": "Verificar"
   },
   "billing": {
+    "paidNotice": "¡Pago recibido! Tu plan {{plan}} ya está activo. Te enviamos la confirmación por correo y Stripe te manda el recibo.",
     "pending": "Falta tu pago para activar el plan {{plan}}.",
     "confirming": "Estamos confirmando tu pago…",
     "payNow": "Pagar con tarjeta",

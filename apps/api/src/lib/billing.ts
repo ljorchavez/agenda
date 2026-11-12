@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
-import { eq, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { ADDON_PRICES, BILLING_GRACE_DAYS, PLAN_LIMITS, withIva, type BillingStatus, type PlanId } from '@agenda/shared';
 import type { Db } from '../db/client.js';
 import { tenants } from '../db/schema.js';
 import { AppError } from './errors.js';
+import { notifyBilling } from './billing-email.js';
 
 /**
  * Subscription billing: each business pays Lugali its plan every month with a card through
@@ -47,6 +48,8 @@ export interface BillingProvider {
   cancel(id: string): Promise<void>;
   /** Stripe's page to change the card, see invoices or cancel. */
   portalUrl(subscriptionId: string, returnUrl: string): Promise<string>;
+  /** Who paid a checkout and which subscription it created (null while unpaid). */
+  checkoutSession(id: string): Promise<{ tenantId: string | null; subscriptionId: string | null }>;
 }
 
 // ---------- Stripe ----------
@@ -133,7 +136,8 @@ const stripeBilling: BillingProvider = {
   async createSubscription(o) {
     const params: Params = {
       mode: 'subscription',
-      success_url: o.returnUrl,
+      // Lets the page confirm the payment right away, without waiting for the webhook.
+      success_url: `${o.returnUrl}${o.returnUrl.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: o.cancelUrl,
       customer_email: o.email,
       client_reference_id: o.tenantId,
@@ -182,6 +186,10 @@ const stripeBilling: BillingProvider = {
     // A checkout that was never paid just expires; a real subscription is cancelled now.
     if (id.startsWith('cs_')) await stripe(`/checkout/sessions/${encodeURIComponent(id)}/expire`, { method: 'POST', params: {} });
     else await stripe(`/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async checkoutSession(id) {
+    const s = await stripe<{ client_reference_id?: string | null; subscription?: string | null }>(`/checkout/sessions/${encodeURIComponent(id)}`);
+    return { tenantId: s.client_reference_id ?? null, subscriptionId: s.subscription ?? null };
   },
   async portalUrl(subscriptionId, returnUrl) {
     const s = await stripe<StripeSub>(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
@@ -298,14 +306,19 @@ export async function syncSubscription(db: Db, subscriptionId: string): Promise<
       await provider.cancel(t.billingSubscriptionId).catch((e) => console.warn('[billing] cancel old failed:', e));
     }
     const plan = (refPlan && refPlan in PLAN_LIMITS ? refPlan : null) ?? t.billingPendingPlan ?? t.plan;
-    await db
+    // Only one confirmation email: whoever (webhook or the return page) claims the change first.
+    const claimed = await db
       .update(tenants)
       .set({ plan, billingStatus: 'active', billingSubscriptionId: sub.id, billingPendingPlan: null, billingAmountCents: sub.amountCents, billingPastDueSince: null })
-      .where(eq(tenants.id, t.id));
+      .where(and(eq(tenants.id, t.id), or(ne(tenants.billingStatus, 'active'), ne(tenants.billingSubscriptionId, sub.id), isNull(tenants.billingSubscriptionId))))
+      .returning({ id: tenants.id });
+    if (claimed.length) await notifyBilling(db, t.id, { kind: 'activated', plan, amountCents: sub.amountCents });
+    else await db.update(tenants).set({ billingAmountCents: sub.amountCents }).where(eq(tenants.id, t.id));
     return;
   }
   if (!current) return;
   if (sub.status === 'paused') {
+    if (t.billingStatus !== 'past_due') await notifyBilling(db, t.id, { kind: 'past_due' });
     await db
       .update(tenants)
       .set({ billingStatus: 'past_due', billingPastDueSince: t.billingPastDueSince ?? new Date() })
@@ -316,6 +329,7 @@ export async function syncSubscription(db: Db, subscriptionId: string): Promise<
       .update(tenants)
       .set({ plan: 'free', billingStatus: 'cancelled', billingSubscriptionId: null, billingPendingPlan: null, billingAmountCents: null, billingPastDueSince: null })
       .where(eq(tenants.id, t.id));
+    await notifyBilling(db, t.id, { kind: 'cancelled' });
   }
 }
 

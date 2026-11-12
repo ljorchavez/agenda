@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ADDON_PRICES, BILLING_GRACE_DAYS, PLAN_LIMITS, PLANS, SELECTABLE_PLANS, type PlanId, type PlanInfoDto } from '@agenda/shared';
@@ -87,8 +87,23 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
   const qc = useQueryClient();
   const { setTenant, tenant } = useAuth();
   const [changing, setChanging] = useState(false);
-  // Back from Mercado Pago: the webhook may take a few seconds to confirm the card.
-  const returning = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('billing') === 'return';
+  // Back from Stripe Checkout: confirm right away (the webhook may take a few seconds).
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const returning = params?.get('billing') === 'return';
+  const sessionId = params?.get('session_id') ?? null;
+  const [paidNotice, setPaidNotice] = useState(false);
+  useEffect(() => {
+    if (!returning || !sessionId) return;
+    api<{ paid: boolean; plan: PlanInfoDto }>('/tenant/billing/confirm', { method: 'POST', body: { sessionId } })
+      .then((r) => {
+        qc.setQueryData(['plan'], r.plan);
+        if (tenant) setTenant({ ...tenant, plan: r.plan.plan, billing: { ...tenant.billing, status: r.plan.billing.status, readOnly: r.plan.billing.readOnly, pastDueSince: r.plan.billing.pastDueSince } });
+        setPaidNotice(r.paid);
+      })
+      .catch(() => undefined)
+      .finally(() => window.history.replaceState(null, '', `${window.location.pathname}?tab=plan`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const info = useQuery({
     queryKey: ['plan'],
     queryFn: () => api<PlanInfoDto>('/tenant/plan'),
@@ -122,6 +137,11 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
           </button>
         )}
       </div>
+      {paidNotice && p && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800" role="status" data-testid="billing-paid">
+          {t('billing.paidNotice', { plan: t(`plans.${p.plan}`) })}
+        </div>
+      )}
       {!p ? (
         <Loading />
       ) : (

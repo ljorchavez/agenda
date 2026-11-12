@@ -148,6 +148,9 @@ d('launch hardening', () => {
     const prices = new Map<string, { id: string; unit_amount: number; lookup_key: string }>();
     const subs = new Map<string, { id: string; status: string; customer: string; metadata: Record<string, string>; items: { data: Item[] } }>();
     const sessions = new Map<string, { id: string; url: string; params: URLSearchParams }>();
+    const paid = new Map<string, string>();
+    const { sentInTests } = await import('../src/lib/email.js');
+    const lastSubject = () => sentInTests[sentInTests.length - 1]?.subject ?? '';
     let n = 0;
     billing.setBillingFetch((async (input: string | URL | Request, init?: RequestInit) => {
       const u = new URL(String(input));
@@ -163,6 +166,11 @@ d('launch hardening', () => {
         const pr = { id: `price_${++n}`, unit_amount: Number(p.get('unit_amount')), lookup_key: p.get('lookup_key')! };
         prices.set(pr.id, pr);
         return json(pr);
+      }
+      const cm = /^\/checkout\/sessions\/(cs_[^/]+)$/.exec(path);
+      if (cm) {
+        const se = sessions.get(cm[1]!)!;
+        return json({ id: se.id, client_reference_id: se.params.get('client_reference_id'), subscription: paid.get(se.id) ?? null });
       }
       if (path === '/checkout/sessions') {
         const id = `cs_test_${++n}`;
@@ -198,6 +206,7 @@ d('launch hardening', () => {
       const items: Item[] = [0, 1]
         .filter((i) => s.params.get(`line_items[${i}][price]`))
         .map((i) => ({ id: `si_${++n}`, quantity: Number(s.params.get(`line_items[${i}][quantity]`)), price: prices.get(s.params.get(`line_items[${i}][price]`)!)! }));
+      paid.set(sessionId, id);
       subs.set(id, { id, status: 'active', customer: 'cus_1', metadata: { tenantId: s.params.get('metadata[tenantId]')!, plan: s.params.get('metadata[plan]')! }, items: { data: items } });
       return id;
     };
@@ -215,6 +224,9 @@ d('launch hardening', () => {
       expect(go.body.plan.billing).toMatchObject({ status: 'pending', pendingPlan: 'standard' });
       const cs = go.body.checkoutUrl.split('/').pop();
       expect(sessions.get(cs)!.params.get('mode')).toBe('subscription');
+      expect(sessions.get(cs)!.params.get('success_url')).toMatch(/billing=return&session_id=\{CHECKOUT_SESSION_ID\}$/);
+      // Not paid yet: the return page confirms nothing
+      expect((await call('POST', '/tenant/billing/confirm', { sessionId: cs }, o.token)).body.paid).toBe(false);
       expect([...prices.values()][0]!.unit_amount).toBe(withIva(39_900));
 
       // Paid in Stripe -> plan on
@@ -223,12 +235,19 @@ d('launch hardening', () => {
       let info = (await call('GET', '/tenant/plan', undefined, o.token)).body;
       expect(info.plan).toBe('standard');
       expect(info.billing).toMatchObject({ status: 'active', pendingPlan: null, amountCents: withIva(39_900) });
+      expect(lastSubject()).toMatch(/^Tu plan Estándar está activo/);
+      // The return page confirming afterwards doesn't send a second email
+      const before = sentInTests.length;
+      expect((await call('POST', '/tenant/billing/confirm', { sessionId: cs }, o.token)).body).toMatchObject({ paid: true, plan: { plan: 'standard' } });
+      expect(sentInTests.length).toBe(before);
 
       // Upgrade: same subscription, new price, no new checkout
       const up = await call('PUT', '/tenant/plan', { plan: 'premium' }, o.token);
       expect(up.body.checkoutUrl).toBeNull();
       expect(up.body.plan.plan).toBe('premium');
       expect(subs.get(sub)!.items.data[0]!.price.unit_amount).toBe(withIva(79_900));
+      expect(lastSubject()).toMatch(/^Cambiaste al plan Premium/);
+      expect(sentInTests[sentInTests.length - 1]!.text).toContain(`$${(withIva(79_900) / 100).toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`);
 
       // Premium includes 2 locations; a third one is added to the subscription
       await call('POST', '/locations', { name: 'Sucursal Dos' }, o.token);
@@ -246,6 +265,7 @@ d('launch hardening', () => {
       await hook('invoice.payment_failed', { id: 'in_1', subscription: sub });
       info = (await call('GET', '/tenant/plan', undefined, o.token)).body;
       expect(info.billing).toMatchObject({ status: 'past_due', readOnly: false });
+      expect(lastSubject()).toMatch(/^No pudimos cobrar/);
       expect((await call('POST', '/customers', { name: 'En gracia' }, o.token)).status).toBe(201);
       const { getDb } = await import('../src/db/client.js');
       const { sql } = await import('drizzle-orm');
@@ -266,8 +286,11 @@ d('launch hardening', () => {
       const pay2 = await call('PUT', '/tenant/plan', { plan: 'standard' }, extra.body.token);
       const cs2 = pay2.body.checkoutUrl.split('/').pop();
       expect(prices.get(sessions.get(cs2)!.params.get('line_items[0][price]')!)!.lookup_key).toMatch(/^lugali_extra_business_/);
-      const sub2 = pay(cs2);
-      await hook('customer.subscription.created', { id: sub2 });
+      pay(cs2);
+      // Another business can't confirm this payment; its own owner can, right on return
+      expect((await call('POST', '/tenant/billing/confirm', { sessionId: cs2 }, o.token)).status).toBe(403);
+      expect((await call('POST', '/tenant/billing/confirm', { sessionId: cs2 }, extra.body.token)).body.paid).toBe(true);
+      expect(lastSubject()).toMatch(/^Tu plan Estándar está activo · Negocio Dos/);
       expect((await call('POST', '/customers', { name: 'Y' }, extra.body.token)).status).toBe(201);
 
       // Bad signature is rejected once the secret is set
@@ -281,6 +304,7 @@ d('launch hardening', () => {
       info = (await call('GET', '/tenant/plan', undefined, o.token)).body;
       expect(info.plan).toBe('free');
       expect(info.billing.status).toBe('cancelled');
+      expect(lastSubject()).toMatch(/^Tu suscripción se canceló/);
 
       expect(await billing.reconcileBilling(getDb())).toBeGreaterThanOrEqual(1);
     } finally {

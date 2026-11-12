@@ -1806,6 +1806,7 @@
     "verify": "Verify"
   },
   "billing": {
+    "paidNotice": "Payment received! Your {{plan}} plan is active. We emailed you a confirmation and Stripe sends the receipt.",
     "pending": "Your payment is missing to start the {{plan}} plan.",
     "confirming": "Confirming your payment…",
     "payNow": "Pay by card",

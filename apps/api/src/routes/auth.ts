@@ -50,7 +50,8 @@ import { getAccount } from '../integrations/mercadopago.js';
 import { requireAuth, requireBusinessManager, requireManager, requireOwner, type AppEnv } from '../middleware/auth.js';
 import { resolveLocation } from '../lib/locations.js';
 import { assertCanAddBusiness, assertFitsPlan, planInfo } from '../lib/plan.js';
-import { billingLinesFor, billingProvider, isDemoSlug } from '../lib/billing.js';
+import { billingLinesFor, billingProvider, isDemoSlug, syncSubscription } from '../lib/billing.js';
+import { notifyBilling } from '../lib/billing-email.js';
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -443,6 +444,7 @@ authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
       .update(tenants)
       .set({ plan, billingStatus: 'none', billingSubscriptionId: null, billingPendingPlan: null, billingAmountCents: null, billingPastDueSince: null })
       .where(eq(tenants.id, tenantId));
+    if (live) await notifyBilling(db, tenantId, { kind: 'cancelled' });
     return done();
   }
   const lines = await billingLinesFor(db, tenantId, plan);
@@ -451,6 +453,7 @@ authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
     // Stripe changes the plan now and charges (or credits) the prorated difference.
     await billing.update(tenant.billingSubscriptionId!, lines);
     await db.update(tenants).set({ plan, billingAmountCents: lines.totalCents }).where(eq(tenants.id, tenantId));
+    if (plan !== tenant.plan) await notifyBilling(db, tenantId, { kind: 'changed', plan, amountCents: lines.totalCents });
     return done();
   }
   // New subscription (first time or after a cancellation): Stripe Checkout.
@@ -474,6 +477,21 @@ authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
     })
     .where(eq(tenants.id, tenantId));
   return c.json({ checkoutUrl: sub.checkoutUrl, plan: await planInfo(db, tenantId, true) });
+});
+
+/** Back from Stripe Checkout: confirms the payment now instead of waiting for the webhook. */
+authRoutes.post('/tenant/billing/confirm', requireAuth, requireOwner, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { sessionId?: unknown };
+  const sessionId = typeof body.sessionId === 'string' && /^cs_[A-Za-z0-9_]{8,200}$/.test(body.sessionId) ? body.sessionId : null;
+  if (!sessionId) throw new AppError(422, 'invalid_session', 'Invalid checkout session');
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const billing = billingProvider();
+  if (!billing) throw new AppError(422, 'no_subscription', 'Billing is not connected');
+  const s = await billing.checkoutSession(sessionId);
+  if (s.tenantId !== tenantId) throw new AppError(403, 'forbidden', 'This payment belongs to another business');
+  if (s.subscriptionId) await syncSubscription(db, s.subscriptionId);
+  return c.json({ paid: s.subscriptionId !== null, plan: await planInfo(db, tenantId, true) });
 });
 
 /** Stripe's page to change the card, see invoices or cancel (owner). */
