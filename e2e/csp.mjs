@@ -4,7 +4,7 @@
  * Needs the API on :3000 and `pnpm --filter @agenda/web exec vite preview --port 4173`.
  */
 import { chromium } from 'playwright';
-const B = 'http://localhost:4173';
+const B = process.env.BASE ?? 'http://localhost:4173';
 const out = [];
 const ok = (name, cond, info = '') => out.push(`${cond ? 'PASS' : 'FAIL'} ${name} ${cond ? '' : info}`);
 const browser = await chromium.launch();
