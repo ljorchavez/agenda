@@ -32,29 +32,30 @@ plan_limit_locations | plan_limit_businesses`. Logins (admins, gerentes, colabor
 - Settings → Plan y uso: current plan, usage, monthly total and plan change (`GET/PUT /api/tenant/plan`, owner only).
 - Demo businesses are seeded on Premium so their history doesn't hit limits.
 
-## Card billing (Mercado Pago Suscripciones)
+## Card billing (Stripe)
 
-`apps/api/src/lib/billing.ts`. Each business pays its plan monthly with a card to Lugali's own
-Mercado Pago account (preapproval without a plan, amount with IVA = `withIva`).
+`apps/api/src/lib/billing.ts`. Each business pays Lugali its plan monthly by card through Stripe.
+(Businesses charge their own customers with Mercado Pago; that's separate.)
 
-Env (Vercel, production): `MERCADOPAGO_BILLING_ACCESS_TOKEN` (Lugali's account, separate from the
-businesses' tokens) and `MERCADOPAGO_BILLING_WEBHOOK_SECRET`. Webhook in the Mercado Pago app:
-`https://lugali.com/api/webhooks/billing`, events "Planes y suscripciones" (subscription_preapproval,
-subscription_authorized_payment). Without the token everything works as before (no charge).
+Env (Vercel, production): `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. Webhook endpoint in
+Stripe: `https://www.lugali.com/api/webhooks/billing` with events `checkout.session.completed`,
+`customer.subscription.created|updated|deleted`, `invoice.paid`, `invoice.payment_failed`.
+Prices (IVA included) are created in Stripe on first use with lookup keys
+`lugali_<plan|extra_business|extra_location>_<cents>`. Without the key, plan changes apply for free.
 
 - `PUT /api/tenant/plan`
   - to Gratis: cancels the subscription, plan changes now;
-  - paid → paid with a live subscription: new amount from the next charge (no proration);
-  - otherwise: creates a subscription (`billing_status = pending`, `billing_pending_plan`) and
-    returns Mercado Pago's `checkoutUrl`; the plan changes when the webhook says `authorized`.
-- Sign-up on a paid plan opens the business on Gratis and sends the owner to pay right away.
-- An extra business opened while billing is on is read-only until its subscription is paid.
-- A rejected monthly charge → `past_due`; after `BILLING_GRACE_DAYS` (7) the business is
-  read-only (`402 billing_read_only` on any change except plan, sign-in, export and delete).
-  Mercado Pago retries; an approved charge clears it. Cancelled at Mercado Pago → plan Gratis.
-- Adding/removing locations updates the monthly amount (`syncBillingAmount`).
-- The daily cron (`/api/cron/reset-demo`) re-reads every subscription (`reconcileBilling`).
+  - with a live subscription: items updated with `proration_behavior=always_invoice` (charged now);
+  - otherwise: Stripe Checkout (`checkoutUrl`); the plan changes when the webhook says it's active.
+- `POST /api/tenant/billing/portal`: Stripe Customer Portal (card, invoices, cancel).
+- Sign-up on a paid plan opens on Gratis and sends the owner to Checkout right away.
+- Extra locations above the plan's included ones are a quantity line on the same subscription,
+  updated when locations change (`syncBillingAmount`), charged prorated at once.
+- An extra business is its own subscription (extra-business price); read-only until paid.
+- Failed charge → Stripe marks the subscription `past_due` → `billing_status = past_due`; after
+  `BILLING_GRACE_DAYS` (7) the business is read-only (`402 billing_read_only`). Paid → active.
+  Cancelled in Stripe → plan Gratis.
+- Daily cron (`/api/cron/reset-demo`) re-reads every subscription (`reconcileBilling`).
 - Demo businesses (`*-demo`) are never charged.
 
-Fees (nov 2026): Mercado Pago Suscripciones 3.19% + IVA (money at once) or 2.89% + IVA (10 days);
-no monthly fee. Stripe was left out (3.6% + $3 MXN + 0.7% Billing).
+Fees (nov 2026): Stripe México 3.6% + $3 MXN per charge + 0.7% Billing; no monthly fee.

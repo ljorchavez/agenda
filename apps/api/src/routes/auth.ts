@@ -50,7 +50,7 @@ import { getAccount } from '../integrations/mercadopago.js';
 import { requireAuth, requireBusinessManager, requireManager, requireOwner, type AppEnv } from '../middleware/auth.js';
 import { resolveLocation } from '../lib/locations.js';
 import { assertCanAddBusiness, assertFitsPlan, planInfo } from '../lib/plan.js';
-import { billingProvider, isDemoSlug, monthlyAmountFor } from '../lib/billing.js';
+import { billingLinesFor, billingProvider, isDemoSlug } from '../lib/billing.js';
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -415,8 +415,8 @@ authRoutes.get('/tenant/plan', requireAuth, requireBusinessManager, async (c) =>
  * Owner changes the plan. With card billing connected:
  * - to Gratis: the subscription is cancelled and the plan changes now;
  * - between paid plans with a live subscription: the monthly amount changes from the next charge;
- * - otherwise: a subscription is created and the owner goes to Mercado Pago to enter the card;
- *   the plan changes when Mercado Pago confirms it (webhook).
+ * - otherwise: the owner goes to Stripe Checkout to enter the card; the plan changes when Stripe
+ *   confirms it (webhook).
  * Without billing (and for demo businesses) the plan changes right away without a charge.
  */
 authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
@@ -445,38 +445,47 @@ authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
       .where(eq(tenants.id, tenantId));
     return done();
   }
-  const amount = await monthlyAmountFor(db, tenantId, plan);
-  if (amount == null) throw new AppError(422, 'plan_unavailable', 'This plan has no price yet');
-  if (live && tenant.billingStatus === 'active') {
-    await billing.updateAmount(tenant.billingSubscriptionId!, amount);
-    await db.update(tenants).set({ plan, billingAmountCents: amount }).where(eq(tenants.id, tenantId));
+  const lines = await billingLinesFor(db, tenantId, plan);
+  if (!lines) throw new AppError(422, 'plan_unavailable', 'This plan has no price yet');
+  if (live) {
+    // Stripe changes the plan now and charges (or credits) the prorated difference.
+    await billing.update(tenant.billingSubscriptionId!, lines);
+    await db.update(tenants).set({ plan, billingAmountCents: lines.totalCents }).where(eq(tenants.id, tenantId));
     return done();
   }
-  // New subscription (first time, after a cancellation, or to replace a card that keeps failing).
+  // New subscription (first time or after a cancellation): Stripe Checkout.
   const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
-  const returnUrl = `${(process.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, '')}/settings?tab=plan&billing=return`;
-  const names: Record<PlanId, string> = { free: 'Gratis', individual: 'Individual', standard: 'Estándar', premium: 'Premium' };
+  const base = (process.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, '');
   const sub = await billing.createSubscription({
     tenantId,
-    plan,
-    amountCents: amount,
+    lines,
     email: user!.email,
-    reason: `Lugali · Plan ${names[plan]} · ${tenant.name}`.slice(0, 120),
-    returnUrl,
+    returnUrl: `${base}/settings?tab=plan&billing=return`,
+    cancelUrl: `${base}/settings?tab=plan`,
   });
-  // The old pending link (if any) stops mattering; a live one is replaced when the new one is paid.
-  if (tenant.billingSubscriptionId && tenant.billingStatus === 'pending') {
-    await billing.cancel(tenant.billingSubscriptionId).catch(() => undefined);
-  }
+  // An earlier checkout that was never paid stops mattering.
+  if (tenant.billingSubscriptionId?.startsWith('cs_')) await billing.cancel(tenant.billingSubscriptionId).catch(() => undefined);
   await db
     .update(tenants)
     .set({
-      billingStatus: tenant.billingStatus === 'past_due' ? 'past_due' : live ? tenant.billingStatus : 'pending',
-      billingSubscriptionId: live ? tenant.billingSubscriptionId : sub.id,
+      billingStatus: tenant.billingStatus === 'past_due' ? 'past_due' : 'pending',
+      billingSubscriptionId: sub.id,
       billingPendingPlan: plan,
     })
     .where(eq(tenants.id, tenantId));
   return c.json({ checkoutUrl: sub.checkoutUrl, plan: await planInfo(db, tenantId, true) });
+});
+
+/** Stripe's page to change the card, see invoices or cancel (owner). */
+authRoutes.post('/tenant/billing/portal', requireAuth, requireOwner, async (c) => {
+  const db = getDb();
+  const tenant = (await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')) }))!;
+  const billing = billingProvider();
+  if (!billing || !tenant.billingSubscriptionId || tenant.billingSubscriptionId.startsWith('cs_')) {
+    throw new AppError(422, 'no_subscription', 'There is no subscription to manage');
+  }
+  const base = (process.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, '');
+  return c.json({ url: await billing.portalUrl(tenant.billingSubscriptionId, `${base}/settings?tab=plan`) });
 });
 
 authRoutes.patch('/tenant', requireAuth, requireBusinessManager, async (c) => {

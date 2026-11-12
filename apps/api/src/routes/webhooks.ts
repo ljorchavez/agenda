@@ -10,7 +10,7 @@ import {
 } from '../integrations/mercadopago.js';
 import { samePhone, verifyWhatsAppSignature, type WhatsAppWebhook } from '../integrations/whatsapp.js';
 import { fulfilPurchase } from '../lib/online-sales.js';
-import { syncCharge, syncSubscription } from '../lib/billing.js';
+import { subscriptionIdOf, syncSubscription, verifyStripeSignature } from '../lib/billing.js';
 
 /** Webhooks from WhatsApp (Meta) and Mercado Pago. Always verify signatures first. */
 export const webhookRoutes = new Hono();
@@ -141,23 +141,22 @@ webhookRoutes.post('/webhooks/mercadopago', async (c) => {
   return c.text('ok');
 });
 
-// ---------- Subscriptions (Lugali's own Mercado Pago account) ----------
+// ---------- Subscriptions (what Lugali charges the businesses, Stripe) ----------
 
 /**
- * Mercado Pago "Planes y suscripciones" notifications. Whatever the body says, the state is read
- * back from Mercado Pago with our token, so a forged call can at most trigger a re-check.
+ * Stripe events: checkout.session.completed, customer.subscription.*, invoice.paid and
+ * invoice.payment_failed. The signature is checked, and the subscription is read back from Stripe.
  */
 webhookRoutes.post('/webhooks/billing', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { type?: string; topic?: string; data?: { id?: string | number } };
-  const type = body.type ?? body.topic ?? c.req.query('type') ?? c.req.query('topic') ?? '';
-  const id = String(body.data?.id ?? c.req.query('data.id') ?? c.req.query('id') ?? '');
-  if (!id || !/^[\w-]{1,64}$/.test(id)) return c.json({ ok: true });
-  const secret = process.env.MERCADOPAGO_BILLING_WEBHOOK_SECRET?.trim();
-  if (secret && !verifyMercadoPagoSignature({ signature: c.req.header('x-signature'), requestId: c.req.header('x-request-id'), dataId: id, secret })) {
-    return c.text('invalid signature', 401);
+  const raw = await c.req.text();
+  if (!verifyStripeSignature(raw, c.req.header('stripe-signature'))) return c.text('invalid signature', 400);
+  let event: { type?: string; data?: { object?: Record<string, unknown> } };
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return c.text('bad json', 400);
   }
-  const db = getDb();
-  if (type.includes('preapproval')) await syncSubscription(db, id);
-  else if (type.includes('authorized_payment')) await syncCharge(db, id);
-  return c.json({ ok: true });
+  const id = subscriptionIdOf(event);
+  if (id) await syncSubscription(getDb(), id);
+  return c.json({ received: true });
 });

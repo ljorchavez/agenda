@@ -805,8 +805,9 @@
     "captcha_required": "Un momento: estamos verificando que no eres un robot. Intenta de nuevo en unos segundos.",
     "captcha_failed": "No pudimos verificar que no eres un robot. Intenta de nuevo.",
     "billing_read_only": "Tu negocio está en modo solo lectura porque no se pudo cobrar la suscripción. Actualiza tu tarjeta en Configuración → Plan.",
-    "billing_provider_error": "Mercado Pago no respondió. Intenta de nuevo en un momento.",
-    "delete_not_confirmed": "La contraseña o el nombre del negocio no coinciden."
+    "billing_provider_error": "El sistema de pagos no respondió. Intenta de nuevo en un momento.",
+    "delete_not_confirmed": "La contraseña o el nombre del negocio no coinciden.",
+    "no_subscription": "No hay una suscripción activa."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -994,7 +995,7 @@
     "oneAgenda": "1 profesional o espacio (una sola agenda)",
     "prioritySupport": "Soporte prioritario por WhatsApp",
     "agendasUsed": "Agendas activas (personas o espacios): {{used}} de {{max}}",
-    "billingNext": "Al crear tu cuenta te llevaremos a Mercado Pago para registrar tu tarjeta. El cobro es mensual y puedes cancelar cuando quieras."
+    "billingNext": "Al crear tu cuenta te llevaremos a pagar con tarjeta (Stripe). El cobro es mensual y puedes cambiar de plan o cancelar cuando quieras."
   },
   "categories": {
     "health": "Salud",
@@ -1806,14 +1807,14 @@
   },
   "billing": {
     "pending": "Falta tu pago para activar el plan {{plan}}.",
-    "confirming": "Estamos confirmando tu pago con Mercado Pago…",
-    "payNow": "Pagar con Mercado Pago",
+    "confirming": "Estamos confirmando tu pago…",
+    "payNow": "Pagar con tarjeta",
     "pastDue": "No se pudo cobrar tu tarjeta. Actualízala antes del {{date}} para no pasar a modo solo lectura.",
     "pastDueShort": "No se pudo cobrar tu suscripción.",
     "readOnly": "Tu negocio está en modo solo lectura porque no se pudo cobrar la suscripción. Puedes ver todo, pero no hacer cambios.",
     "updateCard": "Actualizar tarjeta",
-    "active": "Se cobran {{amount}} (IVA incluido) cada mes con Mercado Pago.",
-    "manage": "Ver cargos o cambiar tarjeta",
+    "active": "Se cobran {{amount}} (IVA incluido) cada mes a tu tarjeta.",
+    "manage": "Cambiar tarjeta, ver facturas o cancelar",
     "cancelled": "Tu suscripción se canceló; el negocio pasó al plan Gratis."
   },
   "data": {

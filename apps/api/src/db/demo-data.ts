@@ -1351,7 +1351,8 @@ const scribble = (seedN: number) => {
   return `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60"><polyline points="${pts}" fill="none" stroke="#1e293b" stroke-width="2"/></svg>`).toString('base64')}`;
 };
 
-const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nutrition', { history: Record<string, unknown>; evolutions: Record<string, unknown>[] }[]> = {
+type ClinicalCase = { history: Record<string, unknown>; evolutions: Record<string, unknown>[]; followUps?: string[] };
+const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nutrition', ClinicalCase[]> = {
   medical: [
     {
       history: {
@@ -1492,6 +1493,214 @@ const CASES: Record<'medical' | 'dental' | 'psychology' | 'physiotherapy' | 'nut
   ],
 };
 
+/**
+ * More cases so every returning patient has a believable record. CASES[type][0..] keep the
+ * original patients (e2e looks for the first ones); these are appended.
+ */
+const MORE_CASES: typeof CASES = {
+  medical: [
+    {
+      history: {
+        ocupacion: 'Estudiante', estadoCivil: 'Soltero(a)', tipoSangre: 'B+', heredofamiliares: 'Madre con asma.',
+        patologicos: 'Asma desde la infancia, última crisis hace 1 año.', alergias: 'Polvo y ácaros', medicamentosActuales: 'Salbutamol de rescate', tabaco: 'Nunca', alcohol: 'No',
+        padecimientoActual: 'Tos nocturna y silbido de pecho de 10 días, usa salbutamol 3 veces por semana.',
+        signos: { ta: '110/70', fc: 88, fr: 20, temp: 36.8, spo2: 95, peso: 60, talla: 168 },
+        torax: 'Sibilancias espiratorias bilaterales', abdomen: 'Sin alteraciones', miembros: 'Sin edema',
+        diagnosticos: [{ code: 'J45.9', text: 'Asma no controlada' }], pronostico: 'Bueno con tratamiento de control',
+        medicamentos: [{ name: 'Budesonida/formoterol 160/4.5 mcg inhalador', dose: '2 disparos', route: 'Inhalada', frequency: 'Cada 12 horas', duration: '30 días' }],
+        indicaciones: 'Técnica de inhalador revisada. Evitar alfombras y peluches. Espirometría al control.',
+      },
+      evolutions: [],
+      followUps: ['Sin tos nocturna, no ha usado rescate esta semana.', 'Espirometría con buena respuesta al broncodilatador. Se mantiene esquema.', 'Asintomática, se reduce a 1 disparo cada 12 horas.'],
+    },
+    {
+      history: {
+        ocupacion: 'Chofer', estadoCivil: 'Casado(a)', tipoSangre: 'O+', heredofamiliares: 'Sin importancia',
+        patologicos: 'Niega crónicos.', alergias: 'Negadas', tabaco: 'Diario (10 cigarros)', alcohol: 'Fines de semana',
+        padecimientoActual: 'Ardor epigástrico de 3 semanas, empeora en ayuno y con café; sin vómito ni sangrado.',
+        signos: { ta: '125/80', fc: 76, fr: 16, temp: 36.5, spo2: 98, peso: 90, talla: 172 },
+        abdomen: 'Dolor leve a la palpación en epigastrio, sin datos de irritación peritoneal',
+        diagnosticos: [{ code: 'K29.7', text: 'Gastritis' }], pronostico: 'Bueno',
+        medicamentos: [{ name: 'Omeprazol 20 mg cápsulas', dose: '1 cápsula', route: 'Oral', frequency: 'Cada 24 horas en ayuno', duration: '28 días' }],
+        indicaciones: 'Evitar irritantes, café y alcohol. Plan para dejar de fumar. Antígeno de H. pylori en heces.',
+      },
+      evolutions: [],
+      followUps: ['Mejoría del ardor en 80 %. Antígeno de H. pylori negativo.', 'Asintomático. Redujo a 4 cigarros al día.', 'Sin síntomas. Se suspende omeprazol de forma escalonada.'],
+    },
+    {
+      history: {
+        ocupacion: 'Ama de casa', estadoCivil: 'Casado(a)', tipoSangre: 'A+', heredofamiliares: 'Hermana con hipotiroidismo.',
+        patologicos: 'Dos cesáreas.', alergias: 'Sulfas', tabaco: 'Nunca', alcohol: 'No',
+        padecimientoActual: 'Cansancio, caída de cabello, intolerancia al frío y aumento de 5 kg en 6 meses.',
+        signos: { ta: '118/76', fc: 62, fr: 16, temp: 36.2, spo2: 98, peso: 71, talla: 158 },
+        cuello: 'Tiroides palpable sin nódulos', miembros: 'Piel seca',
+        resultados: 'TSH 9.8 mUI/L, T4 libre 0.7 ng/dL.',
+        diagnosticos: [{ code: 'E03.9', text: 'Hipotiroidismo' }], pronostico: 'Bueno',
+        medicamentos: [{ name: 'Levotiroxina 50 mcg tabletas', dose: '1 tableta', route: 'Oral', frequency: 'Cada 24 horas en ayuno', duration: '60 días' }],
+        indicaciones: 'Tomar 30 minutos antes del desayuno. TSH en 6 semanas.',
+      },
+      evolutions: [],
+      followUps: ['Más energía. TSH 5.1 mUI/L, se ajusta a 75 mcg.', 'TSH 2.4 mUI/L. Continúa 75 mcg.', 'Estable, control con TSH en 6 meses.'],
+    },
+    {
+      history: {
+        ocupacion: 'Albañil', estadoCivil: 'Unión libre', tipoSangre: 'O-', heredofamiliares: 'Sin importancia',
+        patologicos: 'Niega.', alergias: 'Negadas', tabaco: 'Nunca', alcohol: 'Ocasional',
+        padecimientoActual: 'Dolor lumbar de 5 días tras cargar bultos, sin irradiación a piernas.',
+        signos: { ta: '122/78', fc: 74, fr: 16, temp: 36.5, spo2: 98, peso: 76, talla: 170 },
+        miembros: 'Lasègue negativo, fuerza y reflejos normales', abdomen: 'Sin alteraciones',
+        diagnosticos: [{ code: 'M54.5', text: 'Lumbago no especificado' }], pronostico: 'Bueno',
+        medicamentos: [{ name: 'Naproxeno 500 mg tabletas', dose: '1 tableta', route: 'Oral', frequency: 'Cada 12 horas con alimentos', duration: '5 días' }],
+        indicaciones: 'Calor local, evitar cargar más de 10 kg por 2 semanas. Envío a fisioterapia.',
+      },
+      evolutions: [],
+      followUps: ['Dolor EVA 2/10, regresó a trabajar con faja.', 'Sin dolor. Se dan ejercicios de higiene de columna.'],
+    },
+  ],
+  dental: [
+    {
+      history: {
+        ocupacion: 'Contador', estadoCivil: 'Casado(a)', tipoSangre: 'A+', patologicos: 'Diabetes tipo 2 con metformina', alergias: 'Negadas', tabaco: 'Exfumador(a)', alcohol: 'Ocasional',
+        motivo: 'Me sangran las encías', padecimientoActual: 'Sangrado al cepillarse y movilidad leve en incisivos inferiores de 6 meses.',
+        signos: { ta: '130/80', fc: 78 }, encias: 'Inflamación generalizada, bolsas de 5 mm en sector anterior inferior', oclusion: 'Clase I', higiene: 'Deficiente',
+        odontograma: { '31': { state: 'sano' }, '41': { state: 'sano' }, '46': { state: 'obturado', surfaces: ['O'] }, '38': { state: 'ausente' } },
+        resultados: 'Serie periapical: pérdida ósea horizontal leve.', diagnosticos: [{ code: 'K05.3', text: 'Periodontitis crónica' }],
+        pronostico: 'Reservado, depende del control de la glucosa', plan: 'Raspado y alisado por cuadrantes, control a 3 meses.',
+      },
+      evolutions: [],
+      followUps: ['Raspado y alisado radicular cuadrantes 3 y 4.', 'Raspado y alisado radicular cuadrantes 1 y 2.', 'Revaloración: bolsas de 3 mm, sangrado reducido.'],
+    },
+    {
+      history: {
+        ocupacion: 'Estudiante de preparatoria', estadoCivil: 'Soltero(a)', tipoSangre: 'O+', alergias: 'Negadas', tabaco: 'Nunca', alcohol: 'No',
+        motivo: 'Dientes chuecos', padecimientoActual: 'Apiñamiento anterior superior e inferior; desea tratamiento de ortodoncia.',
+        signos: { ta: '110/70', fc: 72 }, atm: 'Sin alteraciones', oclusion: 'Clase II división 1, sobremordida 4 mm', higiene: 'Buena',
+        odontograma: { '13': { state: 'sano' }, '23': { state: 'sano' }, '18': { state: 'ausente' }, '28': { state: 'ausente' } },
+        resultados: 'Ortopantomografía y cefalometría: patrón esquelético clase II leve.', diagnosticos: [{ code: 'K07.3', text: 'Anomalías de la posición del diente (apiñamiento)' }],
+        pronostico: 'Favorable', plan: 'Ortodoncia fija con brackets metálicos, 18 a 24 meses, ajustes mensuales.',
+      },
+      evolutions: [],
+      followUps: ['Ajuste de ortodoncia: arco 0.014 NiTi.', 'Ajuste: cambio a arco 0.016 NiTi, ligas clase II.', 'Ajuste: arco 0.018 acero, buen avance del apiñamiento.'],
+    },
+  ],
+  psychology: [
+    {
+      history: {
+        ocupacion: 'Vendedor', estadoCivil: 'Divorciado(a)', escolaridad: 'Preparatoria',
+        motivo: '"Ya nada me da gusto desde que me separé."', historiaProblema: 'Ánimo bajo de 3 meses tras divorcio, duerme 10 horas, dejó el fútbol.',
+        tratamientosPrevios: 'Ninguno', heredofamiliares: 'Padre con depresión', familia: 'Ve a sus hijos los fines de semana.', medicos: 'Sin enfermedades.', sustancias: 'Alcohol los fines de semana',
+        apariencia: 'Descuidado', animo: 'Deprimido, afecto aplanado', pensamiento: 'Ideas de minusvalía', orientacion: 'Orientado', juicio: 'Conservado', riesgo: 'Sin plan ni intención suicida; se acuerda plan de seguridad.',
+        pruebas: 'Inventario de Depresión de Beck: 27 (moderada).',
+        diagnosticos: [{ code: 'F32.1', text: 'Episodio depresivo moderado' }], pronostico: 'Favorable con tratamiento',
+        plan: 'Activación conductual y TCC semanal. Valoración por psiquiatría para tratamiento farmacológico.',
+      },
+      evolutions: [],
+      followUps: ['Activación conductual: agenda de actividades placenteras.', 'Retomó el fútbol una vez por semana. Beck 19.', 'Reestructuración de creencias de fracaso. Inició sertralina por psiquiatría.'],
+    },
+    {
+      history: {
+        ocupacion: 'Enfermera', estadoCivil: 'Viudo(a)', escolaridad: 'Licenciatura',
+        motivo: '"No he podido con la muerte de mi esposo."', historiaProblema: 'Fallecimiento del esposo hace 8 meses; llanto diario, evita su recámara.',
+        tratamientosPrevios: 'Ninguno', familia: 'Dos hijas adultas que la apoyan.', medicos: 'Hipertensión controlada.', sustancias: 'Niega',
+        apariencia: 'Aliñada', animo: 'Triste, afecto congruente', pensamiento: 'Centrado en la pérdida', orientacion: 'Orientada', juicio: 'Conservado', riesgo: 'Sin ideación de daño.',
+        diagnosticos: [{ code: 'F43.2', text: 'Trastorno de adaptación (duelo)' }], pronostico: 'Favorable',
+        plan: 'Terapia de duelo quincenal: validación, tareas del duelo, rituales de despedida.',
+      },
+      evolutions: [],
+      followUps: ['Se trabaja narrativa de la pérdida.', 'Escribió carta de despedida; menos evitación.', 'Retomó reuniones con amigas. Llanto ocasional.'],
+    },
+    {
+      history: {
+        ocupacion: 'Estudiante universitario', estadoCivil: 'Soltero(a)', escolaridad: 'Licenciatura en curso',
+        motivo: '"Me dan ataques de pánico antes de los exámenes."', historiaProblema: 'Episodios de taquicardia, falta de aire y miedo a morir, 3 en el último mes.',
+        tratamientosPrevios: 'Ninguno', medicos: 'Electrocardiograma normal.', sustancias: 'Bebidas energéticas',
+        apariencia: 'Aliñado, inquieto', animo: 'Ansioso', pensamiento: 'Catastrófico', orientacion: 'Orientado', juicio: 'Conservado', riesgo: 'Sin riesgo.',
+        pruebas: 'Escala de pánico PDSS: 14.',
+        diagnosticos: [{ code: 'F41.0', text: 'Trastorno de pánico' }], pronostico: 'Favorable',
+        plan: 'TCC para pánico: psicoeducación, respiración, exposición interoceptiva. 10 sesiones.',
+      },
+      evolutions: [],
+      followUps: ['Psicoeducación del ciclo del pánico.', 'Exposición interoceptiva (girar en silla). Ansiedad 6/10 → 3/10.', 'Sin crisis en 3 semanas. Plan de prevención de recaídas.'],
+    },
+  ],
+  physiotherapy: [
+    {
+      history: {
+        ocupacion: 'Oficinista', estadoCivil: 'Soltero(a)',
+        motivo: 'Dolor de cuello y hombros', diagnosticoMedico: 'Cervicalgia mecánica', antecedentes: 'Sin cirugías.', actividad: 'Sedentaria, 9 horas en computadora',
+        eva: 7, localizacion: 'Región cervical y trapecios', tipo: 'Aumenta al final del día, cefalea occipital',
+        postura: 'Cabeza adelantada, hombros en rotación interna', arcos: 'Rotación cervical limitada 20 %', fuerza: 'Flexores profundos de cuello débiles', pruebas: 'Spurling negativo',
+        diagnosticoFisio: 'Cervicalgia postural con puntos gatillo en trapecio superior.', diagnosticos: [{ code: 'M54.2', text: 'Cervicalgia' }], pronostico: 'Bueno',
+        objetivos: 'EVA ≤2 y ergonomía en el trabajo.', plan: '8 sesiones: terapia manual, punción seca, ejercicios posturales.',
+      },
+      evolutions: [],
+      followUps: ['Liberación miofascial de trapecio y suboccipitales.', 'Punción seca en trapecio superior derecho.', 'Ejercicios de flexores profundos y ajuste de silla y monitor.'],
+    },
+    {
+      history: {
+        ocupacion: 'Nadadora master', estadoCivil: 'Casado(a)',
+        motivo: 'Dolor de hombro derecho al nadar', diagnosticoMedico: 'Tendinopatía del supraespinoso', antecedentes: 'Ninguno.', actividad: 'Nada 4 veces por semana',
+        eva: 5, localizacion: 'Cara lateral del hombro derecho', tipo: 'Arco doloroso entre 60 y 120 grados',
+        arcos: 'Abducción completa con arco doloroso', fuerza: 'Rotadores externos 4/5', pruebas: 'Neer y Hawkins positivos',
+        diagnosticoFisio: 'Tendinopatía del supraespinoso por sobreuso.', diagnosticos: [{ code: 'M75.1', text: 'Síndrome del manguito rotador' }], pronostico: 'Bueno',
+        objetivos: 'Nadar 2 km sin dolor.', plan: '10 sesiones: carga progresiva isométrica e isotónica, control escapular.',
+      },
+      evolutions: [],
+      followUps: ['Isométricos de rotación externa, ultrasonido terapéutico.', 'Ejercicio excéntrico con banda, control escapular.', 'Regreso progresivo al nado: 1 km sin dolor.'],
+    },
+    {
+      history: {
+        ocupacion: 'Repartidor', estadoCivil: 'Casado(a)',
+        motivo: 'Dolor de espalda baja', diagnosticoMedico: 'Lumbalgia mecánica', antecedentes: 'Lumbalgia hace 2 años.', actividad: 'Moto 8 horas al día',
+        eva: 6, localizacion: 'Región lumbar bilateral', tipo: 'Rigidez matutina, mejora al caminar',
+        arcos: 'Flexión de tronco limitada', fuerza: 'Core débil', pruebas: 'Lasègue negativo',
+        diagnosticoFisio: 'Lumbalgia mecánica por debilidad de core y postura sostenida.', diagnosticos: [{ code: 'M54.5', text: 'Lumbago no especificado' }], pronostico: 'Bueno',
+        objetivos: 'Trabajar sin dolor.', plan: '8 sesiones: terapia manual, estabilización lumbar.',
+      },
+      evolutions: [],
+      followUps: ['Movilización lumbar y TENS.', 'Estabilización: plancha, bird dog, puente.', 'Alta parcial con programa en casa.'],
+    },
+  ],
+  nutrition: [
+    {
+      history: {
+        ocupacion: 'Comerciante', estadoCivil: 'Casado(a)',
+        motivo: 'Controlar el azúcar', heredofamiliares: 'Madre y hermanos con diabetes', patologicos: 'Diabetes tipo 2 de 2 años', medicamentos: 'Metformina 850 mg', alergias: 'Negadas',
+        actividad: 'Ninguna', agua: 0.8, horarios: 'Desayuna 8:00, come 15:00, cena 21:00.', recordatorio: 'Tamales; comida corrida; pan dulce con café; refresco diario.',
+        medidas: { peso: 92, talla: 168, cintura: 106, cadera: 110, grasa: 34 }, bioquimicos: 'Glucosa 158 mg/dL, HbA1c 8.1 %.',
+        diagnosticoNutricio: 'Obesidad grado I con diabetes descontrolada.', pronostico: 'Bueno con apego',
+        plan: '1,700 kcal, 45 % HC de bajo índice glucémico, conteo de raciones.', metas: 'HbA1c < 7 % en 3 meses',
+      },
+      evolutions: [],
+      followUps: ['Dejó el refresco entre semana.', 'Glucosa en ayuno 128 mg/dL.', 'HbA1c 7.2 %. Agregó caminata diaria.'],
+    },
+    {
+      history: {
+        ocupacion: 'Estudiante, crossfit', estadoCivil: 'Soltero(a)',
+        motivo: 'Ganar masa muscular', patologicos: 'Niega', alergias: 'Negadas',
+        actividad: 'Crossfit 5 veces por semana', agua: 2.5, horarios: '4 comidas, entrena 7:00.', recordatorio: 'Huevo con pan; pollo con arroz; licuado; quesadillas.',
+        medidas: { peso: 68, talla: 176, cintura: 76, grasa: 14 }, bioquimicos: 'Sin estudios.',
+        diagnosticoNutricio: 'Peso normal con ingesta de proteína insuficiente para su objetivo.', pronostico: 'Bueno',
+        plan: '2,900 kcal, proteína 1.8 g/kg, 5 tiempos con colación post entreno.', metas: 'Subir 3 kg de masa muscular en 4 meses',
+      },
+      evolutions: [],
+      followUps: ['Subió 0.9 kg, cumple la proteína 5 de 7 días.', 'Masa muscular +0.6 kg por bioimpedancia.', 'Ajuste de hidratos en días de entrenamiento doble.'],
+    },
+    {
+      history: {
+        ocupacion: 'Maestra', estadoCivil: 'Casado(a)',
+        motivo: 'Comer bien en el embarazo', patologicos: 'Embarazo de 14 semanas', medicamentos: 'Ácido fólico, hierro', alergias: 'Mariscos',
+        actividad: 'Caminata diaria', agua: 1.5, horarios: 'Náuseas por la mañana; come 3 veces.', recordatorio: 'Galletas; caldo de pollo; fruta; quesadillas.',
+        medidas: { peso: 61, talla: 160, cintura: 80 }, bioquimicos: 'Hemoglobina 11.2 g/dL.',
+        diagnosticoNutricio: 'Embarazo normoevolutivo con anemia leve.', pronostico: 'Bueno',
+        plan: '2,100 kcal, alimentos ricos en hierro con vitamina C, 6 tiempos pequeños.', metas: 'Ganancia de 11 a 16 kg en el embarazo',
+      },
+      evolutions: [],
+      followUps: ['Menos náuseas, ganancia adecuada.', 'Hemoglobina 11.9 g/dL.', 'Semana 26: ganancia de 6 kg, adecuada.'],
+    },
+  ],
+};
+
 const ADDENDA: Record<keyof typeof CASES, string> = {
   medical: 'Se corrige: la alergia referida es a sulfas, no a penicilina.',
   dental: 'Se aclara: el dolor a estímulos fríos inició hace 6 semanas, no hace 1 mes.',
@@ -1504,6 +1713,54 @@ const ADDENDA: Record<keyof typeof CASES, string> = {
  * Clinical records for the health demos: patient data, signed histories and progress notes linked
  * to their visits (odontograms in dental), a signed informed consent, an addendum and a draft.
  */
+/** Note for a later visit when the case has no hand-written one: follows the case's course. */
+function followUp(type: keyof typeof CASES, c: ClinicalCase, k: number): Record<string, unknown> {
+  const h = c.history as Record<string, any>;
+  const text = c.followUps?.length ? c.followUps[(k - 1) % c.followUps.length] : undefined;
+  switch (type) {
+    case 'medical': {
+      const s = h.signos ?? {};
+      return {
+        evolucion: text ?? 'Acude a control con buen apego al tratamiento, sin efectos adversos.',
+        signos: { ta: s.ta ?? '120/80', fc: Math.max(60, (s.fc ?? 76) - Math.min(k, 4)), ...(s.peso ? { peso: Math.round((s.peso - 0.4 * k) * 10) / 10, talla: s.talla } : {}) },
+        diagnosticos: h.diagnosticos, pronostico: 'Bueno', medicamentos: h.medicamentos ?? [],
+        indicaciones: 'Continuar tratamiento. Control en 1 mes.',
+      };
+    }
+    case 'dental': {
+      const last = [...c.evolutions].reverse().find((e) => e.odontograma)?.odontograma ?? h.odontograma;
+      return {
+        procedimiento: text ?? ['Profilaxis y control', 'Revisión de restauraciones', 'Aplicación tópica de flúor'][k % 3],
+        odontograma: last, indicaciones: 'Cepillado 3 veces al día e hilo dental.', proxima: 'Control en 6 meses',
+      };
+    }
+    case 'psychology':
+      return {
+        objetivo: text ?? 'Seguimiento del plan terapéutico', desarrollo: text ? `${text} Se revisan tareas de la semana.` : 'Se revisan tareas y avances.',
+        observaciones: ['Afecto más amplio, participativo(a).', 'Refiere mejor descanso.', 'Menos rumiaciones en la semana.'][k % 3],
+        tareas: ['Registro de pensamientos', 'Respiración diafragmática 2 veces al día', 'Agenda de actividades agradables'][k % 3], plan: 'Continuar plan',
+      };
+    case 'physiotherapy': {
+      const eva = Math.max(0, Number(h.eva ?? 6) - k);
+      return {
+        evaInicial: eva, tecnicas: text ?? 'Terapia manual y ejercicio terapéutico.',
+        ejercicios: ['Movilidad y estiramientos', 'Fortalecimiento con banda elástica', 'Ejercicio funcional y propiocepción'][k % 3],
+        evaFinal: Math.max(0, eva - 2), respuesta: 'Buena tolerancia.', casa: 'Ejercicios 3 series de 12 diario',
+      };
+    }
+    case 'nutrition': {
+      const m = h.medidas ?? {};
+      const gain = /ganar|embarazo/i.test(String(h.motivo ?? ''));
+      const peso = Math.round(((m.peso ?? 70) + (gain ? 0.7 : -0.8) * k) * 10) / 10;
+      return {
+        medidas: { ...m, peso, ...(m.cintura ? { cintura: Math.round((m.cintura + (gain ? 0.4 : -0.8) * k) * 10) / 10 } : {}) },
+        adherencia: ['Bueno', 'Regular', 'Bueno'][k % 3], evolucion: text ?? `${gain ? 'Subió' : 'Bajó'} de peso según lo esperado.`,
+        ajustes: ['Sin cambios en el plan.', 'Ajuste de colaciones.', 'Más verdura en la cena.'][k % 3],
+      };
+    }
+  }
+}
+
 async function seedClinical() {
   const db = getDb();
   const owner = await db.query.users.findFirst({ where: eq(users.email, DEMO_OWNER.email) });
@@ -1523,11 +1780,13 @@ async function seedClinical() {
     const type = t.businessType as keyof typeof CASES;
     const [histTpl, evoTpl] = TEMPLATES[type];
     const titleOf = (id: string) => CLINICAL_TEMPLATES[id]!.title;
-    // Patients with at least 3 completed visits, the ones a practice would have a record for
+    // Every patient who has been seen has a record: history at the first visit and a note for each
+    // later one. Only new patients (no visit yet) have none.
     const done = await db.execute<{ customer_id: string; ids: string[]; starts: string[] }>(sql`
       select customer_id, array_agg(id::text order by starts_at) as ids, array_agg(starts_at::text order by starts_at) as starts
       from appointments where tenant_id = ${t.id} and status = 'completed'
-      group by customer_id having count(*) >= 3 order by min(starts_at) limit 6`);
+      group by customer_id order by min(starts_at)`);
+    const pool = [...CASES[type], ...MORE_CASES[type]];
     const notes: (typeof clinicalNotes.$inferInsert)[] = [];
     const sign = (customerId: string, appointmentId: string | null, template: string, content: Record<string, unknown>, at: Date, extra: Partial<typeof clinicalNotes.$inferInsert> = {}) => {
       const signedAt = new Date(at.getTime() + 50 * 60e3);
@@ -1540,16 +1799,32 @@ async function seedClinical() {
       return row;
     };
     for (const [i, p] of done.rows.entries()) {
-      const c = CASES[type][i % CASES[type].length]!;
+      const c = pool[i % pool.length]!;
       const female = i % 2 === 0;
       const year = 1965 + ((i * 7) % 40);
       await db.update(customers).set({
-        sex: female ? 'F' : 'M', birthday: `${year}-${String(1 + (i % 12)).padStart(2, '0')}-${String(3 + i * 4).padStart(2, '0')}`,
+        sex: female ? 'F' : 'M', birthday: `${year}-${String(1 + (i % 12)).padStart(2, '0')}-${String(1 + ((i * 4) % 27)).padStart(2, '0')}`,
         address: `${STREETS[i % STREETS.length]}, Colima, Col.`,
       }).where(eq(customers.id, p.customer_id));
+      // Allergies and conditions at a glance (the nutrition demo already has some)
+      const h = c.history;
+      const allergy = typeof h.alergias === 'string' && !/negad/i.test(h.alergias) ? h.alergias : null;
+      const dx = Array.isArray(h.diagnosticos) ? (h.diagnosticos as { text: string }[]).map((d) => d.text).join('; ') : null;
+      const conditions = [typeof h.patologicos === 'string' && !/^nieg/i.test(h.patologicos) ? h.patologicos : null, dx].filter(Boolean).join('. ') || null;
+      await db.insert(customerRecords).values({
+        customerId: p.customer_id, tenantId: t.id,
+        allergiesEnc: allergy ? encryptSecret(allergy) : null, conditionsEnc: conditions ? encryptSecret(conditions) : null,
+        consentAt: new Date(p.starts[0]!), consentBy: owner.id, updatedBy: owner.id,
+      }).onConflictDoNothing();
       const at = (k: number) => new Date(p.starts[k]!);
       const hist = sign(p.customer_id, p.ids[0]!, histTpl, c.history, at(0));
-      c.evolutions.forEach((e, k) => { if (p.ids[k + 1]) sign(p.customer_id, p.ids[k + 1]!, evoTpl, e, at(k + 1)); });
+      // The first patient's latest visit is still a draft (below); every other visit is signed.
+      const signedUntil = i === 0 && p.ids.length > 1 ? p.ids.length - 1 : p.ids.length;
+      for (let k = 1; k < signedUntil; k++) sign(p.customer_id, p.ids[k]!, evoTpl, c.evolutions[k - 1] ?? followUp(type, c, k), at(k));
+      if (i > 0 && type === 'medical' && p.ids[1] && Array.isArray(h.medicamentos)) {
+        // Their treatment as a prescription they can see in the portal
+        sign(p.customer_id, p.ids[1], 'prescription', { medicamentos: h.medicamentos, indicaciones: String(h.indicaciones ?? ''), diagnostico: dx ?? '' }, at(1), { sharedAt: at(1) });
+      }
       if (i === 0) {
         // A correction to the history: signed and attached, the original never changes
         const content = { texto: ADDENDA[type], sobre: `${hist.title} del ${hist.signedAt!.toISOString().slice(0, 10)}` };
@@ -1590,7 +1865,7 @@ async function seedClinical() {
         contentEnc: encryptSecret(JSON.stringify({})), status: 'draft', authorId: owner.id, author, createdAt: new Date(first.starts[last]!),
       });
     }
-    if (notes.length) await db.insert(clinicalNotes).values(notes);
+    if (notes.length) await insertChunked(clinicalNotes, notes, 300);
     total += notes.length;
   }
   console.log(`Seeded ${total} clinical documents (NOM-004 / NOM-013)`);

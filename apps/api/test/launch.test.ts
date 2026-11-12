@@ -142,64 +142,108 @@ d('launch hardening', () => {
     }
   });
 
-  it('card billing with Mercado Pago: checkout, webhook, plan changes, failed charge, read-only, cancel', async () => {
+  it('card billing with Stripe: checkout, webhook, plan change, extra location, failed charge, read-only, cancel', async () => {
     const billing = await import('../src/lib/billing.js');
-    const subs = new Map<string, { id: string; status: string; external_reference: string; auto_recurring: { transaction_amount: number } }>();
-    const charges = new Map<string, unknown>();
+    type Item = { id: string; quantity: number; price: { id: string; unit_amount: number; lookup_key: string } };
+    const prices = new Map<string, { id: string; unit_amount: number; lookup_key: string }>();
+    const subs = new Map<string, { id: string; status: string; customer: string; metadata: Record<string, string>; items: { data: Item[] } }>();
+    const sessions = new Map<string, { id: string; url: string; params: URLSearchParams }>();
     let n = 0;
     billing.setBillingFetch((async (input: string | URL | Request, init?: RequestInit) => {
       const u = new URL(String(input));
-      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      const p = new URLSearchParams(String(init?.body ?? ''));
       const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } });
-      if (u.pathname === '/preapproval' && init?.method === 'POST') {
-        const id = `pre${++n}`;
-        subs.set(id, { id, status: 'pending', external_reference: body.external_reference, auto_recurring: { transaction_amount: body.auto_recurring.transaction_amount } });
-        return json({ ...subs.get(id), init_point: `https://mp.test/checkout/${id}` }, 201);
+      const path = u.pathname.replace('/v1', '');
+      if (path === '/prices' && (init?.method ?? 'GET') === 'GET') {
+        const key = u.searchParams.get('lookup_keys[]')!;
+        const found = [...prices.values()].filter((x) => x.lookup_key === key);
+        return json({ data: found });
       }
-      const m = /^\/preapproval\/(.+)$/.exec(u.pathname);
+      if (path === '/prices') {
+        const pr = { id: `price_${++n}`, unit_amount: Number(p.get('unit_amount')), lookup_key: p.get('lookup_key')! };
+        prices.set(pr.id, pr);
+        return json(pr);
+      }
+      if (path === '/checkout/sessions') {
+        const id = `cs_test_${++n}`;
+        sessions.set(id, { id, url: `https://checkout.stripe.test/${id}`, params: p });
+        return json({ id, url: `https://checkout.stripe.test/${id}` });
+      }
+      const m = /^\/subscriptions\/(.+)$/.exec(path);
       if (m) {
         const s = subs.get(m[1]!);
-        if (!s) return json({ message: 'not found' }, 404);
-        if (init?.method === 'PUT') {
-          if (body.status) s.status = body.status;
-          if (body.auto_recurring) s.auto_recurring.transaction_amount = body.auto_recurring.transaction_amount;
+        if (!s) return json({ error: { message: 'no such subscription' } }, 404);
+        if (init?.method === 'DELETE') s.status = 'canceled';
+        if (init?.method === 'POST') {
+          for (const i of [0, 1]) {
+            const priceId = p.get(`items[${i}][price]`);
+            const itemId = p.get(`items[${i}][id]`);
+            if (p.get(`items[${i}][deleted]`)) s.items.data = s.items.data.filter((x) => x.id !== itemId);
+            else if (priceId) {
+              const it = { id: itemId ?? `si_${++n}`, quantity: Number(p.get(`items[${i}][quantity]`) ?? 1), price: prices.get(priceId)! };
+              s.items.data = [...s.items.data.filter((x) => x.id !== it.id), it];
+            }
+          }
+          if (p.get('metadata[plan]')) s.metadata.plan = p.get('metadata[plan]')!;
         }
         return json(s);
       }
-      const c = /^\/authorized_payments\/(.+)$/.exec(u.pathname);
-      if (c) return json(charges.get(c[1]!) ?? {});
-      return json({ message: 'unexpected' }, 404);
+      if (path === '/billing_portal/sessions') return json({ url: `https://billing.stripe.test/${p.get('customer')}` });
+      return json({ error: { message: `unexpected ${path}` } }, 404);
     }) as typeof fetch);
-    process.env.MERCADOPAGO_BILLING_ACCESS_TOKEN = 'TEST-billing';
+    /** What Stripe does when the checkout is paid: creates the subscription from the session. */
+    const pay = (sessionId: string) => {
+      const s = sessions.get(sessionId)!;
+      const id = `sub_${++n}`;
+      const items: Item[] = [0, 1]
+        .filter((i) => s.params.get(`line_items[${i}][price]`))
+        .map((i) => ({ id: `si_${++n}`, quantity: Number(s.params.get(`line_items[${i}][quantity]`)), price: prices.get(s.params.get(`line_items[${i}][price]`)!)! }));
+      subs.set(id, { id, status: 'active', customer: 'cus_1', metadata: { tenantId: s.params.get('metadata[tenantId]')!, plan: s.params.get('metadata[plan]')! }, items: { data: items } });
+      return id;
+    };
+    const hook = (type: string, object: Record<string, unknown>) => raw('POST', '/webhooks/billing', { body: { type, data: { object } } });
+    process.env.STRIPE_SECRET_KEY = 'sk_test_x';
     try {
       // Paid sign-up opens on Gratis until the card is in
       const o = (await call('POST', '/auth/register', reg('pay', 'standard'))).body as AuthResponse;
       expect(o.tenant.plan).toBe('free');
-      const hook = (type: string, id: string) => call('POST', '/webhooks/billing', { type, data: { id } });
 
       const go = await call('PUT', '/tenant/plan', { plan: 'standard' }, o.token);
       expect(go.status).toBe(200);
-      expect(go.body.checkoutUrl).toBe('https://mp.test/checkout/pre1');
+      expect(go.body.checkoutUrl).toMatch(/^https:\/\/checkout\.stripe\.test\/cs_test_/);
       expect(go.body.plan.plan).toBe('free');
       expect(go.body.plan.billing).toMatchObject({ status: 'pending', pendingPlan: 'standard' });
-      expect(subs.get('pre1')!.auto_recurring.transaction_amount).toBe(withIva(39_900) / 100);
+      const cs = go.body.checkoutUrl.split('/').pop();
+      expect(sessions.get(cs)!.params.get('mode')).toBe('subscription');
+      expect([...prices.values()][0]!.unit_amount).toBe(withIva(39_900));
 
-      // Card authorized at Mercado Pago -> plan on
-      subs.get('pre1')!.status = 'authorized';
-      expect((await hook('subscription_preapproval', 'pre1')).status).toBe(200);
+      // Paid in Stripe -> plan on
+      const sub = pay(cs);
+      expect((await hook('checkout.session.completed', { id: cs, subscription: sub })).status).toBe(200);
       let info = (await call('GET', '/tenant/plan', undefined, o.token)).body;
       expect(info.plan).toBe('standard');
       expect(info.billing).toMatchObject({ status: 'active', pendingPlan: null, amountCents: withIva(39_900) });
 
-      // Upgrade with a live subscription: new amount, no new checkout
+      // Upgrade: same subscription, new price, no new checkout
       const up = await call('PUT', '/tenant/plan', { plan: 'premium' }, o.token);
       expect(up.body.checkoutUrl).toBeNull();
       expect(up.body.plan.plan).toBe('premium');
-      expect(subs.get('pre1')!.auto_recurring.transaction_amount).toBe(withIva(79_900) / 100);
+      expect(subs.get(sub)!.items.data[0]!.price.unit_amount).toBe(withIva(79_900));
 
-      // A rejected monthly charge: grace period, then read-only
-      charges.set('ch1', { preapproval_id: 'pre1', status: 'recycling', payment: { status: 'rejected' } });
-      await hook('subscription_authorized_payment', 'ch1');
+      // Premium includes 2 locations; a third one is added to the subscription
+      await call('POST', '/locations', { name: 'Sucursal Dos' }, o.token);
+      expect(subs.get(sub)!.items.data).toHaveLength(1);
+      const third = await call('POST', '/locations', { name: 'Sucursal Tres' }, o.token);
+      expect(third.status).toBe(201);
+      const loc = subs.get(sub)!.items.data.find((i) => i.price.lookup_key.startsWith('lugali_extra_location_'));
+      expect(loc?.quantity).toBe(1);
+
+      // Portal to change the card
+      expect((await call('POST', '/tenant/billing/portal', undefined, o.token)).body.url).toBe('https://billing.stripe.test/cus_1');
+
+      // A failed charge: grace period, then read-only
+      subs.get(sub)!.status = 'past_due';
+      await hook('invoice.payment_failed', { id: 'in_1', subscription: sub });
       info = (await call('GET', '/tenant/plan', undefined, o.token)).body;
       expect(info.billing).toMatchObject({ status: 'past_due', readOnly: false });
       expect((await call('POST', '/customers', { name: 'En gracia' }, o.token)).status).toBe(201);
@@ -210,34 +254,54 @@ d('launch hardening', () => {
       expect(blocked.status).toBe(402);
       expect(blocked.body.error).toBe('billing_read_only');
       expect((await call('GET', '/customers', undefined, o.token)).status).toBe(200);
-      expect((await call('GET', '/auth/me', undefined, o.token)).body.tenant.billing.readOnly).toBe(true);
-      // Mercado Pago retries and the charge goes through
-      charges.set('ch2', { preapproval_id: 'pre1', status: 'processed', payment: { status: 'approved' } });
-      await hook('subscription_authorized_payment', 'ch2');
+      // Card updated, Stripe retries and it's paid
+      subs.get(sub)!.status = 'active';
+      await hook('invoice.paid', { id: 'in_2', parent: { subscription_details: { subscription: sub } } });
       expect((await call('POST', '/customers', { name: 'Ya pagó' }, o.token)).status).toBe(201);
 
       // An extra business opened with billing on is read-only until paid
-      const extra = await call('POST', '/businesses', { businessName: 'Sucursal Dos', businessType: 'barbershop' }, o.token);
+      const extra = await call('POST', '/businesses', { businessName: 'Negocio Dos', businessType: 'barbershop' }, o.token);
       expect(extra.status).toBe(201);
       expect((await call('POST', '/customers', { name: 'X' }, extra.body.token)).status).toBe(402);
       const pay2 = await call('PUT', '/tenant/plan', { plan: 'standard' }, extra.body.token);
-      expect(pay2.body.checkoutUrl).toBe('https://mp.test/checkout/pre2');
-      subs.get('pre2')!.status = 'authorized';
-      await hook('subscription_preapproval', 'pre2');
+      const cs2 = pay2.body.checkoutUrl.split('/').pop();
+      expect(prices.get(sessions.get(cs2)!.params.get('line_items[0][price]')!)!.lookup_key).toMatch(/^lugali_extra_business_/);
+      const sub2 = pay(cs2);
+      await hook('customer.subscription.created', { id: sub2 });
       expect((await call('POST', '/customers', { name: 'Y' }, extra.body.token)).status).toBe(201);
 
-      // Cancelled at Mercado Pago -> back to Gratis
-      subs.get('pre1')!.status = 'cancelled';
-      await hook('subscription_preapproval', 'pre1');
+      // Bad signature is rejected once the secret is set
+      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
+      expect((await hook('customer.subscription.updated', { id: sub })).status).toBe(400);
+      delete process.env.STRIPE_WEBHOOK_SECRET;
+
+      // Cancelled in Stripe -> back to Gratis
+      subs.get(sub)!.status = 'canceled';
+      await hook('customer.subscription.deleted', { id: sub });
       info = (await call('GET', '/tenant/plan', undefined, o.token)).body;
       expect(info.plan).toBe('free');
       expect(info.billing.status).toBe('cancelled');
 
-      // Daily check runs without errors
       expect(await billing.reconcileBilling(getDb())).toBeGreaterThanOrEqual(1);
     } finally {
-      delete process.env.MERCADOPAGO_BILLING_ACCESS_TOKEN;
+      delete process.env.STRIPE_SECRET_KEY;
       billing.setBillingFetch(null);
+    }
+  });
+
+  it('verifies Stripe webhook signatures', async () => {
+    const { verifyStripeSignature } = await import('../src/lib/billing.js');
+    const crypto = await import('node:crypto');
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_abc';
+    try {
+      const body = '{"type":"x"}';
+      const t = Math.floor(Date.now() / 1000);
+      const v1 = crypto.createHmac('sha256', 'whsec_abc').update(`${t}.${body}`).digest('hex');
+      expect(verifyStripeSignature(body, `t=${t},v1=${v1}`)).toBe(true);
+      expect(verifyStripeSignature(body + ' ', `t=${t},v1=${v1}`)).toBe(false);
+      expect(verifyStripeSignature(body, `t=${t - 1000},v1=${v1}`)).toBe(false);
+    } finally {
+      delete process.env.STRIPE_WEBHOOK_SECRET;
     }
   });
 

@@ -154,10 +154,8 @@ export function verifyMercadoPagoSignature(params: {
   signature: string | undefined;
   requestId: string | undefined;
   dataId: string;
-  /** Defaults to MERCADOPAGO_WEBHOOK_SECRET */
-  secret?: string;
 }): boolean {
-  const secret = params.secret ?? process.env.MERCADOPAGO_WEBHOOK_SECRET;
+  const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
   if (!secret) return process.env.NODE_ENV !== 'production';
   if (!params.signature) return false;
   const parts = Object.fromEntries(

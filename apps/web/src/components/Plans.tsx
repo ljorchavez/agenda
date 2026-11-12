@@ -178,6 +178,11 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
 function BillingStatus({ info, canChange, busy, pay, returning }: { info: PlanInfoDto; canChange: boolean; busy: boolean; pay: (p: PlanId) => void; returning: boolean }) {
   const { t, i18n } = useTranslation();
   const b = info.billing;
+  // Stripe's own page: change the card, see invoices, cancel.
+  const portal = useMutation({
+    mutationFn: () => api<{ url: string }>('/tenant/billing/portal', { method: 'POST' }),
+    onSuccess: (r) => window.location.assign(r.url),
+  });
   const date = (iso: string, plusDays = 0) =>
     new Date(new Date(iso).getTime() + plusDays * 86_400_000).toLocaleDateString(i18n.language.startsWith('en') ? 'en-US' : 'es-MX', { day: 'numeric', month: 'long' });
   if (b.status === 'pending' && b.pendingPlan) {
@@ -195,17 +200,21 @@ function BillingStatus({ info, canChange, busy, pay, returning }: { info: PlanIn
       <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-900" data-testid="billing-past-due">
         {b.readOnly ? t('billing.readOnly') : t('billing.pastDue', { date: b.pastDueSince ? date(b.pastDueSince, BILLING_GRACE_DAYS) : '' })}
         {canChange && (
-          <button type="button" className="btn-primary mt-2 block" disabled={busy} onClick={() => pay(b.pendingPlan ?? info.plan)}>{t('billing.updateCard')}</button>
+          <button type="button" className="btn-primary mt-2 block" disabled={busy || portal.isPending} onClick={() => (b.pendingPlan ? pay(b.pendingPlan) : portal.mutate())}>{t('billing.updateCard')}</button>
         )}
+        <ErrorText error={portal.error} />
       </div>
     );
   }
   if (b.status === 'active') {
     return (
-      <p className="text-sm text-slate-600" data-testid="billing-active">
+      <div className="text-sm text-slate-600" data-testid="billing-active">
         {t('billing.active', { amount: b.amountCents != null ? money(b.amountCents) : '' })}{' '}
-        <a href="https://www.mercadopago.com.mx/subscriptions" target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">{t('billing.manage')}</a>
-      </p>
+        {canChange && (
+          <button type="button" className="font-medium text-brand-700 hover:underline" disabled={portal.isPending} onClick={() => portal.mutate()} data-testid="billing-portal">{t('billing.manage')}</button>
+        )}
+        <ErrorText error={portal.error} />
+      </div>
     );
   }
   if (b.status === 'cancelled') return <p className="text-sm text-slate-600">{t('billing.cancelled')}</p>;

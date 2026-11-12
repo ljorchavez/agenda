@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { eq, isNotNull, sql } from 'drizzle-orm';
 import { ADDON_PRICES, BILLING_GRACE_DAYS, PLAN_LIMITS, withIva, type BillingStatus, type PlanId } from '@agenda/shared';
 import type { Db } from '../db/client.js';
@@ -5,13 +6,15 @@ import { tenants } from '../db/schema.js';
 import { AppError } from './errors.js';
 
 /**
- * Subscription billing: each business pays its plan every month with a card, to Lugali's own
- * Mercado Pago account (Suscripciones / preapproval). Mercado Pago charges the card monthly and
- * retries failed charges; we learn about it from the webhook (/api/webhooks/billing) and a daily
- * check. See docs/billing.md.
+ * Subscription billing: each business pays Lugali its plan every month with a card through
+ * Stripe (Checkout to subscribe, Customer Portal to change the card or cancel). Plan changes and
+ * extra locations update the subscription with proration. Stripe tells us what happened through
+ * the webhook (/api/webhooks/billing); a daily check re-reads every subscription. See docs/billing.md.
  *
- * Env: MERCADOPAGO_BILLING_ACCESS_TOKEN (Lugali's account, not the businesses' tokens) and
- * MERCADOPAGO_BILLING_WEBHOOK_SECRET. Without the token, plan changes apply without a charge.
+ * Businesses charge THEIR customers with Mercado Pago (integrations/mercadopago.ts); this is only
+ * what Lugali charges the businesses.
+ *
+ * Env: STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET. Without the key, plan changes apply without a charge.
  */
 
 export type SubscriptionStatus = 'pending' | 'authorized' | 'paused' | 'cancelled';
@@ -24,21 +27,29 @@ export interface Subscription {
   amountCents: number | null;
 }
 
-export interface BillingProvider {
-  name: 'mercadopago';
-  /** Creates the monthly subscription; the owner enters the card on `checkoutUrl`. */
-  createSubscription(o: { tenantId: string; plan: PlanId; amountCents: number; email: string; reason: string; returnUrl: string }): Promise<{ id: string; checkoutUrl: string }>;
-  getSubscription(id: string): Promise<Subscription>;
-  /** New monthly amount (plan change, extra locations); applies from the next charge. */
-  updateAmount(id: string, amountCents: number): Promise<void>;
-  cancel(id: string): Promise<void>;
-  /** One monthly charge of a subscription. */
-  getCharge(id: string): Promise<{ subscriptionId: string | null; approved: boolean; rejected: boolean }>;
-  /** Where the payer changes the card or sees the charges. */
-  manageUrl: string;
+/** What a business pays each month: its plan (or the extra-business price) plus extra locations. */
+export interface BillingLines {
+  plan: PlanId;
+  /** Lookup key and price (IVA included) of the main line */
+  base: { key: string; name: string; amountCents: number };
+  extraLocations: number;
+  extraLocationCents: number;
+  totalCents: number;
 }
 
-// ---------- Mercado Pago ----------
+export interface BillingProvider {
+  name: 'stripe';
+  /** Checkout page where the owner enters the card; the subscription exists once it's paid. */
+  createSubscription(o: { tenantId: string; lines: BillingLines; email: string; returnUrl: string; cancelUrl: string }): Promise<{ id: string; checkoutUrl: string }>;
+  getSubscription(id: string): Promise<Subscription>;
+  /** New plan / number of extra locations; charged right away, prorated. */
+  update(id: string, lines: BillingLines): Promise<void>;
+  cancel(id: string): Promise<void>;
+  /** Stripe's page to change the card, see invoices or cancel. */
+  portalUrl(subscriptionId: string, returnUrl: string): Promise<string>;
+}
+
+// ---------- Stripe ----------
 
 type Fetch = typeof fetch;
 let fetchImpl: Fetch = (...a) => fetch(...a);
@@ -47,80 +58,166 @@ export const setBillingFetch = (f: Fetch | null) => {
   fetchImpl = f ?? ((...a) => fetch(...a));
 };
 
-const MP = 'https://api.mercadopago.com';
-const billingToken = () => process.env.MERCADOPAGO_BILLING_ACCESS_TOKEN?.trim() || null;
+const STRIPE = 'https://api.stripe.com/v1';
+const stripeKey = () => process.env.STRIPE_SECRET_KEY?.trim() || null;
 
-async function mp<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await fetchImpl(`${MP}${path}`, {
-    method: init.method ?? 'GET',
-    headers: { Authorization: `Bearer ${billingToken()}`, 'Content-Type': 'application/json' },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+type Params = Record<string, string | number | boolean | undefined | null>;
+
+/** Stripe takes form-encoded bodies with bracket keys (items[0][price]=...). */
+function form(params: Params): string {
+  const out = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) out.append(k, String(v));
+  return out.toString();
+}
+
+async function stripe<T>(path: string, init: { method?: string; params?: Params } = {}): Promise<T> {
+  const method = init.method ?? 'GET';
+  const body = init.params && method !== 'GET' ? form(init.params) : undefined;
+  const qs = init.params && method === 'GET' ? `?${form(init.params)}` : '';
+  const res = await fetchImpl(`${STRIPE}${path}${qs}`, {
+    method,
+    headers: { Authorization: `Bearer ${stripeKey()}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
   });
-  const json = (await res.json().catch(() => ({}))) as T & { message?: string };
-  if (!res.ok) throw new AppError(502, 'billing_provider_error', json.message ?? `Mercado Pago HTTP ${res.status}`);
+  const json = (await res.json().catch(() => ({}))) as T & { error?: { message?: string } };
+  if (!res.ok) throw new AppError(502, 'billing_provider_error', json.error?.message ?? `Stripe HTTP ${res.status}`);
   return json;
 }
 
-const pesos = (cents: number) => Math.round(cents) / 100;
+/** Monthly price for a line, created in Stripe the first time it's needed (versioned by amount). */
+async function priceId(key: string, name: string, amountCents: number): Promise<string> {
+  const lookup = `lugali_${key}_${amountCents}`;
+  const found = await stripe<{ data: { id: string }[] }>('/prices', { params: { 'lookup_keys[]': lookup, active: true, limit: 1 } });
+  if (found.data[0]) return found.data[0].id;
+  const created = await stripe<{ id: string }>('/prices', {
+    method: 'POST',
+    params: {
+      currency: 'mxn',
+      unit_amount: amountCents,
+      'recurring[interval]': 'month',
+      'product_data[name]': name,
+      lookup_key: lookup,
+      transfer_lookup_key: true,
+    },
+  });
+  return created.id;
+}
 
-interface MpPreapproval {
+interface StripeSub {
   id: string;
   status: string;
-  init_point?: string;
-  external_reference?: string | null;
-  auto_recurring?: { transaction_amount?: number };
+  customer: string;
+  metadata?: Record<string, string>;
+  items: { data: { id: string; quantity?: number; price: { id: string; unit_amount: number | null; lookup_key?: string | null } }[] };
 }
 
-function toSubscription(p: MpPreapproval): Subscription {
-  const status: SubscriptionStatus = p.status === 'authorized' ? 'authorized' : p.status === 'paused' ? 'paused' : p.status === 'cancelled' ? 'cancelled' : 'pending';
-  const amount = p.auto_recurring?.transaction_amount;
-  return { id: p.id, status, externalReference: p.external_reference ?? null, amountCents: amount == null ? null : Math.round(amount * 100) };
+function toSubscription(s: StripeSub): Subscription {
+  const status: SubscriptionStatus =
+    s.status === 'active' || s.status === 'trialing'
+      ? 'authorized'
+      : s.status === 'past_due' || s.status === 'unpaid' || s.status === 'paused'
+        ? 'paused'
+        : s.status === 'canceled' || s.status === 'incomplete_expired'
+          ? 'cancelled'
+          : 'pending';
+  const amount = s.items.data.reduce((sum, i) => sum + (i.price.unit_amount ?? 0) * (i.quantity ?? 1), 0);
+  const tenantId = s.metadata?.tenantId;
+  return { id: s.id, status, externalReference: tenantId ? `${tenantId}|${s.metadata?.plan ?? ''}` : null, amountCents: amount };
 }
 
-const mercadoPagoBilling: BillingProvider = {
-  name: 'mercadopago',
+const isLocationItem = (i: StripeSub['items']['data'][number]) => (i.price.lookup_key ?? '').startsWith('lugali_extra_location_');
+const locationPrice = (lines: BillingLines) => priceId('extra_location', 'Lugali · Sucursal adicional', lines.extraLocationCents);
+
+const stripeBilling: BillingProvider = {
+  name: 'stripe',
   async createSubscription(o) {
-    const p = await mp<MpPreapproval>('/preapproval', {
-      method: 'POST',
-      body: {
-        reason: o.reason,
-        external_reference: `${o.tenantId}|${o.plan}`,
-        payer_email: o.email,
-        back_url: o.returnUrl,
-        status: 'pending',
-        auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: pesos(o.amountCents), currency_id: 'MXN' },
-      },
-    });
-    if (!p.init_point) throw new AppError(502, 'billing_provider_error', 'Mercado Pago did not return a checkout link');
-    return { id: p.id, checkoutUrl: p.init_point };
+    const params: Params = {
+      mode: 'subscription',
+      success_url: o.returnUrl,
+      cancel_url: o.cancelUrl,
+      customer_email: o.email,
+      client_reference_id: o.tenantId,
+      locale: 'es-419',
+      allow_promotion_codes: true,
+      'metadata[tenantId]': o.tenantId,
+      'metadata[plan]': o.lines.plan,
+      'subscription_data[metadata][tenantId]': o.tenantId,
+      'subscription_data[metadata][plan]': o.lines.plan,
+      'line_items[0][price]': await priceId(o.lines.base.key, o.lines.base.name, o.lines.base.amountCents),
+      'line_items[0][quantity]': 1,
+    };
+    if (o.lines.extraLocations > 0) {
+      params['line_items[1][price]'] = await locationPrice(o.lines);
+      params['line_items[1][quantity]'] = o.lines.extraLocations;
+    }
+    const s = await stripe<{ id: string; url?: string }>('/checkout/sessions', { method: 'POST', params });
+    if (!s.url) throw new AppError(502, 'billing_provider_error', 'Stripe did not return a checkout link');
+    return { id: s.id, checkoutUrl: s.url };
   },
   async getSubscription(id) {
-    return toSubscription(await mp<MpPreapproval>(`/preapproval/${encodeURIComponent(id)}`));
+    return toSubscription(await stripe<StripeSub>(`/subscriptions/${encodeURIComponent(id)}`));
   },
-  async updateAmount(id, amountCents) {
-    await mp(`/preapproval/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: { auto_recurring: { transaction_amount: pesos(amountCents), currency_id: 'MXN' } },
-    });
+  async update(id, lines) {
+    const s = await stripe<StripeSub>(`/subscriptions/${encodeURIComponent(id)}`);
+    const main = s.items.data.find((i) => !isLocationItem(i));
+    const loc = s.items.data.find(isLocationItem);
+    const params: Params = {
+      proration_behavior: 'always_invoice',
+      'metadata[plan]': lines.plan,
+      'items[0][id]': main?.id,
+      'items[0][price]': await priceId(lines.base.key, lines.base.name, lines.base.amountCents),
+      'items[0][quantity]': 1,
+    };
+    if (lines.extraLocations > 0) {
+      params['items[1][id]'] = loc?.id;
+      params['items[1][price]'] = await locationPrice(lines);
+      params['items[1][quantity]'] = lines.extraLocations;
+    } else if (loc) {
+      params['items[1][id]'] = loc.id;
+      params['items[1][deleted]'] = true;
+    }
+    await stripe(`/subscriptions/${encodeURIComponent(id)}`, { method: 'POST', params });
   },
   async cancel(id) {
-    await mp(`/preapproval/${encodeURIComponent(id)}`, { method: 'PUT', body: { status: 'cancelled' } });
+    // A checkout that was never paid just expires; a real subscription is cancelled now.
+    if (id.startsWith('cs_')) await stripe(`/checkout/sessions/${encodeURIComponent(id)}/expire`, { method: 'POST', params: {} });
+    else await stripe(`/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
-  async getCharge(id) {
-    const r = await mp<{ preapproval_id?: string; status?: string; payment?: { status?: string } }>(`/authorized_payments/${encodeURIComponent(id)}`);
-    const pay = r.payment?.status;
-    return {
-      subscriptionId: r.preapproval_id ?? null,
-      approved: pay === 'approved' || r.status === 'processed',
-      rejected: pay === 'rejected' || r.status === 'recycling',
-    };
+  async portalUrl(subscriptionId, returnUrl) {
+    const s = await stripe<StripeSub>(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+    const p = await stripe<{ url: string }>('/billing_portal/sessions', { method: 'POST', params: { customer: s.customer, return_url: returnUrl, locale: 'es-419' } });
+    return p.url;
   },
-  manageUrl: 'https://www.mercadopago.com.mx/subscriptions',
 };
 
 /** The configured provider, or null while card billing isn't connected yet. */
 export function billingProvider(): BillingProvider | null {
-  return billingToken() ? mercadoPagoBilling : null;
+  return stripeKey() ? stripeBilling : null;
+}
+
+/**
+ * Stripe-Signature check: HMAC-SHA256 of "<t>.<raw body>" with STRIPE_WEBHOOK_SECRET, within 5 min.
+ * Without the secret it only passes outside production.
+ */
+export function verifyStripeSignature(raw: string, header: string | undefined, now = Date.now()): boolean {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+  if (!secret) return process.env.NODE_ENV !== 'production';
+  if (!header) return false;
+  const items = header.split(',').map((p) => p.trim());
+  const t = Number(items.find((p) => p.startsWith('t='))?.slice(2));
+  const sigs = items.filter((p) => p.startsWith('v1=')).map((p) => p.slice(3));
+  if (!t || !sigs.length || Math.abs(now / 1000 - t) > 300) return false;
+  const expected = crypto.createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex');
+  return sigs.some((s) => s.length === expected.length && crypto.timingSafeEqual(Buffer.from(s), Buffer.from(expected)));
+}
+
+/** Subscription id an event is about (subscription, checkout or invoice events). */
+export function subscriptionIdOf(event: { type?: string; data?: { object?: Record<string, unknown> } }): string | null {
+  const o = event.data?.object ?? {};
+  if (typeof event.type === 'string' && event.type.startsWith('customer.subscription.')) return typeof o.id === 'string' ? o.id : null;
+  if (typeof o.subscription === 'string') return o.subscription;
+  const parent = o.parent as { subscription_details?: { subscription?: string } } | undefined;
+  return parent?.subscription_details?.subscription ?? null;
 }
 
 // ---------- State ----------
@@ -139,10 +236,12 @@ export function isReadOnly(t: { billingStatus: BillingStatus; billingPastDueSinc
 /** Demo businesses are never charged. */
 export const isDemoSlug = (slug: string) => slug.endsWith('-demo');
 
-/** Monthly amount with IVA for `plan` given the business's extra locations / extra business. */
-export async function monthlyAmountFor(db: Pick<Db, 'execute'>, tenantId: string, plan: PlanId): Promise<number | null> {
+const PLAN_NAMES: Record<PlanId, string> = { free: 'Gratis', individual: 'Individual', standard: 'Estándar', premium: 'Premium' };
+
+/** The lines a business pays for `plan` (null for Gratis or a plan without a price). */
+export async function billingLinesFor(db: Pick<Db, 'execute'>, tenantId: string, plan: PlanId): Promise<BillingLines | null> {
+  if (plan === 'free') return null;
   const limits = PLAN_LIMITS[plan];
-  if (plan === 'free') return 0;
   const res = await db.execute<{ locations: string; extra_business: boolean }>(sql`
     select (select count(*) from locations where tenant_id = ${tenantId} and active) as locations,
            exists (
@@ -153,14 +252,19 @@ export async function monthlyAmountFor(db: Pick<Db, 'execute'>, tenantId: string
                and t.created_at < (select created_at from tenants where id = ${tenantId})) as extra_business`);
   const r = res.rows[0];
   const extraLocations = limits.extraLocations ? Math.max(0, Number(r?.locations ?? 0) - limits.includedLocations) : 0;
-  const base = r?.extra_business ? ADDON_PRICES.extraBusinessCents : limits.priceCents;
-  if (base == null) return null;
-  return withIva(base + extraLocations * ADDON_PRICES.extraLocationCents);
+  const extraBusiness = Boolean(r?.extra_business);
+  const baseCents = extraBusiness ? ADDON_PRICES.extraBusinessCents : limits.priceCents;
+  if (baseCents == null) return null;
+  const base = extraBusiness
+    ? { key: 'extra_business', name: 'Lugali · Negocio adicional', amountCents: withIva(baseCents) }
+    : { key: plan, name: `Lugali · Plan ${PLAN_NAMES[plan]}`, amountCents: withIva(baseCents) };
+  const extraLocationCents = withIva(ADDON_PRICES.extraLocationCents);
+  return { plan, base, extraLocations, extraLocationCents, totalCents: base.amountCents + extraLocations * extraLocationCents };
 }
 
 /**
- * Keeps the card charge in line with the plan and add-ons (call after a location is added or
- * removed). Never fails the caller: the daily check retries.
+ * Keeps the subscription in line with the plan and extra locations (call after a location is
+ * added or removed): Stripe charges the difference right away. Never fails the caller.
  */
 export async function syncBillingAmount(db: Db, tenantId: string): Promise<void> {
   const provider = billingProvider();
@@ -168,16 +272,16 @@ export async function syncBillingAmount(db: Db, tenantId: string): Promise<void>
   try {
     const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
     if (!t?.billingSubscriptionId || (t.billingStatus !== 'active' && t.billingStatus !== 'past_due')) return;
-    const amount = await monthlyAmountFor(db, tenantId, t.plan);
-    if (amount == null || amount === t.billingAmountCents) return;
-    await provider.updateAmount(t.billingSubscriptionId, amount);
-    await db.update(tenants).set({ billingAmountCents: amount }).where(eq(tenants.id, tenantId));
+    const lines = await billingLinesFor(db, tenantId, t.plan);
+    if (!lines || lines.totalCents === t.billingAmountCents) return;
+    await provider.update(t.billingSubscriptionId, lines);
+    await db.update(tenants).set({ billingAmountCents: lines.totalCents }).where(eq(tenants.id, tenantId));
   } catch (e) {
     console.warn('[billing] amount sync failed:', e);
   }
 }
 
-/** Applies what the provider says about a subscription (webhook and daily check). */
+/** Applies what Stripe says about a subscription (webhook and daily check). */
 export async function syncSubscription(db: Db, subscriptionId: string): Promise<void> {
   const provider = billingProvider();
   if (!provider) return;
@@ -189,23 +293,14 @@ export async function syncSubscription(db: Db, subscriptionId: string): Promise<
   const current = t.billingSubscriptionId === sub.id;
 
   if (sub.status === 'authorized') {
-    // A newer subscription replaces an older one (plan change from scratch, card re-entered).
-    if (t.billingSubscriptionId && !current && (t.billingStatus === 'active' || t.billingStatus === 'past_due')) {
+    // A newer subscription replaces an older one (paid again after cancelling, card re-entered).
+    if (t.billingSubscriptionId && !current && !t.billingSubscriptionId.startsWith('cs_') && (t.billingStatus === 'active' || t.billingStatus === 'past_due')) {
       await provider.cancel(t.billingSubscriptionId).catch((e) => console.warn('[billing] cancel old failed:', e));
     }
-    const plan = t.billingPendingPlan ?? (refPlan && refPlan in PLAN_LIMITS ? refPlan : t.plan);
-    // A new authorization (first card, plan bought, card re-entered) settles any unpaid state;
-    // otherwise failed charges are handled by syncCharge.
-    const newAuth = !current || t.billingPendingPlan != null || t.billingStatus === 'pending' || t.billingStatus === 'cancelled';
+    const plan = (refPlan && refPlan in PLAN_LIMITS ? refPlan : null) ?? t.billingPendingPlan ?? t.plan;
     await db
       .update(tenants)
-      .set({
-        plan,
-        billingSubscriptionId: sub.id,
-        billingPendingPlan: null,
-        billingAmountCents: sub.amountCents,
-        ...(newAuth ? { billingStatus: 'active' as const, billingPastDueSince: null } : {}),
-      })
+      .set({ plan, billingStatus: 'active', billingSubscriptionId: sub.id, billingPendingPlan: null, billingAmountCents: sub.amountCents, billingPastDueSince: null })
       .where(eq(tenants.id, t.id));
     return;
   }
@@ -216,37 +311,23 @@ export async function syncSubscription(db: Db, subscriptionId: string): Promise<
       .set({ billingStatus: 'past_due', billingPastDueSince: t.billingPastDueSince ?? new Date() })
       .where(eq(tenants.id, t.id));
   } else if (sub.status === 'cancelled') {
-    // Cancelled at Mercado Pago (by the owner or after failed retries): back to the free plan.
+    // Cancelled (by the owner in Stripe or after failed retries): back to the free plan.
     await db
       .update(tenants)
-      .set({ plan: t.billingStatus === 'pending' ? t.plan : 'free', billingStatus: 'cancelled', billingSubscriptionId: null, billingPendingPlan: null, billingAmountCents: null, billingPastDueSince: null })
+      .set({ plan: 'free', billingStatus: 'cancelled', billingSubscriptionId: null, billingPendingPlan: null, billingAmountCents: null, billingPastDueSince: null })
       .where(eq(tenants.id, t.id));
   }
 }
 
-/** One monthly charge: approved clears a failure, rejected starts the grace period. */
-export async function syncCharge(db: Db, chargeId: string): Promise<void> {
-  const provider = billingProvider();
-  if (!provider) return;
-  const ch = await provider.getCharge(chargeId);
-  if (!ch.subscriptionId) return;
-  const t = await db.query.tenants.findFirst({ where: eq(tenants.billingSubscriptionId, ch.subscriptionId) });
-  if (!t) return;
-  if (ch.approved) {
-    await db.update(tenants).set({ billingStatus: 'active', billingPastDueSince: null }).where(eq(tenants.id, t.id));
-  } else if (ch.rejected && t.billingStatus !== 'past_due') {
-    await db.update(tenants).set({ billingStatus: 'past_due', billingPastDueSince: new Date() }).where(eq(tenants.id, t.id));
-  }
-}
-
-/** Daily: re-reads every open subscription in case a webhook was missed. */
+/** Daily: re-reads every subscription in case a webhook was missed. */
 export async function reconcileBilling(db: Db): Promise<number> {
   if (!billingProvider()) return 0;
   const rows = await db.select({ id: tenants.billingSubscriptionId }).from(tenants).where(isNotNull(tenants.billingSubscriptionId));
   let n = 0;
   for (const r of rows) {
+    if (!r.id || r.id.startsWith('cs_')) continue;
     try {
-      await syncSubscription(db, r.id!);
+      await syncSubscription(db, r.id);
       n++;
     } catch (e) {
       console.warn('[billing] reconcile failed:', e);

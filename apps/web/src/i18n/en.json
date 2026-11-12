@@ -805,8 +805,9 @@
     "captcha_required": "One moment: we're checking you're not a robot. Try again in a few seconds.",
     "captcha_failed": "We couldn't verify you're not a robot. Try again.",
     "billing_read_only": "Your business is read-only because the subscription payment failed. Update your card in Settings → Plan.",
-    "billing_provider_error": "Mercado Pago didn't answer. Try again in a moment.",
-    "delete_not_confirmed": "The password or business name don't match."
+    "billing_provider_error": "The payment system didn't answer. Try again in a moment.",
+    "delete_not_confirmed": "The password or business name don't match.",
+    "no_subscription": "There is no active subscription."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -994,7 +995,7 @@
     "oneAgenda": "1 professional or space (a single agenda)",
     "prioritySupport": "Priority support on WhatsApp",
     "agendasUsed": "Active agendas (people or spaces): {{used}} of {{max}}",
-    "billingNext": "After creating your account we'll take you to Mercado Pago to add your card. Billed monthly; cancel anytime."
+    "billingNext": "After creating your account we'll take you to pay by card (Stripe). Billed monthly; change plan or cancel anytime."
   },
   "categories": {
     "health": "Health",
@@ -1806,14 +1807,14 @@
   },
   "billing": {
     "pending": "Your payment is missing to start the {{plan}} plan.",
-    "confirming": "Confirming your payment with Mercado Pago…",
-    "payNow": "Pay with Mercado Pago",
+    "confirming": "Confirming your payment…",
+    "payNow": "Pay by card",
     "pastDue": "Your card couldn't be charged. Update it before {{date}} to avoid read-only mode.",
     "pastDueShort": "Your subscription couldn't be charged.",
     "readOnly": "Your business is read-only because the subscription couldn't be charged. You can see everything but not make changes.",
     "updateCard": "Update card",
-    "active": "{{amount}} (IVA included) is charged every month through Mercado Pago.",
-    "manage": "See charges or change card",
+    "active": "{{amount}} (IVA included) is charged to your card every month.",
+    "manage": "Change card, see invoices or cancel",
     "cancelled": "Your subscription was cancelled; the business moved to the Free plan."
   },
   "data": {
