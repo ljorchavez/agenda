@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ADDON_PRICES, BILLING_GRACE_DAYS, PLAN_LIMITS, PLANS, SELECTABLE_PLANS, type PlanId, type PlanInfoDto } from '@agenda/shared';
+import { ADDON_PRICES, BILLING_GRACE_DAYS, PLAN_LIMITS, PLANS, SELECTABLE_PLANS, withIva, type PlanId, type PlanInfoDto } from '@agenda/shared';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { money } from '../lib/format';
@@ -87,6 +87,7 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
   const qc = useQueryClient();
   const { setTenant, tenant } = useAuth();
   const [changing, setChanging] = useState(false);
+  const [confirming, setConfirming] = useState<PlanId | null>(null);
   // Back from Stripe Checkout: confirm right away (the webhook may take a few seconds).
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const returning = params?.get('billing') === 'return';
@@ -119,6 +120,7 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
       qc.setQueryData(['plan'], r.plan);
       if (tenant) setTenant({ ...tenant, plan: r.plan.plan });
       setChanging(false);
+      setConfirming(null);
     },
   });
   const p = info.data;
@@ -183,7 +185,20 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
           {p.billingConnected && <BillingStatus info={p} canChange={canChange} busy={change.isPending} pay={(x) => change.mutate(x)} returning={returning} />}
           {changing && (
             <div className="pt-2">
-              <PlanCards current={p.plan} busy={change.isPending} onPick={(x) => change.mutate(x)} />
+              {confirming ? (
+                <ConfirmPlanChange info={p} plan={confirming} busy={change.isPending} onCancel={() => setConfirming(null)} onConfirm={() => change.mutate(confirming)} />
+              ) : (
+                <PlanCards
+                  current={p.plan}
+                  busy={change.isPending}
+                  onPick={(x) => {
+                    // Changes that charge the saved card or cancel it need an explicit yes; a new checkout is confirmed on Stripe's page.
+                    const live = p.billingConnected && (p.billing.status === 'active' || p.billing.status === 'past_due');
+                    if (live || (x === 'free' && p.plan !== 'free')) setConfirming(x);
+                    else change.mutate(x);
+                  }}
+                />
+              )}
               <PlanExtras />
             </div>
           )}
@@ -191,6 +206,40 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
         </>
       )}
     </section>
+  );
+}
+
+/** What changes on the card before switching plan or going back to Gratis. */
+function ConfirmPlanChange({ info, plan, busy, onCancel, onConfirm }: { info: PlanInfoDto; plan: PlanId; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const { t } = useTranslation();
+  const l = PLAN_LIMITS[plan];
+  const extra = l.extraLocations ? Math.max(0, info.usage.activeLocations - l.includedLocations) : 0;
+  const base = info.extraBusiness ? ADDON_PRICES.extraBusinessCents : l.priceCents;
+  const monthly = base == null ? null : withIva(base) + extra * withIva(ADDON_PRICES.extraLocationCents);
+  const live = info.billingConnected && (info.billing.status === 'active' || info.billing.status === 'past_due');
+  const toFree = plan === 'free';
+  return (
+    <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm" role="alertdialog" aria-labelledby="confirm-plan-title" data-testid="confirm-plan">
+      <h3 id="confirm-plan-title" className="font-semibold">
+        {toFree ? t('billing.confirmFreeTitle') : t('billing.confirmChangeTitle', { from: t(`plans.${info.plan}`), to: t(`plans.${plan}`) })}
+      </h3>
+      {toFree ? (
+        <p>{live ? t('billing.confirmFreeLive') : t('billing.confirmFree')}</p>
+      ) : (
+        <>
+          {monthly != null && <p>{t('billing.confirmMonthly', { amount: money(monthly) })}</p>}
+          {live && <p>{t('billing.confirmProrate')}</p>}
+        </>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={toFree ? 'btn-danger' : 'btn-primary'} disabled={busy} onClick={onConfirm} data-testid="confirm-plan-yes">
+          {toFree ? t('billing.confirmFreeYes') : t('billing.confirmChangeYes', { plan: t(`plans.${plan}`) })}
+        </button>
+        <button type="button" className="btn-secondary" disabled={busy} onClick={onCancel}>
+          {t('common.cancel')}
+        </button>
+      </div>
+    </div>
   );
 }
 

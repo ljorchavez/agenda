@@ -116,6 +116,35 @@ async function subscribe(label, token, plan, expectedCents) {
   return { sub, cs };
 }
 
+/** Changes plan from Settings like the owner would: pick, read the confirmation, confirm. */
+async function changeInUi(label, token, plan, { cancelFirst = false } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 900 }, locale: 'es-MX', recordVideo: { dir: `${OUT}/video`, size: { width: 1100, height: 900 } } });
+  await ctx.addCookies([{ name: 'lugali_session', value: token, url: WEB }]);
+  const page = await ctx.newPage();
+  await page.goto(WEB + '/');
+  await page.evaluate(() => localStorage.setItem('agenda.session', '1'));
+  await page.goto(WEB + '/settings?tab=plan');
+  await page.getByRole('button', { name: 'Cambiar plan' }).click();
+  const pick = () => page.getByTestId(`plan-${plan}`).getByRole('button').click();
+  await pick();
+  const dialog = page.getByTestId('confirm-plan');
+  const shown = await dialog.waitFor({ timeout: 10_000 }).then(() => true).catch(() => false);
+  const text = shown ? (await dialog.innerText()).replace(/\n+/g, ' / ') : '';
+  await page.screenshot({ path: `${OUT}/${String(++shot).padStart(2, '0')}-${label}-confirmar.png` });
+  let cancelledOk = true;
+  if (cancelFirst && shown) {
+    await dialog.getByRole('button', { name: 'Cancelar' }).click();
+    const before = (await api('/tenant/plan', undefined, token)).body.plan;
+    cancelledOk = (await dialog.count()) === 0 && before !== plan;
+    await pick();
+    await dialog.waitFor({ timeout: 10_000 });
+  }
+  if (shown) await page.getByTestId('confirm-plan-yes').click();
+  await page.waitForTimeout(3000);
+  await ctx.close();
+  return { shown, text, cancelledOk };
+}
+
 const invoicesOf = async (subId) => (await stripe(`/invoices?subscription=${subId}&limit=10`)).data ?? [];
 
 try {
@@ -131,8 +160,12 @@ try {
   log('== 2. Cambio de plan ==');
   {
     const { token, sub } = accounts.individual;
-    const up = await api('/tenant/plan', { plan: 'standard' }, token, 'PUT');
-    ok('Individual → Estándar sin volver a pagar en Checkout', up.status === 200 && up.body.checkoutUrl === null && up.body.plan.plan === 'standard');
+    const ui = await changeInUi('cambio-plan', token, 'standard', { cancelFirst: true });
+    ok('Pide confirmación antes de cambiar de plan', ui.shown, ui.text);
+    log(`      Confirmación: "${ui.text}"`);
+    ok('Si cancela, no cambia nada', ui.cancelledOk);
+    const upInfo = (await api('/tenant/plan', undefined, token)).body;
+    ok('Individual → Estándar sin volver a pagar en Checkout', upInfo.plan === 'standard' && upInfo.billing.status === 'active', upInfo.plan);
     await new Promise((r) => setTimeout(r, 2500));
     const s = await stripe(`/subscriptions/${sub.id}`);
     ok('Misma suscripción, nuevo precio', s.id === sub.id && s.status === 'active' && s.items.data[0].price.unit_amount === iva(39_900), `${s.items.data[0].price.unit_amount}`);
@@ -141,8 +174,9 @@ try {
     ok('Cobra la diferencia prorrateada (≤ $174.00)', inv.amount_due > 0 && inv.amount_due <= iva(39_900) - iva(24_900) + 1 && inv.status === 'paid', pesos(inv.amount_due));
     if (inv.hosted_invoice_url) await shotPage('cambio-plan-recibo', inv.hosted_invoice_url);
 
-    const down = await api('/tenant/plan', { plan: 'individual' }, token, 'PUT');
-    ok('Estándar → Individual (bajar)', down.status === 200 && down.body.plan.plan === 'individual');
+    await changeInUi('bajar-plan', token, 'individual');
+    const down = (await api('/tenant/plan', undefined, token)).body;
+    ok('Estándar → Individual (bajar)', down.plan === 'individual', down.plan);
     await new Promise((r) => setTimeout(r, 2500));
     const inv2 = (await invoicesOf(sub.id))[0];
     const cust = await stripe(`/customers/${sub.customer}`);
@@ -188,11 +222,14 @@ try {
   {
     const { token, sub } = accounts.standard;
     const r = await api('/tenant/plan', { plan: 'free' }, token, 'PUT');
-    // Estándar now has 2 locations; Gratis allows 1, so Lugali may refuse until one is closed
-    if (r.status !== 200) log(`      Lugali pide cerrar sucursales antes de bajar: ${r.status} ${r.body?.error}`);
-    const target = r.status === 200 ? { token, sub } : accounts.individual;
-    const r2 = r.status === 200 ? r : await api('/tenant/plan', { plan: 'free' }, target.token, 'PUT');
-    ok('Bajar a Gratis', r2.status === 200 && r2.body.plan.plan === 'free', `${r2.status} ${JSON.stringify(r2.body).slice(0, 120)}`);
+    // Estándar now has 2 locations; Gratis allows 1, so Lugali refuses until one is closed
+    ok('Con 2 sucursales Lugali pide cerrar una antes de bajar', r.status === 402, `${r.status} ${r.body?.error}`);
+    const target = accounts.individual;
+    const ui = await changeInUi('bajar-gratis', target.token, 'free');
+    ok('Pide confirmación antes de bajar a Gratis', ui.shown, ui.text);
+    log(`      Confirmación: "${ui.text}"`);
+    const r2 = (await api('/tenant/plan', undefined, target.token)).body;
+    ok('Bajar a Gratis', r2.plan === 'free', r2.plan);
     await new Promise((x) => setTimeout(x, 2500));
     const s = await stripe(`/subscriptions/${target.sub.id}`);
     ok('La suscripción queda cancelada en Stripe (sin más cobros)', s.status === 'canceled', s.status);

@@ -1806,6 +1806,14 @@
     "verify": "Verificar"
   },
   "billing": {
+    "confirmChangeTitle": "¿Cambiar de {{from}} a {{to}}?",
+    "confirmMonthly": "Tu nuevo cargo mensual será de {{amount}} (IVA incluido).",
+    "confirmProrate": "Hoy se cobra a tu tarjeta guardada la diferencia proporcional de este mes (o queda a tu favor si bajas de plan).",
+    "confirmChangeYes": "Sí, cambiar a {{plan}}",
+    "confirmFreeTitle": "¿Bajar al plan Gratis?",
+    "confirmFreeLive": "Tu suscripción se cancela hoy y no habrá más cargos. No se reembolsa lo que queda del mes. Tu negocio queda con los límites del plan Gratis.",
+    "confirmFree": "Tu negocio queda con los límites del plan Gratis.",
+    "confirmFreeYes": "Sí, bajar a Gratis",
     "paidNotice": "¡Pago recibido! Tu plan {{plan}} ya está activo. Te enviamos la confirmación por correo y Stripe te manda el recibo.",
     "pending": "Falta tu pago para activar el plan {{plan}}.",
     "confirming": "Estamos confirmando tu pago…",

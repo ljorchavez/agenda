@@ -284,6 +284,7 @@ export async function syncBillingAmount(db: Db, tenantId: string): Promise<void>
     if (!lines || lines.totalCents === t.billingAmountCents) return;
     await provider.update(t.billingSubscriptionId, lines);
     await db.update(tenants).set({ billingAmountCents: lines.totalCents }).where(eq(tenants.id, tenantId));
+    await notifyBilling(db, tenantId, { kind: 'locations', extraLocations: lines.extraLocations, amountCents: lines.totalCents, added: lines.totalCents > (t.billingAmountCents ?? 0) });
   } catch (e) {
     console.warn('[billing] amount sync failed:', e);
   }
@@ -312,7 +313,10 @@ export async function syncSubscription(db: Db, subscriptionId: string): Promise<
       .set({ plan, billingStatus: 'active', billingSubscriptionId: sub.id, billingPendingPlan: null, billingAmountCents: sub.amountCents, billingPastDueSince: null })
       .where(and(eq(tenants.id, t.id), or(ne(tenants.billingStatus, 'active'), ne(tenants.billingSubscriptionId, sub.id), isNull(tenants.billingSubscriptionId))))
       .returning({ id: tenants.id });
-    if (claimed.length) await notifyBilling(db, t.id, { kind: 'activated', plan, amountCents: sub.amountCents });
+    if (claimed.length) {
+      const lines = await billingLinesFor(db, t.id, plan).catch(() => null);
+      await notifyBilling(db, t.id, { kind: 'activated', plan, amountCents: sub.amountCents, extraBusiness: lines?.base.key === 'extra_business' });
+    }
     else await db.update(tenants).set({ billingAmountCents: sub.amountCents }).where(eq(tenants.id, t.id));
     return;
   }

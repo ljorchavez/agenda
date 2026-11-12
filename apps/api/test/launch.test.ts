@@ -256,6 +256,7 @@ d('launch hardening', () => {
       expect(third.status).toBe(201);
       const loc = subs.get(sub)!.items.data.find((i) => i.price.lookup_key.startsWith('lugali_extra_location_'));
       expect(loc?.quantity).toBe(1);
+      expect(lastSubject()).toMatch(/^Agregaste una sucursal/);
 
       // Portal to change the card
       expect((await call('POST', '/tenant/billing/portal', undefined, o.token)).body.url).toBe('https://billing.stripe.test/cus_1');
@@ -290,7 +291,7 @@ d('launch hardening', () => {
       // Another business can't confirm this payment; its own owner can, right on return
       expect((await call('POST', '/tenant/billing/confirm', { sessionId: cs2 }, o.token)).status).toBe(403);
       expect((await call('POST', '/tenant/billing/confirm', { sessionId: cs2 }, extra.body.token)).body.paid).toBe(true);
-      expect(lastSubject()).toMatch(/^Tu plan Estándar está activo · Negocio Dos/);
+      expect(lastSubject()).toMatch(/^Tu negocio adicional está activo · Negocio Dos/);
       expect((await call('POST', '/customers', { name: 'Y' }, extra.body.token)).status).toBe(201);
 
       // Bad signature is rejected once the secret is set

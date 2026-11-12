@@ -1806,6 +1806,14 @@
     "verify": "Verify"
   },
   "billing": {
+    "confirmChangeTitle": "Switch from {{from}} to {{to}}?",
+    "confirmMonthly": "Your new monthly charge will be {{amount}} (VAT included).",
+    "confirmProrate": "The prorated difference for this month is charged to your saved card today (or credited if you downgrade).",
+    "confirmChangeYes": "Yes, switch to {{plan}}",
+    "confirmFreeTitle": "Downgrade to Free?",
+    "confirmFreeLive": "Your subscription is cancelled today and there will be no more charges. The rest of the month is not refunded. Your business keeps the Free plan limits.",
+    "confirmFree": "Your business keeps the Free plan limits.",
+    "confirmFreeYes": "Yes, downgrade to Free",
     "paidNotice": "Payment received! Your {{plan}} plan is active. We emailed you a confirmation and Stripe sends the receipt.",
     "pending": "Your payment is missing to start the {{plan}} plan.",
     "confirming": "Confirming your payment…",

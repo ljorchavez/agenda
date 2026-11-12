@@ -6,7 +6,8 @@ import { escapeHtml, sendEmail } from './email.js';
 
 /** Plan confirmation emails to the business owner (Stripe sends the payment receipt itself). */
 export type BillingNotice =
-  | { kind: 'activated'; plan: PlanId; amountCents: number | null }
+  | { kind: 'activated'; plan: PlanId; amountCents: number | null; extraBusiness?: boolean }
+  | { kind: 'locations'; extraLocations: number; amountCents: number; added: boolean }
   | { kind: 'changed'; plan: PlanId; amountCents: number | null }
   | { kind: 'cancelled' }
   | { kind: 'past_due' };
@@ -19,6 +20,11 @@ export function billingNoticeText(business: string, n: BillingNotice, appUrl: st
   const amount = 'amountCents' in n && n.amountCents ? ` Se cobrarán ${money(n.amountCents)} al mes (IVA incluido).` : '';
   switch (n.kind) {
     case 'activated':
+      if (n.extraBusiness)
+        return {
+          subject: `Tu negocio adicional está activo · ${business}`,
+          lines: [`¡Gracias! Recibimos tu pago y ${business} ya está activo como negocio adicional.${amount}`, `Stripe te envía el recibo por separado. Puedes ver tus facturas o cambiar tu tarjeta en ${link}`],
+        };
       return {
         subject: `Tu plan ${PLAN_NAMES[n.plan] ?? n.plan} está activo · ${business}`,
         lines: [`¡Gracias! Recibimos tu pago y el plan ${PLAN_NAMES[n.plan] ?? n.plan} de ${business} ya está activo.${amount}`, `Stripe te envía el recibo por separado. Puedes ver tus facturas o cambiar tu tarjeta en ${link}`],
@@ -27,6 +33,14 @@ export function billingNoticeText(business: string, n: BillingNotice, appUrl: st
       return {
         subject: `Cambiaste al plan ${PLAN_NAMES[n.plan] ?? n.plan} · ${business}`,
         lines: [`${business} ahora tiene el plan ${PLAN_NAMES[n.plan] ?? n.plan}.${amount}`, `La diferencia de este mes se cobra (o se abona) de forma proporcional. Detalles en ${link}`],
+      };
+    case 'locations':
+      return {
+        subject: `${n.added ? 'Agregaste una sucursal' : 'Cerraste una sucursal'} · ${business}`,
+        lines: [
+          `${business} ahora tiene ${n.extraLocations} ${n.extraLocations === 1 ? 'sucursal adicional' : 'sucursales adicionales'} en su plan. Se cobrarán ${money(n.amountCents)} al mes (IVA incluido).`,
+          `${n.added ? 'Hoy se cobra la parte proporcional de este mes.' : 'La parte no usada de este mes queda a tu favor.'} Detalles en ${link}`,
+        ],
       };
     case 'cancelled':
       return {
