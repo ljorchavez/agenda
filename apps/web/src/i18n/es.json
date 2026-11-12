@@ -580,7 +580,11 @@
       "topCustomers": "Mejores clientes",
       "locations": "Sucursales",
       "resources": "Equipo / espacios",
-      "upcoming": "Próximas citas"
+      "upcoming": "Próximas citas",
+      "posKpis": "Punto de venta",
+      "posSales": "Ventas de mostrador en el tiempo",
+      "posProducts": "Productos más vendidos",
+      "posCategories": "Ventas por categoría"
     },
     "range_too_long": "El periodo es demasiado largo; agrupa por semana o mes.",
     "invalid_range": "Fechas no válidas.",
@@ -588,7 +592,22 @@
     "bookingsN_one": "{{count}} reserva",
     "bookingsN_other": "{{count}} reservas",
     "dragHint": "Arrastra el ícono ⠿ de cada gráfico para reacomodarlos. El orden se guarda en este dispositivo.",
-    "dragBlock": "Mover «{{name}}»"
+    "dragBlock": "Mover «{{name}}»",
+    "pos": {
+      "sales": "Ventas",
+      "revenue": "Total vendido",
+      "avgTicket": "Ticket promedio",
+      "units": "Unidades",
+      "profit": "Utilidad estimada",
+      "costCoverage": "Con costo capturado en {{pct}} de lo vendido",
+      "salesCount": "Ventas",
+      "unitsN_one": "{{count}} ud.",
+      "unitsN_other": "{{count}} uds.",
+      "profitHint": "En verde, la utilidad estimada con el costo actual de cada producto.",
+      "freeLines": "Conceptos libres",
+      "noCategory": "Sin categoría",
+      "methods": "Formas de pago"
+    }
   },
   "manage": {
     "title": "Tu cita",

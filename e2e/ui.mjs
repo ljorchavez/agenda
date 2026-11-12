@@ -557,6 +557,9 @@ ok('Punto de venta in the menu opens the counter', (await page.locator('nav a[hr
 await page.goto('http://localhost:5173/payments?tab=products');
 await page.getByTestId('product-row').first().waitFor({ timeout: 8000 }).catch(() => {});
 ok('products tab lists the catalog with stock', (await page.getByTestId('product-row').count()) >= 3);
+await page.goto('http://localhost:5173/reports');
+await page.getByTestId('pos-kpis').waitFor({ timeout: 10000 }).catch(() => {});
+ok('reports: point of sale numbers and best sellers', ((await page.getByTestId('pos-kpis').textContent().catch(() => '')) ?? '').length > 0 && ((await page.getByTestId('pos-top-products').textContent().catch(() => '')) ?? '').includes('Amoxicilina'));
 await page.goto('http://localhost:5173/privacidad');
 ok('privacy notice page', ((await page.getByTestId('privacy-page').textContent({ timeout: 8000 }).catch(() => '')) ?? '').includes('ARCO'));
 await page.goto('http://localhost:5173/terminos');

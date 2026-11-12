@@ -93,11 +93,15 @@ const WIDGETS = [
   'weekday',
   'heatmap',
   'topCustomers',
+  'posKpis',
+  'posSales',
+  'posProducts',
+  'posCategories',
   'upcoming',
 ] as const;
 type Widget = (typeof WIDGETS)[number];
 /** Blocks that take the full width of the grid */
-const WIDE: ReadonlySet<Widget> = new Set<Widget>(['kpis', 'revenue']);
+const WIDE: ReadonlySet<Widget> = new Set<Widget>(['kpis', 'revenue', 'posKpis', 'posSales']);
 const LAYOUT_KEY = 'agenda.reports.layout';
 const OLD_WIDGET_KEY = 'agenda.reports.widgets';
 
@@ -309,6 +313,18 @@ export function ReportsPage() {
         prevNewCustomers: prev ? prev.newCustomers : null,
       };
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, i18n.language]);
+
+  const posRows = useMemo(() => {
+    if (!data?.pos) return [];
+    const pos = data.pos;
+    return pos.series.map((p, i) => ({
+      label: bucketLabel(p.bucket),
+      revenue: p.revenueCents / 100,
+      sales: p.sales,
+      prevRevenue: pos.previousSeries[i] ? pos.previousSeries[i]!.revenueCents / 100 : null,
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, i18n.language]);
 
@@ -635,6 +651,123 @@ export function ReportsPage() {
           )}
         </Card>
         );
+      case 'posKpis': {
+        const pos = data.pos;
+        if (!pos) return null;
+        const pk2 = pos.previousKpis;
+        const tiles: { label: string; cur: number; prev: number; fmt: (v: number) => string; sub?: string }[] = [
+          { label: t('reports.pos.sales'), cur: pos.kpis.sales, prev: pk2.sales, fmt: String },
+          { label: t('reports.pos.revenue'), cur: pos.kpis.revenueCents, prev: pk2.revenueCents, fmt: money },
+          { label: t('reports.pos.avgTicket'), cur: pos.kpis.avgTicketCents, prev: pk2.avgTicketCents, fmt: money },
+          { label: t('reports.pos.units'), cur: pos.kpis.units, prev: pk2.units, fmt: String },
+          {
+            label: t('reports.pos.profit'),
+            cur: pos.kpis.profitCents,
+            prev: pk2.profitCents,
+            fmt: money,
+            sub: pos.kpis.costCoverage < 0.999 && pos.kpis.units > 0 ? t('reports.pos.costCoverage', { pct: percent(pos.kpis.costCoverage) }) : undefined,
+          },
+        ];
+        return (
+          <Card title={t('reports.widgets.posKpis')}>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="pos-kpis">
+              {tiles.map((d) => (
+                <div key={d.label} className="rounded-lg border border-slate-200 p-3">
+                  <div className="text-sm text-slate-500">{d.label}</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-900">{d.fmt(d.cur)}</div>
+                  {d.sub && <div className="text-xs text-slate-500">{d.sub}</div>}
+                  {compare && <Delta cur={d.cur} prev={d.prev} k="revenueCents" />}
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      }
+      case 'posSales':
+        return data.pos ? (
+          <Card title={t('reports.widgets.posSales')}>
+            <div className="h-64" data-testid="pos-sales-chart">
+              <ResponsiveContainer>
+                <ComposedChart data={posRows} margin={{ left: 4, right: 8 }}>
+                  <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={12} />
+                  <YAxis tickLine={false} axisLine={false} fontSize={12} width={48} tickFormatter={tickMoney} />
+                  <Tooltip formatter={(v, name) => (name === t('reports.pos.salesCount') ? v : money(Number(v) * 100))} cursor={{ fill: '#f1f5f9' }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="revenue" name={t('reports.current')} fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  {compare && <Line dataKey="prevRevenue" name={t('reports.previous')} stroke={PREV} strokeDasharray="4 4" strokeWidth={2} dot={false} />}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        ) : null;
+      case 'posProducts': {
+        const list = data.pos?.topProducts ?? [];
+        if (!data.pos) return null;
+        const top = Math.max(1, ...list.map((x) => x.revenueCents));
+        return (
+          <Card title={t('reports.widgets.posProducts')}>
+            {list.length === 0 ? (
+              <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+            ) : (
+              <ul className="space-y-3" data-testid="pos-top-products">
+                {list.map((r) => (
+                  <li key={`${r.productId ?? r.name}`}>
+                    <div className="mb-1 flex justify-between gap-2 text-sm">
+                      <span className="min-w-0 truncate">{r.name} <span className="text-slate-400">· {t('reports.pos.unitsN', { count: r.units })}</span></span>
+                      <span className="shrink-0 font-medium">
+                        {money(r.revenueCents)}
+                        {r.profitCents != null && <span className="ml-1 text-xs font-normal text-emerald-700">+{money(r.profitCents)}</span>}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full" style={{ width: `${(r.revenueCents / top) * 100}%`, background: '#8b5cf6' }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {list.some((r) => r.profitCents != null) && <p className="mt-3 text-xs text-slate-500">{t('reports.pos.profitHint')}</p>}
+          </Card>
+        );
+      }
+      case 'posCategories': {
+        const pos = data.pos;
+        if (!pos) return null;
+        const total = Math.max(1, pos.kpis.revenueCents);
+        return (
+          <Card title={t('reports.widgets.posCategories')}>
+            {pos.byCategory.length === 0 ? (
+              <p className="text-sm text-slate-500">{t('dashboard.noData')}</p>
+            ) : (
+              <ul className="space-y-3">
+                {pos.byCategory.map((c, i) => (
+                  <li key={c.category ?? '__free'}>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span>{c.category == null ? t('reports.pos.freeLines') : c.category || t('reports.pos.noCategory')}</span>
+                      <span className="font-medium">{money(c.revenueCents)} <span className="text-slate-400">({percent(c.revenueCents / total)})</span></span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full" style={{ width: `${(c.revenueCents / total) * 100}%`, background: METHOD_COLORS[i % METHOD_COLORS.length] }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {pos.byMethod.length > 0 && (
+              <div className="mt-4 border-t border-slate-100 pt-3 text-sm">
+                <div className="mb-1 text-xs font-medium uppercase text-slate-500">{t('reports.pos.methods')}</div>
+                {pos.byMethod.map((m) => (
+                  <div key={m.method} className="flex justify-between">
+                    <span>{t(`methods.${m.method}`)}</span>
+                    <span>{money(m.revenueCents)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      }
       case 'upcoming':
         return <UpcomingCard />;
     }

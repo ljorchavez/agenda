@@ -1383,7 +1383,7 @@ export type ReportQuery = z.infer<typeof reportQuerySchema>;
 
 export interface ReportKpis {
   revenueCents: number;
-  /** Part of revenue from selling packages, memberships and gift cards (no booking) */
+  /** Part of revenue from selling packages, memberships, gift cards and counter sales (no booking) */
   salesCents: number;
   payments: number;
   avgTicketCents: number;
@@ -1429,6 +1429,29 @@ export interface ReportDto {
   /** weekday 1-7 x local hour 0-23 */
   heatmap: { weekday: number; hour: number; count: number }[];
   topCustomers: { id: string; name: string; visits: number; totalSpentCents: number }[];
+  /** Counter sales (POS); null when the business doesn't sell products or a booking filter is on */
+  pos: PosReport | null;
+}
+
+export interface PosKpis {
+  sales: number;
+  revenueCents: number;
+  avgTicketCents: number;
+  units: number;
+  /** Revenue minus the products' cost (only lines whose product has a cost) */
+  profitCents: number;
+  /** Share of product revenue that has a cost, to judge the profit figure */
+  costCoverage: number;
+}
+
+export interface PosReport {
+  kpis: PosKpis;
+  previousKpis: PosKpis;
+  series: { bucket: string; revenueCents: number; sales: number }[];
+  previousSeries: { bucket: string; revenueCents: number; sales: number }[];
+  topProducts: { productId: string | null; name: string; units: number; revenueCents: number; profitCents: number | null }[];
+  byCategory: { category: string | null; units: number; revenueCents: number }[];
+  byMethod: { method: PaymentMethod; revenueCents: number }[];
 }
 
 // ---------- Customer self-service (manage link) ----------

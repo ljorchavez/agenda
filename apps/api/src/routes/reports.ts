@@ -5,6 +5,8 @@ import {
   reportQuerySchema,
   type AppointmentSource,
   type PaymentMethod,
+  type PosKpis,
+  type PosReport,
   type ReportDto,
   type ReportGranularity,
   type ReportKpis,
@@ -74,7 +76,7 @@ async function kpis(db: Db, tenantId: string, q: ReportQuery, r: Range): Promise
   const [pay, appt, cust] = await Promise.all([
     db.execute(sql`
       select coalesce(sum(p.amount_cents), 0) as revenue, count(*) as payments,
-             coalesce(sum(p.amount_cents) filter (where p.customer_plan_id is not null or p.sold_gift_card_id is not null), 0) as sales
+             coalesce(sum(p.amount_cents) filter (where p.customer_plan_id is not null or p.sold_gift_card_id is not null or p.sale_id is not null), 0) as sales
       from payments p where p.tenant_id = ${tenantId} and p.status = 'paid'
         and p.paid_at >= ${F}::timestamptz and p.paid_at < ${T}::timestamptz ${paymentFilter(q, f)}`),
     db.execute(sql`
@@ -169,6 +171,107 @@ async function series(db: Db, tenantId: string, tz: string, q: ReportQuery, r: R
   }));
 }
 
+// ---------- Point of sale ----------
+
+/** Sales lines with their product's current cost and category (free lines have no product). */
+const saleLines = (tenantId: string, F: string, T: string, loc: SQL) => sql`
+  select s.id as sale_id, s.created_at, (i->>'productId') as product_id, i->>'name' as name,
+         (i->>'qty')::int as qty, (i->>'totalCents')::int as total, pr.cost_cents, pr.category
+  from sales s
+  cross join lateral jsonb_array_elements(s.items) i
+  left join products pr on pr.id = nullif(i->>'productId', '')::uuid and pr.tenant_id = s.tenant_id
+  where s.tenant_id = ${tenantId} and s.status = 'paid'
+    and s.created_at >= ${F}::timestamptz and s.created_at < ${T}::timestamptz ${loc}`;
+
+async function posKpis(db: Db, tenantId: string, r: Range, loc: SQL): Promise<PosKpis> {
+  const F = r.start.toUTC().toISO()!;
+  const T = r.end.toUTC().toISO()!;
+  const res = await db.execute(sql`
+    with l as (${saleLines(tenantId, F, T, loc)})
+    select count(distinct sale_id) as sales, coalesce(sum(total), 0) as revenue, coalesce(sum(qty) filter (where product_id is not null), 0) as units,
+           coalesce(sum(total - qty * cost_cents) filter (where cost_cents is not null), 0) as profit,
+           coalesce(sum(total) filter (where cost_cents is not null), 0) as costed,
+           coalesce(sum(total) filter (where product_id is not null), 0) as products`);
+  const x = res.rows[0] ?? {};
+  const sales = n(x.sales);
+  return {
+    sales,
+    revenueCents: n(x.revenue),
+    avgTicketCents: sales ? Math.round(n(x.revenue) / sales) : 0,
+    units: n(x.units),
+    profitCents: n(x.profit),
+    costCoverage: n(x.products) ? n(x.costed) / n(x.products) : 0,
+  };
+}
+
+async function posSeries(db: Db, tenantId: string, tz: string, r: Range, g: ReportGranularity, loc: SQL) {
+  const F = r.start.toUTC().toISO()!;
+  const T = r.end.toUTC().toISO()!;
+  const step = `1 ${g}`;
+  const res = await db.execute(sql`
+    with b as (
+      select generate_series(
+        date_trunc(${g}::text, ${F}::timestamptz at time zone ${tz}),
+        date_trunc(${g}::text, (${T}::timestamptz - interval '1 second') at time zone ${tz}),
+        ${step}::interval) as bucket),
+    sv as (
+      select date_trunc(${g}::text, s.created_at at time zone ${tz}) as bucket, count(*) as sales, sum(s.total_cents) as revenue
+      from sales s where s.tenant_id = ${tenantId} and s.status = 'paid'
+        and s.created_at >= ${F}::timestamptz and s.created_at < ${T}::timestamptz ${loc}
+      group by 1)
+    select to_char(b.bucket, 'YYYY-MM-DD') as bucket, coalesce(sv.revenue, 0) as revenue, coalesce(sv.sales, 0) as sales
+    from b left join sv using (bucket) order by b.bucket`);
+  return res.rows.map((x) => ({ bucket: String(x.bucket), revenueCents: n(x.revenue), sales: n(x.sales) }));
+}
+
+async function posReport(db: Db, tenantId: string, tz: string, q: ReportQuery, cur: Range, prev: Range, g: ReportGranularity): Promise<PosReport | null> {
+  // Booking filters don't apply to counter sales: leave them out rather than show unfiltered numbers
+  if (q.serviceId || q.staffUserId || q.resourceId || q.source) return null;
+  const sells = await db.execute(sql`
+    select exists (select 1 from products where tenant_id = ${tenantId}) or exists (select 1 from sales where tenant_id = ${tenantId}) as yes`);
+  if (!sells.rows[0]?.yes) return null;
+  const loc = q.locationId ? sql`and s.location_id = ${q.locationId}` : sql``;
+  const F = cur.start.toUTC().toISO()!;
+  const T = cur.end.toUTC().toISO()!;
+  const [k, pk, s, ps, top, cat, meth] = await Promise.all([
+    posKpis(db, tenantId, cur, loc),
+    posKpis(db, tenantId, prev, loc),
+    posSeries(db, tenantId, tz, cur, g, loc),
+    posSeries(db, tenantId, tz, prev, g, loc),
+    db.execute(sql`
+      with l as (${saleLines(tenantId, F, T, loc)})
+      select product_id, min(name) as name, sum(qty) as units, sum(total) as revenue,
+             case when bool_and(cost_cents is not null) then sum(total - qty * cost_cents) end as profit
+      from l group by product_id, case when product_id is null then name end
+      order by revenue desc limit 10`),
+    db.execute(sql`
+      with l as (${saleLines(tenantId, F, T, loc)})
+      select case when product_id is null then null else coalesce(category, '') end as category, sum(qty) as units, sum(total) as revenue
+      from l group by 1 order by revenue desc`),
+    db.execute(sql`
+      select p.method, sum(p.amount_cents) as revenue from payments p join sales s on s.id = p.sale_id
+      where p.tenant_id = ${tenantId} and s.status = 'paid'
+        and s.created_at >= ${F}::timestamptz and s.created_at < ${T}::timestamptz ${loc}
+      group by p.method order by revenue desc`),
+  ]);
+  return {
+    kpis: k,
+    previousKpis: pk,
+    series: s,
+    previousSeries: ps,
+    topProducts: top.rows.map((x) => ({
+      productId: x.product_id ? String(x.product_id) : null,
+      name: String(x.name),
+      units: n(x.units),
+      revenueCents: n(x.revenue),
+      profitCents: x.profit == null ? null : n(x.profit),
+    })),
+    // null = free lines (services without booking); '' = products without category
+    byCategory: cat.rows.map((x) => ({ category: x.category == null ? null : String(x.category), units: n(x.units), revenueCents: n(x.revenue) })),
+    byMethod: meth.rows.map((x) => ({ method: x.method as PaymentMethod, revenueCents: n(x.revenue) })),
+  };
+}
+
 reportRoutes.get('/reports', async (c) => {
   const tenantId = c.get('tenantId');
   const q = reportQuerySchema.parse(c.req.query());
@@ -198,7 +301,7 @@ reportRoutes.get('/reports', async (c) => {
   const T = end.toUTC().toISO()!;
   const f = filters(q);
 
-  const [k, pk, s, ps, svc, method, source, weekday, heat, top, res, loc] = await Promise.all([
+  const [k, pk, s, ps, svc, method, source, weekday, heat, top, res, loc, pos] = await Promise.all([
     kpis(db, tenantId, q, cur),
     kpis(db, tenantId, q, prev),
     series(db, tenantId, tz, q, cur, g),
@@ -250,6 +353,7 @@ reportRoutes.get('/reports', async (c) => {
       where a.tenant_id = ${tenantId} and a.status = 'completed'
         and a.starts_at >= ${F}::timestamptz and a.starts_at < ${T}::timestamptz ${f}
       group by l.id order by revenue desc, l.name`),
+    posReport(db, tenantId, tz, q, cur, prev, g),
   ]);
 
   const body: ReportDto = {
@@ -268,6 +372,7 @@ reportRoutes.get('/reports', async (c) => {
     byWeekday: weekday.rows.map((r) => ({ weekday: n(r.weekday), count: n(r.count) })),
     heatmap: heat.rows.map((r) => ({ weekday: n(r.weekday), hour: n(r.hour), count: n(r.count) })),
     topCustomers: top.rows.map((r) => ({ id: String(r.id), name: String(r.name), visits: n(r.visits), totalSpentCents: n(r.total) })),
+    pos,
   };
   return c.json(body);
 });

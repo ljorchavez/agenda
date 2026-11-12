@@ -1833,9 +1833,20 @@ d('API (integration)', () => {
     // Sold products are only hidden
     expect((await call('DELETE', `/products/${pomada.id}`, undefined, tok)).body).toEqual({ deactivated: true });
     expect((await call('GET', '/products', undefined, tok)).body.some((x: { id: string }) => x.id === pomada.id)).toBe(false);
+    // Reports: counter sales (the canceled one doesn't count)
+    const rep = (await call('GET', `/reports?from=${day}&to=${day}`, undefined, tok)).body;
+    expect(rep.pos.kpis).toMatchObject({ sales: 1, revenueCents: 60000, avgTicketCents: 60000, units: 3 });
+    expect(rep.pos.topProducts[0]).toMatchObject({ name: 'Pomada', units: 2, revenueCents: 50000, profitCents: null });
+    expect(rep.pos.byCategory).toEqual(expect.arrayContaining([{ category: 'Estilizado', units: 2, revenueCents: 50000 }, { category: null, units: 1, revenueCents: 8000 }]));
+    expect(rep.pos.byMethod).toEqual(expect.arrayContaining([{ method: 'cash', revenueCents: 40000 }, { method: 'card', revenueCents: 20000 }]));
+    expect(rep.pos.series.reduce((a: number, x: { revenueCents: number }) => a + x.revenueCents, 0)).toBe(60000);
+    expect(rep.kpis.salesCents).toBeGreaterThanOrEqual(60000);
+    // Booking filters leave counter sales out
+    expect((await call('GET', `/reports?from=${day}&to=${day}&source=online`, undefined, tok)).body.pos).toBeNull();
     // Another business can't see them
     const other = (await call('POST', '/auth/register', { businessName: 'Otra POS', businessType: 'barbershop', name: 'Otro', email: 'pos2@test.mx', password: 'password123' })).body.token;
     expect((await call('GET', '/products', undefined, other)).body).toEqual([]);
+    expect((await call('GET', `/reports?from=${day}&to=${day}`, undefined, other)).body.pos).toBeNull();
     expect((await call('POST', `/sales/${s2.id}/cancel`, {}, other)).status).toBe(404);
     expect((await call('GET', `/sales/${s2.id}/ticket`, undefined, other)).status).toBe(404);
     expect((await call('POST', '/sales', { items: [{ productId: med.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 12000 }] }, other)).status).toBe(404);

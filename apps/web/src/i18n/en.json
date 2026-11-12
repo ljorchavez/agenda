@@ -580,7 +580,11 @@
       "topCustomers": "Top customers",
       "locations": "Locations",
       "resources": "Team / spaces",
-      "upcoming": "Upcoming bookings"
+      "upcoming": "Upcoming bookings",
+      "posKpis": "Point of sale",
+      "posSales": "Counter sales over time",
+      "posProducts": "Best-selling products",
+      "posCategories": "Sales by category"
     },
     "range_too_long": "Range too long; group by week or month.",
     "invalid_range": "Invalid dates.",
@@ -588,7 +592,22 @@
     "bookingsN_one": "{{count}} booking",
     "bookingsN_other": "{{count}} bookings",
     "dragHint": "Drag the ⠿ grip on each chart to rearrange them. The order is saved on this device.",
-    "dragBlock": "Move “{{name}}”"
+    "dragBlock": "Move “{{name}}”",
+    "pos": {
+      "sales": "Sales",
+      "revenue": "Total sold",
+      "avgTicket": "Average ticket",
+      "units": "Units",
+      "profit": "Estimated profit",
+      "costCoverage": "Cost entered for {{pct}} of sales",
+      "salesCount": "Sales",
+      "unitsN_one": "{{count}} unit",
+      "unitsN_other": "{{count}} units",
+      "profitHint": "In green, estimated profit with each product's current cost.",
+      "freeLines": "Custom items",
+      "noCategory": "No category",
+      "methods": "Payment methods"
+    }
   },
   "manage": {
     "title": "Your appointment",
