@@ -552,6 +552,7 @@ await page.getByTestId('pos-charge').click().catch(() => {});
 await page.getByTestId('pos-done').waitFor({ timeout: 8000 }).catch(() => {});
 ok('POS: sale charged', await page.getByTestId('pos-done').isVisible().catch(() => false));
 await page.keyboard.press('Escape');
+await page.getByTestId('pos-sales').filter({ hasText: 'Amoxicilina' }).waitFor({ timeout: 8000 }).catch(() => {});
 ok('POS: shows in today sales', ((await page.getByTestId('pos-sales').textContent().catch(() => '')) ?? '').includes('Amoxicilina'));
 const [ticketPage] = await Promise.all([page.waitForEvent('popup', { timeout: 8000 }).catch(() => null), page.getByTestId('sale-ticket').first().click().catch(() => {})]);
 if (ticketPage) await ticketPage.getByTestId('ticket').waitFor({ timeout: 8000 }).catch(() => {});
