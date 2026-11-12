@@ -1,3 +1,4 @@
+import { syncBillingAmount } from '../lib/billing.js';
 import { Hono } from 'hono';
 import { and, eq, sql } from 'drizzle-orm';
 import { locationInputSchema, normalizeMxPhone } from '@agenda/shared';
@@ -43,6 +44,7 @@ locationRoutes.post('/locations', requireBusinessManager, async (c) => {
     .values({ ...clean(input), tenantId: c.get('tenantId'), isPrimary: false })
     .returning();
   const list = await listLocations(db, c.get('tenantId'));
+  await syncBillingAmount(db, c.get('tenantId'));
   return c.json({ location: toLocationDto(row!), plan: planFor(list, await planOf(db, c.get('tenantId'))) }, 201);
 });
 
@@ -63,5 +65,6 @@ locationRoutes.put('/locations/:id', requireBusinessManager, async (c) => {
   }
   const [row] = await db.update(locations).set(clean(input)).where(eq(locations.id, id)).returning();
   const list = await listLocations(db, tenantId);
+  await syncBillingAmount(db, c.get('tenantId'));
   return c.json({ location: toLocationDto(row!), plan: planFor(list, await planOf(db, c.get('tenantId'))) });
 });

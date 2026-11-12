@@ -43,6 +43,7 @@ import { HoursFields } from '../components/Schedule';
 import { PublicProfileSection } from '../components/PublicProfile';
 import { LocationSelect, LocationsSection } from '../components/Locations';
 import { PlanSection } from '../components/Plans';
+import { BusinessDataSection, TwoFactorSection } from '../components/Security';
 import { ErrorText, Modal, PageHeader } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
@@ -191,6 +192,7 @@ function AccountSection() {
         </div>
         <ErrorText error={save.error} ns="settings" />
       </form>
+      <TwoFactorSection />
     </section>
   );
 }
@@ -500,7 +502,12 @@ function BusinessSettings() {
       {tab === 'invoicing' && <InvoicingSection canEdit={isOwner} />}
       {tab === 'locations' && <LocationsSection editable={businessManager} />}
       {tab === 'users' && <UsersSection kind={kind} />}
-      {tab === 'plan' && <PlanSection canChange={isOwner} />}
+      {tab === 'plan' && (
+        <>
+          <PlanSection canChange={isOwner} />
+          {isOwner && <BusinessDataSection />}
+        </>
+      )}
       {tab === 'packages' && (
         <div className="space-y-6">
           <div className="grid items-stretch gap-6 lg:grid-cols-2">

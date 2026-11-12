@@ -2,9 +2,11 @@ import { createMiddleware } from 'hono/factory';
 import { and, eq } from 'drizzle-orm';
 import { isManager, type Role } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { memberships, users } from '../db/schema.js';
+import { memberships, tenants, users } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import { verifyToken } from '../lib/auth.js';
+import { CSRF_HEADER, sessionCookie } from '../lib/session.js';
+import { isReadOnly } from '../lib/billing.js';
 
 export interface AuthVars {
   userId: string;
@@ -14,14 +16,25 @@ export interface AuthVars {
   role: Role;
   /** Location this login is limited to in this business (null = all locations). */
   locationId: string | null;
+  /** How the request proved who it is */
+  authVia: 'cookie' | 'bearer';
 }
 
 export type AppEnv = { Variables: AuthVars };
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** What still works while a business is read-only for an unpaid subscription. */
+const READ_ONLY_ALLOWED = [/^\/api\/auth\//, /^\/api\/tenant\/(plan|billing|export|delete)/];
+
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const header = c.req.header('authorization');
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
+  const bearer = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
+  const token = bearer ?? sessionCookie(c);
   if (!token) throw new AppError(401, 'unauthorized');
+  // Cookie sessions must come from our own app when they change something (CSRF).
+  if (!bearer && !SAFE_METHODS.has(c.req.method) && !c.req.header(CSRF_HEADER)) {
+    throw new AppError(403, 'forbidden', 'Missing X-Requested-With header');
+  }
   let claims;
   try {
     claims = await verifyToken(token);
@@ -29,9 +42,16 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
     throw new AppError(401, 'unauthorized', 'Invalid or expired token');
   }
   const [m] = await getDb()
-    .select({ role: memberships.role, locationId: memberships.locationId, passwordChangedAt: users.passwordChangedAt })
+    .select({
+      role: memberships.role,
+      locationId: memberships.locationId,
+      passwordChangedAt: users.passwordChangedAt,
+      billingStatus: tenants.billingStatus,
+      billingPastDueSince: tenants.billingPastDueSince,
+    })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
+    .innerJoin(tenants, eq(tenants.id, memberships.tenantId))
     .where(and(eq(memberships.userId, claims.sub), eq(memberships.tenantId, claims.tid)))
     .limit(1);
   if (!m) throw new AppError(401, 'unauthorized', 'No access to this business');
@@ -39,10 +59,18 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   if (m.passwordChangedAt && (claims.iat ?? 0) < Math.floor(m.passwordChangedAt.getTime() / 1000)) {
     throw new AppError(401, 'unauthorized', 'Session ended after a password change');
   }
+  if (
+    !SAFE_METHODS.has(c.req.method) &&
+    isReadOnly({ billingStatus: m.billingStatus, billingPastDueSince: m.billingPastDueSince }) &&
+    !READ_ONLY_ALLOWED.some((r) => r.test(c.req.path))
+  ) {
+    throw new AppError(402, 'billing_read_only', 'The subscription payment failed; update the card to keep working');
+  }
   c.set('userId', claims.sub);
   c.set('tenantId', claims.tid);
   c.set('role', m.role);
   c.set('locationId', m.locationId);
+  c.set('authVia', bearer ? 'bearer' : 'cookie');
   await next();
 });
 

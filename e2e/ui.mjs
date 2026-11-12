@@ -18,7 +18,14 @@ await page.fill('#email', 'demo@lugali.com');
 await page.fill('#password', 'demo1234');
 await page.locator('form .btn-primary').first().click();
 await page.waitForURL(/\/agenda/);
-const tok = await page.evaluate(() => localStorage.getItem('agenda.token'));
+// The session is an HttpOnly cookie now: read it from the browser context.
+const tok = (await page.context().cookies()).find((c) => c.name === 'lugali_session')?.value;
+ok('session lives in an HttpOnly cookie, not in localStorage', Boolean(tok) && (await page.context().cookies()).find((c) => c.name === 'lugali_session')?.httpOnly === true && (await page.evaluate(() => localStorage.getItem('agenda.token'))) === null);
+/** Opens another business in the browser (same as the app does after /auth/switch). */
+const useSession = async (t) => {
+  await page.context().addCookies([{ name: 'lugali_session', value: t, url: 'http://localhost:5173' }]);
+  await page.evaluate(() => localStorage.setItem('agenda.session', '1'));
+};
 ok('Inicio gone from menu', (await page.locator('nav a[href="/inicio"]').count()) === 0);
 // 1. New booking: search and pick a customer, then save
 await page.getByRole('button', { name: /Nueva cita|Nueva reserva/ }).first().click();
@@ -355,7 +362,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   const login = await api('/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const nutri = login.businesses.find((b) => b.slug === 'nutricion-demo');
   const ntok = (await api('/auth/switch', { tenantId: nutri.id }, login.token)).token;
-  await page.evaluate((t) => localStorage.setItem('agenda.token', t), ntok);
+  await useSession(ntok);
   await page.goto('http://localhost:5173/settings?tab=forms');
   await page.getByTestId('forms-section').filter({ hasText: 'Historia clínica nutricional' }).waitFor({ timeout: 8000 }).catch(() => {});
   ok('questionnaires tab lists the form and its booking types', ((await page.getByTestId('forms-section').textContent()) ?? '').match(/Historia clínica nutricional[\s\S]*Consulta inicial[\s\S]*Plan alimenticio/) != null);
@@ -429,7 +436,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
     return null;
   };
   const psy = await as('psicologia-demo');
-  await page.evaluate((t) => localStorage.setItem('agenda.token', t), psy);
+  await useSession(psy);
   await page.goto('http://localhost:5173/customers');
   await page.getByRole('heading', { name: 'Pacientes' }).waitFor({ timeout: 8000 }).catch(() => {});
   await page.reload();
@@ -475,7 +482,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
     ok('nav hidden on the printable page', (await page.locator('nav a[href="/agenda"]').count()) === 0);
   }
   const den = await as('dental-demo');
-  await page.evaluate((t) => localStorage.setItem('agenda.token', t), den);
+  await useSession(den);
   const dfound = await withRecord(den);
   ok('dental demo: record follows NOM-013', dfound?.r.norm === 'NOM-013-SSA2-2015' && Boolean(dfound?.r.odontogram));
   if (dfound) {
@@ -488,7 +495,7 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
 {
   const login = await api('/auth/login', { email: 'demo@lugali.com', password: 'demo1234' });
   const med = (await api('/auth/switch', { tenantId: login.businesses.find((b) => b.slug === 'medico-demo').id }, login.token)).token;
-  await page.evaluate((t) => localStorage.setItem('agenda.token', t), med);
+  await useSession(med);
   let target = null;
   let rxPath = null;
   for (const c of (await api('/customers?limit=200', null, med)).items) {

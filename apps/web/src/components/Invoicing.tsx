@@ -12,7 +12,7 @@ import {
   type InvoicingStatusDto,
   type PaymentDto,
 } from '@agenda/shared';
-import { api, tokenStore } from '../lib/api';
+import { api } from '../lib/api';
 import { money } from '../lib/format';
 import { ErrorText, Modal } from './ui';
 
@@ -135,7 +135,7 @@ export function InvoicingSection({ canEdit }: { canEdit: boolean }) {
 }
 
 async function download(path: string, name: string) {
-  const res = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${tokenStore.get() ?? ''}` } });
+  const res = await fetch(`/api${path}`, { credentials: 'same-origin' });
   if (!res.ok) return;
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');

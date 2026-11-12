@@ -7,6 +7,7 @@ set -euo pipefail
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "Applying database migrations…"
   pnpm --filter @agenda/api db:migrate
+  pnpm --filter @agenda/api db:reencrypt
   pnpm --filter @agenda/api db:seed-missing || echo "Demo seed skipped"
   pnpm --filter @agenda/api whatsapp:setup || echo "WhatsApp templates skipped"
 else
@@ -34,20 +35,25 @@ cat > "$OUT/functions/api.func/.vc-config.json" <<'JSON'
 }
 JSON
 
-cat > "$OUT/config.json" <<'JSON'
-{
-  "version": 3,
-  "routes": [
-    { "src": "^/api/(.*)$", "dest": "/api?__path=$1" },
-    { "src": "^/b/([^/]+)/?$", "dest": "/api?__path=page/b/$1" },
-    { "handle": "filesystem" },
-    { "src": "^/(.*)$", "dest": "/index.html" }
+# Routes, crons and the security headers (CSP etc. from apps/web/security-headers.json)
+node -e '
+const fs = require("fs");
+const headers = JSON.parse(fs.readFileSync("apps/web/security-headers.json", "utf8"));
+const config = {
+  version: 3,
+  routes: [
+    { src: "^/(.*)$", headers, continue: true },
+    { src: "^/api/(.*)$", dest: "/api?__path=$1" },
+    { src: "^/b/([^/]+)/?$", dest: "/api?__path=page/b/$1" },
+    { handle: "filesystem" },
+    { src: "^/(.*)$", dest: "/index.html" }
   ],
-  "crons": [
-    { "path": "/api/cron/reminders", "schedule": "0 16 * * *" },
-    { "path": "/api/cron/reset-demo", "schedule": "0 9 * * *" }
+  crons: [
+    { path: "/api/cron/reminders", schedule: "0 16 * * *" },
+    { path: "/api/cron/reset-demo", schedule: "0 9 * * *" }
   ]
-}
-JSON
+};
+fs.writeFileSync(process.argv[1], JSON.stringify(config, null, 2));
+' "$OUT/config.json"
 
 echo "Build output ready in $OUT"

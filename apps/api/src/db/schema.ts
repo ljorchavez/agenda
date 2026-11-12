@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   date,
   doublePrecision,
@@ -32,6 +33,7 @@ import {
   type StockReason,
   type Professional,
   type PlanId,
+  type BillingStatus,
   type WorkHours,
   type TenantSettings,
 } from '@agenda/shared';
@@ -82,6 +84,16 @@ export const tenants = pgTable(
     directoryListed: boolean('directory_listed').notNull().default(false),
     /** Subscription plan of this business (limits in packages/shared PLAN_LIMITS) */
     plan: text('plan').$type<PlanId>().notNull().default('free'),
+    /** Card subscription: none | pending (waiting for the card) | active | past_due | cancelled */
+    billingStatus: text('billing_status').$type<BillingStatus>().notNull().default('none'),
+    /** Subscription id at the provider (Mercado Pago preapproval) */
+    billingSubscriptionId: text('billing_subscription_id'),
+    /** Plan the owner chose and is paying for; becomes `plan` when the provider confirms */
+    billingPendingPlan: text('billing_pending_plan').$type<PlanId>(),
+    /** Monthly amount (IVA included) the subscription charges */
+    billingAmountCents: integer('billing_amount_cents'),
+    /** First failed charge; after a grace period the business goes read-only */
+    billingPastDueSince: timestamp('billing_past_due_since', { withTimezone: true }),
     ...timestamps,
   },
   (t) => [
@@ -104,6 +116,13 @@ export const users = pgTable(
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
     /** Cédula, institution and specialty for clinical documents */
     professional: jsonb('professional').$type<Professional | null>(),
+    /** Two-step sign-in (TOTP): secret encrypted with lib/crypto; enabled once confirmed with a code */
+    totpSecretEnc: text('totp_secret_enc'),
+    totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+    /** Last accepted 30-second step, so a code can't be used twice */
+    totpLastStep: bigint('totp_last_step', { mode: 'number' }),
+    /** SHA-256 of the unused recovery codes */
+    totpRecovery: jsonb('totp_recovery').$type<string[] | null>(),
     ...timestamps,
   },
   (t) => [uniqueIndex('users_email_idx').on(t.email)],
@@ -787,3 +806,23 @@ export const invoices = pgTable(
   (t) => [index('invoices_tenant_idx').on(t.tenantId, t.createdAt), index('invoices_payment_idx').on(t.paymentId)],
 );
 export type Invoice = typeof invoices.$inferSelect;
+
+/** Unexpected errors (API and browser), grouped by fingerprint; new ones are emailed (lib/monitor.ts). */
+export const errorEvents = pgTable(
+  'error_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fingerprint: text('fingerprint').notNull(),
+    source: text('source').notNull(),
+    message: text('message').notNull(),
+    stack: text('stack'),
+    path: text('path'),
+    userAgent: text('user_agent'),
+    tenantId: uuid('tenant_id'),
+    count: integer('count').notNull().default(1),
+    firstSeen: timestamp('first_seen', { withTimezone: true }).notNull().defaultNow(),
+    lastSeen: timestamp('last_seen', { withTimezone: true }).notNull().defaultNow(),
+    lastAlertedAt: timestamp('last_alerted_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('error_events_fingerprint_idx').on(t.fingerprint)],
+);

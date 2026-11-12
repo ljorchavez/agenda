@@ -1,3 +1,4 @@
+import { Captcha } from '../components/Captcha';
 import { PublicReviews, RatingBadge } from '../components/Reviews';
 import { ShopSection } from '../components/Shop';
 import { SocialButton } from '../components/SocialIcons';
@@ -97,6 +98,7 @@ export function BookingPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-slate-100 px-3 py-4 sm:px-4 sm:py-8">
       <div className="mx-auto max-w-2xl">
+        <Captcha />
         <ProfileHeader business={business} subtitle={subtitle} mapsUrl={mapsUrl} locationLine={multi && location ? (
           <p className="text-sm font-medium text-brand-700">
             ⌂ {location.name} ·{' '}

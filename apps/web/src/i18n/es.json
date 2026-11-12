@@ -21,7 +21,9 @@
     "remove": "Quitar",
     "saveError": "No se pudo guardar. Revisa los datos.",
     "add": "Agregar",
-    "done": "Listo"
+    "done": "Listo",
+    "crash": "Algo falló en esta pantalla. Ya nos llegó el aviso.",
+    "reload": "Volver a cargar"
   },
   "nav": {
     "dashboard": "Inicio",
@@ -794,7 +796,17 @@
     "form_invalid": "Revisa tus respuestas.",
     "plan_limit_resources": "Tu plan incluye una sola agenda (1 profesional o espacio). Cambia a Estándar para agregar más.",
     "coupon_not_for_service": "Este cupón no aplica para este servicio.",
-    "coupon_already_used": "Ya usaste este cupón."
+    "coupon_already_used": "Ya usaste este cupón.",
+    "mfa_bad_code": "El código no es válido. Revisa la app e intenta de nuevo.",
+    "mfa_expired": "Pasó mucho tiempo. Vuelve a iniciar sesión.",
+    "mfa_already_on": "La verificación en dos pasos ya está activa.",
+    "mfa_not_started": "Primero inicia la configuración.",
+    "demo_account": "No disponible en la cuenta de demostración.",
+    "captcha_required": "Un momento: estamos verificando que no eres un robot. Intenta de nuevo en unos segundos.",
+    "captcha_failed": "No pudimos verificar que no eres un robot. Intenta de nuevo.",
+    "billing_read_only": "Tu negocio está en modo solo lectura porque no se pudo cobrar la suscripción. Actualiza tu tarjeta en Configuración → Plan.",
+    "billing_provider_error": "Mercado Pago no respondió. Intenta de nuevo en un momento.",
+    "delete_not_confirmed": "La contraseña o el nombre del negocio no coinciden."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -981,7 +993,8 @@
     "locationsIncluded_other": "{{count}} sucursales incluidas",
     "oneAgenda": "1 profesional o espacio (una sola agenda)",
     "prioritySupport": "Soporte prioritario por WhatsApp",
-    "agendasUsed": "Agendas activas (personas o espacios): {{used}} de {{max}}"
+    "agendasUsed": "Agendas activas (personas o espacios): {{used}} de {{max}}",
+    "billingNext": "Al crear tu cuenta te llevaremos a Mercado Pago para registrar tu tarjeta. El cobro es mensual y puedes cancelar cuando quieras."
   },
   "categories": {
     "health": "Salud",
@@ -1771,5 +1784,47 @@
     "askInvoice": "Si necesitas factura, pídela en caja.",
     "thanks": "¡Gracias por su compra!",
     "autoPrint": "Imprimir ticket al cobrar"
+  },
+  "mfa": {
+    "title": "Verificación en dos pasos",
+    "why": "Además de tu contraseña, al entrar te pediremos un código de 6 dígitos de una app en tu teléfono (Google Authenticator, Microsoft Authenticator o 1Password). Recomendado si ves expedientes o cobros.",
+    "setUp": "Activar",
+    "scan": "Escanea este código con tu app de autenticación y escribe el código de 6 dígitos que aparece.",
+    "openApp": "Abrir en la app de autenticación",
+    "manual": "¿No puedes escanear? Escribe esta clave en la app:",
+    "code": "Código de 6 dígitos",
+    "turnOn": "Confirmar y activar",
+    "turnOff": "Desactivar",
+    "on": "Activa: al entrar te pediremos el código de tu app.",
+    "recoveryTitle": "Guarda tus códigos de respaldo",
+    "recoveryHelp": "Si pierdes tu teléfono, entra con uno de estos códigos (cada uno sirve una vez). Guárdalos en un lugar seguro; no los volveremos a mostrar.",
+    "copy": "Copiar",
+    "saved": "Ya los guardé",
+    "loginHint": "Escribe el código de 6 dígitos de tu app de autenticación.",
+    "recoveryHint": "¿Sin tu teléfono? Usa un código de respaldo.",
+    "verify": "Verificar"
+  },
+  "billing": {
+    "pending": "Falta tu pago para activar el plan {{plan}}.",
+    "confirming": "Estamos confirmando tu pago con Mercado Pago…",
+    "payNow": "Pagar con Mercado Pago",
+    "pastDue": "No se pudo cobrar tu tarjeta. Actualízala antes del {{date}} para no pasar a modo solo lectura.",
+    "pastDueShort": "No se pudo cobrar tu suscripción.",
+    "readOnly": "Tu negocio está en modo solo lectura porque no se pudo cobrar la suscripción. Puedes ver todo, pero no hacer cambios.",
+    "updateCard": "Actualizar tarjeta",
+    "active": "Se cobran {{amount}} (IVA incluido) cada mes con Mercado Pago.",
+    "manage": "Ver cargos o cambiar tarjeta",
+    "cancelled": "Tu suscripción se canceló; el negocio pasó al plan Gratis."
+  },
+  "data": {
+    "title": "Tus datos",
+    "exportHelp": "Descarga toda la información del negocio (clientes, citas, ventas, expedientes) en un archivo.",
+    "export": "Descargar mis datos",
+    "deleteHelp": "Eliminar el negocio borra para siempre clientes, citas, pagos, expedientes y archivos. Si tienes suscripción, se cancela.",
+    "delete": "Eliminar negocio",
+    "deleteTitle": "Eliminar {{name}}",
+    "deleteWarning": "Esto no se puede deshacer. Te recomendamos descargar tus datos antes.",
+    "typeName": "Escribe el nombre del negocio ({{name}}) para confirmar",
+    "deleteForGood": "Eliminar para siempre"
   }
 }

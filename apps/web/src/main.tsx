@@ -7,7 +7,10 @@ import './index.css';
 import { App } from './App';
 import { AuthProvider } from './lib/auth';
 import { registerServiceWorker } from './components/InstallApp';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { installErrorReporting } from './lib/monitor';
 
+installErrorReporting();
 registerServiceWorker();
 
 const queryClient = new QueryClient({
@@ -19,7 +22,9 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <App />
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

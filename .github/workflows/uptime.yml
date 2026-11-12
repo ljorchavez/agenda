@@ -1,0 +1,25 @@
+# Uptime check: every 10 minutes the page and the API must answer. If they don't (after three
+# tries), this run fails and GitHub emails the repository owner ("Run failed: Disponibilidad").
+name: Disponibilidad
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: lugali.com responde
+        run: |
+          check() {
+            for i in 1 2 3; do
+              if curl -fsS --max-time 20 -o /dev/null "$1"; then echo "OK $1"; return 0; fi
+              echo "Intento $i falló: $1"; sleep 20
+            done
+            echo "::error::$1 no responde"; return 1
+          }
+          check https://lugali.com/
+          check https://lugali.com/api/health

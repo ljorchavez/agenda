@@ -37,19 +37,33 @@ import { recordRoutes } from './routes/records.js';
 import { cashRoutes } from './routes/cash.js';
 import { publicReviewRoutes, reviewRoutes } from './routes/reviews.js';
 import { calendarRoutes, publicCalendarRoutes } from './routes/calendar.js';
-import { pruneAuthTables } from './lib/throttle.js';
+import { limitPublic, pruneAuthTables } from './lib/throttle.js';
+import { recordError } from './lib/monitor.js';
+import { clientErrorSchema } from '@agenda/shared';
+import { reconcileBilling } from './lib/billing.js';
+import { accountRoutes } from './routes/account.js';
 import { getDb } from './db/client.js';
 
 export function createApp() {
   const app = new Hono().basePath('/api');
 
-  app.use('*', secureHeaders());
+  app.use('*', secureHeaders({ strictTransportSecurity: 'max-age=63072000; includeSubDomains', referrerPolicy: 'strict-origin-when-cross-origin' }));
   if (process.env.NODE_ENV !== 'test') app.use('*', logger());
   // In AWS the web app and API share a domain through CloudFront, so CORS is only for local dev.
   app.use('*', cors({ origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(',') }));
   app.onError(errorHandler);
 
+  // Uptime check (GitHub Actions every few minutes). No database: an idle database can sleep.
   app.get('/health', (c) => c.json({ ok: true }));
+
+  // Errors seen in the browser (lib/monitor.ts on the web).
+  app.post('/client-errors', async (c) => {
+    const db = getDb();
+    await limitPublic(db, c, 'client-error', 30, 10);
+    const input = clientErrorSchema.parse(await c.req.json().catch(() => ({})));
+    await recordError({ source: 'web', message: input.message, stack: input.stack ?? null, path: input.path ?? null, userAgent: c.req.header('user-agent') ?? null });
+    return c.body(null, 204);
+  });
 
   // Scheduled job endpoints (Vercel Cron sends `Authorization: Bearer $CRON_SECRET`).
   const isCron = (auth: string | undefined) => {
@@ -69,7 +83,9 @@ export function createApp() {
     const started = Date.now();
     await seedDemo();
     await pruneAuthTables(getDb());
-    return c.json({ ok: true, ms: Date.now() - started });
+    // Same daily run: re-check every card subscription in case a webhook was missed.
+    const subscriptions = await reconcileBilling(getDb());
+    return c.json({ ok: true, ms: Date.now() - started, subscriptions });
   });
 
   // Public (no auth)
@@ -85,6 +101,7 @@ export function createApp() {
   app.route('/', shopRoutes);
   app.route('/', passwordRoutes);
   app.route('/', authRoutes); // register/login are public; the rest apply requireAuth per route
+  app.route('/', accountRoutes);
 
   // Authenticated, tenant-scoped
   const priv = new Hono<AppEnv>();

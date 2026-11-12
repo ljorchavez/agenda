@@ -1,3 +1,4 @@
+import { Captcha } from '../components/Captcha';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -117,6 +118,7 @@ function AskLink({ slug, onToken }: { slug: string; onToken: (token: string) => 
     <form className="card space-y-3" onSubmit={(e) => { e.preventDefault(); ask.mutate(); }} data-testid="portal-ask">
       <p className="text-sm text-slate-600">{t('portal.askHelp')}</p>
       <input type="email" required className="input" placeholder={t('customers.email')} aria-label={t('customers.email')} value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Captcha />
       <ErrorText error={ask.error} ns="portal" />
       <button className="btn-primary w-full" disabled={ask.isPending}>{t('portal.sendLink')}</button>
       <p className="text-center text-sm"><Link to={`/b/${slug}`} className="text-brand-700 hover:underline">{t('portal.book')}</Link></p>

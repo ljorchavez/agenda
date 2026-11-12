@@ -1,5 +1,6 @@
 import { businessKind, paymentSettingsOf, rentalSettingsOf, reservationSettingsOf, selfServiceOf } from '@agenda/shared';
 import { manageToken } from './crypto.js';
+import { isReadOnly } from './billing.js';
 import type {
   AppointmentDto,
   CustomerDto,
@@ -85,6 +86,7 @@ export function toTenantDto(t: Tenant): TenantDto {
     },
     mercadoPago: { connected: Boolean(t.mpAccessTokenEnc), account: t.mpAccount },
     plan: t.plan,
+    billing: { status: t.billingStatus, readOnly: isReadOnly(t), pastDueSince: t.billingPastDueSince?.toISOString() ?? null },
   };
 }
 

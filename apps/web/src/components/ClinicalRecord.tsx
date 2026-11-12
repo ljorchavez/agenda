@@ -19,7 +19,7 @@ import {
   type ClinicalRecordDto,
   type ClinicalTemplate,
 } from '@agenda/shared';
-import { api, ApiError, tokenStore } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateOnly, dateTime } from '../lib/format';
 import { SaveStatus, useAutoSave } from '../lib/autosave';
@@ -551,7 +551,7 @@ function GrowthChart({ notes }: { notes: ClinicalNoteDto[] }) {
 /** Opens a private file (needs the session) in a new tab. */
 async function openPrivate(path: string) {
   const win = window.open('', '_blank');
-  const res = await fetch(path, { headers: { Authorization: `Bearer ${tokenStore.get() ?? ''}` } });
+  const res = await fetch(path, { credentials: 'same-origin' });
   if (!res.ok) {
     win?.close();
     return;

@@ -1,4 +1,5 @@
 import { InstallAppBanner } from './InstallApp';
+import { Link } from 'react-router-dom';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isManager, kindConfig, PLAN_LIMITS, type BusinessKind } from '@agenda/shared';
@@ -139,6 +140,7 @@ export function Layout() {
       <main className="px-4 pb-24 pt-6 md:ml-60 md:px-8 md:pb-10">
         <div className="mx-auto max-w-6xl">
           <InstallAppBanner />
+          <BillingBanner />
           <Outlet />
         </div>
       </main>
@@ -162,6 +164,21 @@ export function Layout() {
           </NavLink>
         ))}
       </nav>
+    </div>
+  );
+}
+
+/** A failed subscription charge: warns during the grace period, explains read-only after it. */
+function BillingBanner() {
+  const { t } = useTranslation();
+  const { tenant, user } = useAuth();
+  const b = tenant?.billing;
+  if (!b || b.status !== 'past_due') return null;
+  const owner = user?.role === 'owner';
+  return (
+    <div className={`mb-4 rounded-lg p-3 text-sm ${b.readOnly ? 'bg-rose-50 text-rose-900' : 'bg-amber-50 text-amber-900'}`} data-testid="billing-banner">
+      {b.readOnly ? t('billing.readOnly') : t('billing.pastDueShort')}{' '}
+      {owner && <Link to="/settings?tab=plan" className="font-semibold underline">{t('billing.updateCard')}</Link>}
     </div>
   );
 }

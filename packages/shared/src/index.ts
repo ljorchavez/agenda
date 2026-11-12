@@ -568,7 +568,41 @@ export const googleLoginSchema = z.object({ credential: z.string().min(20).max(4
 export interface PublicConfigDto {
   /** Set when GOOGLE_CLIENT_ID is configured; otherwise the Google button is hidden */
   googleClientId: string | null;
+  /** Cloudflare Turnstile site key; when set, sign-up and public forms show the anti-bot check */
+  turnstileSiteKey: string | null;
 }
+
+// ---------- Two-step sign-in (TOTP) ----------
+
+/** Login answered with "now the 6-digit code" instead of a session. */
+export interface MfaChallengeDto {
+  mfaRequired: true;
+  /** Short-lived ticket that proves the password (or Google) step passed */
+  mfaToken: string;
+}
+export const mfaLoginSchema = z.object({
+  mfaToken: z.string().min(20).max(2000),
+  /** 6-digit code from the authenticator app, or a recovery code (xxxx-xxxx) */
+  code: z.string().trim().min(6).max(20),
+});
+export interface TotpSetupDto {
+  /** Base32 secret, for typing it by hand */
+  secret: string;
+  /** otpauth:// link (opens the authenticator app on a phone; also drawn as a QR) */
+  otpauthUrl: string;
+}
+export const totpEnableSchema = z.object({ code: z.string().trim().regex(/^\d{6}$/) });
+export const totpDisableSchema = z.object({ password: z.string().min(1).max(200), code: z.string().trim().min(6).max(20) });
+
+/** Deleting a business for good: the owner types its name and their password. */
+export const tenantDeleteSchema = z.object({ password: z.string().min(1).max(200), confirmName: z.string().trim().min(1).max(200) });
+
+/** Browser error report (lib/monitor on the web). */
+export const clientErrorSchema = z.object({
+  message: z.string().max(1000),
+  stack: z.string().max(8000).nullable().optional(),
+  path: z.string().max(500).nullable().optional(),
+});
 export type LoginInput = z.infer<typeof loginSchema>;
 
 /** "Forgot my password": always answers ok, whether or not the email has an account. */
@@ -725,9 +759,29 @@ export interface PlanInfoDto {
   extraBusiness: boolean;
   /** Card payments for subscriptions are connected (otherwise plan changes apply without a charge) */
   billingConnected: boolean;
+  /** Subscription state at the provider */
+  billing: {
+    status: BillingStatus;
+    /** Plan paid for but not confirmed yet */
+    pendingPlan: PlanId | null;
+    /** What the card is charged each month (IVA included) */
+    amountCents: number | null;
+    pastDueSince: string | null;
+    readOnly: boolean;
+  };
 }
 
 export const planChangeSchema = z.object({ plan: z.enum(PLANS) });
+
+/** none: never subscribed or free · pending: waiting for the card · active · past_due: a charge failed · cancelled */
+export const BILLING_STATUSES = ['none', 'pending', 'active', 'past_due', 'cancelled'] as const;
+export type BillingStatus = (typeof BILLING_STATUSES)[number];
+/** Days a business keeps working normally after a failed charge before it turns read-only. */
+export const BILLING_GRACE_DAYS = 7;
+/** IVA added to plan prices when charging the card. */
+export const PLAN_IVA = 0.16;
+/** Monthly charge with IVA, in cents. */
+export const withIva = (cents: number) => Math.round(cents * (1 + PLAN_IVA));
 
 export const locationInputSchema = z
   .object({
@@ -1212,6 +1266,8 @@ export interface SessionUser {
   locationId: string | null;
   /** Cédula, institution and specialty shown on clinical documents */
   professional: Professional | null;
+  /** Two-step sign-in is on */
+  twoFactor: boolean;
 }
 
 export interface TenantDto {
@@ -1229,6 +1285,8 @@ export interface TenantDto {
   /** Never includes the token itself. */
   mercadoPago: { connected: boolean; account: string | null };
   plan: PlanId;
+  /** Card subscription state; `readOnly` when a failed charge went past the grace period */
+  billing: { status: BillingStatus; readOnly: boolean; pastDueSince: string | null };
 }
 
 export interface AuthResponse {

@@ -21,7 +21,9 @@
     "remove": "Remove",
     "saveError": "Couldn't save. Check the data.",
     "add": "Add",
-    "done": "Done"
+    "done": "Done",
+    "crash": "Something went wrong on this screen. We have been notified.",
+    "reload": "Reload"
   },
   "nav": {
     "dashboard": "Home",
@@ -794,7 +796,17 @@
     "form_invalid": "Check your answers.",
     "plan_limit_resources": "Your plan includes a single agenda (1 professional or space). Switch to Standard to add more.",
     "coupon_not_for_service": "This coupon doesn't apply to this service.",
-    "coupon_already_used": "You already used this coupon."
+    "coupon_already_used": "You already used this coupon.",
+    "mfa_bad_code": "That code is not valid. Check the app and try again.",
+    "mfa_expired": "Too much time passed. Sign in again.",
+    "mfa_already_on": "Two-step verification is already on.",
+    "mfa_not_started": "Start the setup first.",
+    "demo_account": "Not available on the demo account.",
+    "captcha_required": "One moment: we're checking you're not a robot. Try again in a few seconds.",
+    "captcha_failed": "We couldn't verify you're not a robot. Try again.",
+    "billing_read_only": "Your business is read-only because the subscription payment failed. Update your card in Settings → Plan.",
+    "billing_provider_error": "Mercado Pago didn't answer. Try again in a moment.",
+    "delete_not_confirmed": "The password or business name don't match."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -981,7 +993,8 @@
     "locationsIncluded_other": "{{count}} locations included",
     "oneAgenda": "1 professional or space (a single agenda)",
     "prioritySupport": "Priority support on WhatsApp",
-    "agendasUsed": "Active agendas (people or spaces): {{used}} of {{max}}"
+    "agendasUsed": "Active agendas (people or spaces): {{used}} of {{max}}",
+    "billingNext": "After creating your account we'll take you to Mercado Pago to add your card. Billed monthly; cancel anytime."
   },
   "categories": {
     "health": "Health",
@@ -1771,5 +1784,47 @@
     "askInvoice": "Need an invoice? Ask at the counter.",
     "thanks": "Thank you for your purchase!",
     "autoPrint": "Print ticket when charging"
+  },
+  "mfa": {
+    "title": "Two-step verification",
+    "why": "Besides your password, we'll ask for a 6-digit code from an app on your phone (Google Authenticator, Microsoft Authenticator or 1Password). Recommended if you see records or payments.",
+    "setUp": "Turn on",
+    "scan": "Scan this code with your authenticator app and type the 6-digit code it shows.",
+    "openApp": "Open in the authenticator app",
+    "manual": "Can't scan? Type this key in the app:",
+    "code": "6-digit code",
+    "turnOn": "Confirm and turn on",
+    "turnOff": "Turn off",
+    "on": "On: we'll ask for the code from your app when you sign in.",
+    "recoveryTitle": "Save your backup codes",
+    "recoveryHelp": "If you lose your phone, sign in with one of these codes (each works once). Keep them somewhere safe; we won't show them again.",
+    "copy": "Copy",
+    "saved": "I've saved them",
+    "loginHint": "Type the 6-digit code from your authenticator app.",
+    "recoveryHint": "No phone? Use a backup code.",
+    "verify": "Verify"
+  },
+  "billing": {
+    "pending": "Your payment is missing to start the {{plan}} plan.",
+    "confirming": "Confirming your payment with Mercado Pago…",
+    "payNow": "Pay with Mercado Pago",
+    "pastDue": "Your card couldn't be charged. Update it before {{date}} to avoid read-only mode.",
+    "pastDueShort": "Your subscription couldn't be charged.",
+    "readOnly": "Your business is read-only because the subscription couldn't be charged. You can see everything but not make changes.",
+    "updateCard": "Update card",
+    "active": "{{amount}} (IVA included) is charged every month through Mercado Pago.",
+    "manage": "See charges or change card",
+    "cancelled": "Your subscription was cancelled; the business moved to the Free plan."
+  },
+  "data": {
+    "title": "Your data",
+    "exportHelp": "Download all the business information (customers, bookings, sales, records) as a file.",
+    "export": "Download my data",
+    "deleteHelp": "Deleting the business erases customers, bookings, payments, records and files for good. Any subscription is cancelled.",
+    "delete": "Delete business",
+    "deleteTitle": "Delete {{name}}",
+    "deleteWarning": "This can't be undone. Download your data first.",
+    "typeName": "Type the business name ({{name}}) to confirm",
+    "deleteForGood": "Delete for good"
   }
 }

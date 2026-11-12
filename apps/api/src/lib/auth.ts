@@ -11,6 +11,7 @@ export interface TokenClaims {
 }
 
 const TOKEN_TTL = '7d';
+export const SESSION_DAYS = 7;
 
 function secret(): Uint8Array {
   const s = process.env.JWT_SECRET;
@@ -32,10 +33,32 @@ export async function signToken(claims: TokenClaims): Promise<string> {
 
 export async function verifyToken(token: string): Promise<TokenClaims> {
   const { payload } = await jwtVerify(token, secret(), { algorithms: ['HS256'] });
-  if (typeof payload.sub !== 'string' || typeof payload.tid !== 'string') {
+  if (typeof payload.sub !== 'string' || typeof payload.tid !== 'string' || payload.purpose) {
     throw new Error('invalid token claims');
   }
   return { sub: payload.sub, tid: payload.tid, role: payload.role as Role, iat: payload.iat };
+}
+
+/**
+ * Ticket between the password (or Google) step and the 6-digit code when two-step sign-in is on.
+ * Valid 10 minutes and useless as a session (no business in it).
+ */
+export async function signMfaToken(userId: string): Promise<string> {
+  return new SignJWT({ purpose: 'mfa' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime('10m')
+    .sign(secret());
+}
+
+export async function verifyMfaToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, secret(), { algorithms: ['HS256'] });
+    return payload.purpose === 'mfa' && typeof payload.sub === 'string' ? payload.sub : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Turns "Clínica Nutrición Sana" into "clinica-nutricion-sana". */

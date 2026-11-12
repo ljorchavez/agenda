@@ -9,6 +9,7 @@ import { escapeHtml, sendEmail } from '../lib/email.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { appUrl, isUndeliverable } from '../lib/notify.js';
 import { assertNotLimited, clientIp, recordAttempt } from '../lib/throttle.js';
+import { assertCaptcha } from '../lib/captcha.js';
 import { listStudies, toDtos } from './clinical.js';
 import { photoToken } from './records.js';
 import { getTenantBySlug } from './public.js';
@@ -33,6 +34,7 @@ portalRoutes.post('/public/:slug/portal/link', async (c) => {
     { key: `portal-ip:${clientIp(c)}`, max: 10, minutes: 60 },
   ];
   await assertNotLimited(db, limits);
+  await assertCaptcha(c);
   await recordAttempt(db, limits);
   const cu = await db.query.customers.findFirst({
     where: and(eq(customers.tenantId, tenant.id), sql`lower(${customers.email}) = ${email}`),

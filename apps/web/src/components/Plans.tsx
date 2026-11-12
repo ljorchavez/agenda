@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ADDON_PRICES, PLAN_LIMITS, PLANS, SELECTABLE_PLANS, type PlanId, type PlanInfoDto } from '@agenda/shared';
+import { ADDON_PRICES, BILLING_GRACE_DAYS, PLAN_LIMITS, PLANS, SELECTABLE_PLANS, type PlanId, type PlanInfoDto } from '@agenda/shared';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { money } from '../lib/format';
@@ -87,7 +87,13 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
   const qc = useQueryClient();
   const { setTenant, tenant } = useAuth();
   const [changing, setChanging] = useState(false);
-  const info = useQuery({ queryKey: ['plan'], queryFn: () => api<PlanInfoDto>('/tenant/plan') });
+  // Back from Mercado Pago: the webhook may take a few seconds to confirm the card.
+  const returning = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('billing') === 'return';
+  const info = useQuery({
+    queryKey: ['plan'],
+    queryFn: () => api<PlanInfoDto>('/tenant/plan'),
+    refetchInterval: (q) => (returning && q.state.data?.billing.status === 'pending' ? 4000 : false),
+  });
   const change = useMutation({
     mutationFn: (plan: PlanId) => api<{ checkoutUrl: string | null; plan: PlanInfoDto }>('/tenant/plan', { method: 'PUT', body: { plan } }),
     onSuccess: (r) => {
@@ -154,6 +160,7 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
           )}
           {p.extraBusiness && <p className="text-xs text-slate-500">{t('plans.extraBusinessNote')}</p>}
           {!p.billingConnected && <p className="text-xs text-slate-500">{t('plans.billingSoon')}</p>}
+          {p.billingConnected && <BillingStatus info={p} canChange={canChange} busy={change.isPending} pay={(x) => change.mutate(x)} returning={returning} />}
           {changing && (
             <div className="pt-2">
               <PlanCards current={p.plan} busy={change.isPending} onPick={(x) => change.mutate(x)} />
@@ -165,4 +172,42 @@ export function PlanSection({ canChange }: { canChange: boolean }) {
       )}
     </section>
   );
+}
+
+/** Card subscription state under the plan: waiting for the card, charged monthly, or a failed charge. */
+function BillingStatus({ info, canChange, busy, pay, returning }: { info: PlanInfoDto; canChange: boolean; busy: boolean; pay: (p: PlanId) => void; returning: boolean }) {
+  const { t, i18n } = useTranslation();
+  const b = info.billing;
+  const date = (iso: string, plusDays = 0) =>
+    new Date(new Date(iso).getTime() + plusDays * 86_400_000).toLocaleDateString(i18n.language.startsWith('en') ? 'en-US' : 'es-MX', { day: 'numeric', month: 'long' });
+  if (b.status === 'pending' && b.pendingPlan) {
+    return (
+      <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900" data-testid="billing-pending">
+        {returning ? t('billing.confirming') : t('billing.pending', { plan: t(`plans.${b.pendingPlan}`) })}
+        {canChange && !returning && (
+          <button type="button" className="btn-primary mt-2 block" disabled={busy} onClick={() => pay(b.pendingPlan!)}>{t('billing.payNow')}</button>
+        )}
+      </div>
+    );
+  }
+  if (b.status === 'past_due') {
+    return (
+      <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-900" data-testid="billing-past-due">
+        {b.readOnly ? t('billing.readOnly') : t('billing.pastDue', { date: b.pastDueSince ? date(b.pastDueSince, BILLING_GRACE_DAYS) : '' })}
+        {canChange && (
+          <button type="button" className="btn-primary mt-2 block" disabled={busy} onClick={() => pay(b.pendingPlan ?? info.plan)}>{t('billing.updateCard')}</button>
+        )}
+      </div>
+    );
+  }
+  if (b.status === 'active') {
+    return (
+      <p className="text-sm text-slate-600" data-testid="billing-active">
+        {t('billing.active', { amount: b.amountCents != null ? money(b.amountCents) : '' })}{' '}
+        <a href="https://www.mercadopago.com.mx/subscriptions" target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">{t('billing.manage')}</a>
+      </p>
+    );
+  }
+  if (b.status === 'cancelled') return <p className="text-sm text-slate-600">{t('billing.cancelled')}</p>;
+  return null;
 }

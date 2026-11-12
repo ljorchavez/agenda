@@ -1,3 +1,4 @@
+import { Captcha } from './Captcha';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -84,6 +85,7 @@ function BuyModal({ slug, item, onClose }: { slug: string; item: Item; onClose: 
   return (
     <Modal open title={`${title} · ${money(price)}`} onClose={onClose}>
       <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); buy.mutate(); }} data-testid="buy-form">
+        <Captcha />
         {item.kind === 'gift_card' && (
           <input className="input" maxLength={120} placeholder={t('shop.recipient')} value={form.recipientName} onChange={(e) => setForm({ ...form, recipientName: e.target.value })} />
         )}

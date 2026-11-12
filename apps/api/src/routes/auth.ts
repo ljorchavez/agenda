@@ -12,6 +12,11 @@ import {
   DEFAULT_RESERVATION_SETTINGS,
   DEFAULT_TENANT_SETTINGS,
   loginSchema,
+  mfaLoginSchema,
+  totpDisableSchema,
+  totpEnableSchema,
+  type MfaChallengeDto,
+  type TotpSetupDto,
   mercadoPagoConnectSchema,
   normalizeMxPhone,
   PLAN_LIMITS,
@@ -34,15 +39,18 @@ import { assertNotLimited, clearAttempts, clientIp, loginLimits, recordAttempt }
 import { memberships, resources, services, tenants, users, type Tenant, type User } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { starterResources } from '../lib/resources.js';
-import { hashPassword, signToken, slugify, verifyPassword } from '../lib/auth.js';
+import { hashPassword, signMfaToken, signToken, slugify, verifyMfaToken, verifyPassword } from '../lib/auth.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
-import { encryptSecret } from '../lib/crypto.js';
+import { decryptSecret, encryptSecret } from '../lib/crypto.js';
+import { clearSessionCookie, setSessionCookie } from '../lib/session.js';
+import { generateRecoveryCodes, generateTotpSecret, hashRecovery, otpauthUrl, verifyTotp } from '../lib/totp.js';
+import { assertCaptcha, turnstileSiteKey } from '../lib/captcha.js';
 import { toTenantDto } from '../lib/mappers.js';
 import { getAccount } from '../integrations/mercadopago.js';
 import { requireAuth, requireBusinessManager, requireManager, requireOwner, type AppEnv } from '../middleware/auth.js';
 import { resolveLocation } from '../lib/locations.js';
 import { assertCanAddBusiness, assertFitsPlan, planInfo } from '../lib/plan.js';
-import { billingProvider } from '../lib/billing.js';
+import { billingProvider, isDemoSlug, monthlyAmountFor } from '../lib/billing.js';
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -55,7 +63,7 @@ async function linkedResource(db: Pick<Db, 'query'>, tenantId: string, userId: s
   return r?.id ?? null;
 }
 
-async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 'email'> & { professional?: User['professional'] }, tenantId: string) {
+async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 'email'> & { professional?: User['professional']; totpEnabledAt?: User['totpEnabledAt'] }, tenantId: string) {
   const m = await db.query.memberships.findFirst({
     where: and(eq(memberships.tenantId, tenantId), eq(memberships.userId, u.id)),
     columns: { role: true, locationId: true },
@@ -69,6 +77,7 @@ async function sessionUser(db: Pick<Db, 'query'>, u: Pick<User, 'id' | 'name' | 
     resourceId: await linkedResource(db, tenantId, u.id),
     locationId: m.role === 'owner' ? null : m.locationId,
     professional: u.professional ?? null,
+    twoFactor: Boolean(u.totpEnabledAt),
   };
 }
 
@@ -82,8 +91,11 @@ async function businessesFor(db: Db, userId: string): Promise<BusinessSummary[]>
   return res.rows.map((r) => ({ id: r.id, name: r.name, slug: r.slug, businessType: r.business_type, kind: businessKind(r.business_type), role: r.role }));
 }
 
-/** Token + profile for one business; remembers it as the last one used. */
-async function issueSession(db: Db, user: Pick<User, 'id' | 'name' | 'email'>, tenantId: string): Promise<AuthResponse> {
+/**
+ * Token + profile for one business; remembers it as the last one used. The token also goes in
+ * the HttpOnly session cookie (the web app uses that; scripts and tests can use the token).
+ */
+async function issueSession(c: Context, db: Db, user: Pick<User, 'id' | 'name' | 'email' | 'totpEnabledAt'>, tenantId: string): Promise<AuthResponse> {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) });
   if (!tenant) throw notFound('tenant');
   const su = await sessionUser(db, user, tenantId);
@@ -92,6 +104,7 @@ async function issueSession(db: Db, user: Pick<User, 'id' | 'name' | 'email'>, t
     .set({ lastUsedAt: new Date() })
     .where(and(eq(memberships.tenantId, tenantId), eq(memberships.userId, user.id)));
   const token = await signToken({ sub: user.id, tid: tenant.id, role: su.role });
+  setSessionCookie(c, token);
   return { token, user: su, tenant: toTenantDto(tenant), businesses: await businessesFor(db, user.id) };
 }
 
@@ -150,25 +163,45 @@ async function createBusiness(
   return tenant!;
 }
 
+/** Sign-ups per device: enough for a front desk opening several businesses, not for a bot. */
+const registerLimits = (ip: string) => [{ key: `register-ip:${ip}`, max: 10, minutes: 60 }];
+
 authRoutes.post('/auth/register', async (c) => {
   const input = registerSchema.parse(await c.req.json());
   const db = getDb();
+  const ip = clientIp(c);
+  await assertNotLimited(db, registerLimits(ip));
+  await assertCaptcha(c);
   // With Google the verified Google email is the login; a random password is kept (reset works).
   if (input.googleCredential) input.email = (await verifyGoogleCredential(input.googleCredential)).email;
   else if (!input.password) throw new AppError(422, 'validation_error', 'Password required');
 
   const existing = await db.query.users.findFirst({ where: eq(users.email, input.email) });
   if (existing) throw conflict('email_taken', 'Email already registered');
+  await recordAttempt(db, registerLimits(ip));
 
+  // With card billing on, a paid plan starts once the card is in: the business opens on Gratis and
+  // the app sends the owner to pay right away (PUT /tenant/plan).
+  const plan: PlanId = billingProvider() ? 'free' : input.plan;
   const passwordHash = await hashPassword(input.password ?? randomBytes(24).toString('base64url'));
   const result = await db.transaction(async (tx) => {
-    const tenant = await createBusiness(tx, input);
+    const tenant = await createBusiness(tx, { ...input, plan });
     const [user] = await tx.insert(users).values({ email: input.email, passwordHash, name: input.name }).returning();
     await tx.insert(memberships).values({ tenantId: tenant.id, userId: user!.id, role: 'owner' });
     return { tenant, user: user! };
   });
-  return c.json(await issueSession(db, result.user, result.tenant.id), 201);
+  return c.json(await issueSession(c, db, result.user, result.tenant.id), 201);
 });
+
+/** Password (or Google) passed: either the session, or "now the code" when two-step is on. */
+async function afterFirstFactor(c: Context, db: Db, user: User) {
+  const [last] = await businessesFor(db, user.id);
+  if (!last) throw new AppError(401, 'no_business', 'This login has no business');
+  if (user.totpEnabledAt) {
+    return c.json({ mfaRequired: true, mfaToken: await signMfaToken(user.id) } satisfies MfaChallengeDto);
+  }
+  return c.json(await issueSession(c, db, user, last.id));
+}
 
 authRoutes.post('/auth/login', async (c) => {
   const input = loginSchema.parse(await c.req.json());
@@ -182,13 +215,11 @@ authRoutes.post('/auth/login', async (c) => {
     throw new AppError(401, 'invalid_credentials', 'Invalid email or password');
   }
   await clearAttempts(db, [limits[0]!.key]);
-  const [last] = await businessesFor(db, user.id);
-  if (!last) throw new AppError(401, 'no_business', 'This login has no business');
-  return c.json(await issueSession(db, user, last.id));
+  return afterFirstFactor(c, db, user);
 });
 
 /** Settings the app needs before login (no secrets). */
-authRoutes.get('/config', (c) => c.json({ googleClientId: googleClientId() } satisfies PublicConfigDto));
+authRoutes.get('/config', (c) => c.json({ googleClientId: googleClientId(), turnstileSiteKey: turnstileSiteKey() } satisfies PublicConfigDto));
 
 /** "Continuar con Google" for an existing account (same email). New people go to sign-up. */
 authRoutes.post('/auth/google', async (c) => {
@@ -197,9 +228,53 @@ authRoutes.post('/auth/google', async (c) => {
   const g = await verifyGoogleCredential(credential);
   const user = await db.query.users.findFirst({ where: eq(users.email, g.email) });
   if (!user) throw new AppError(404, 'google_no_account', 'No account with this Google email yet', { email: g.email, name: g.name });
+  return afterFirstFactor(c, db, user);
+});
+
+/**
+ * Checks the second factor: a 6-digit code (each one works once) or an unused recovery code
+ * (which is then spent). Returns false when it doesn't match.
+ */
+async function checkSecondFactor(db: Db, user: User, code: string): Promise<boolean> {
+  if (!user.totpSecretEnc) return false;
+  const clean = code.replace(/\s/g, '');
+  if (/^\d{6}$/.test(clean)) {
+    const step = verifyTotp(decryptSecret(user.totpSecretEnc), clean, user.totpLastStep ?? null);
+    if (step == null) return false;
+    // Atomic: two requests with the same code can't both pass.
+    const res = await db.execute(sql`update users set totp_last_step = ${step}
+      where id = ${user.id} and (totp_last_step is null or totp_last_step < ${step}) returning id`);
+    return res.rows.length > 0;
+  }
+  const hash = hashRecovery(clean);
+  const left = user.totpRecovery ?? [];
+  if (!left.includes(hash)) return false;
+  await db.update(users).set({ totpRecovery: left.filter((h) => h !== hash) }).where(eq(users.id, user.id));
+  return true;
+}
+
+authRoutes.post('/auth/login/2fa', async (c) => {
+  const { mfaToken, code } = mfaLoginSchema.parse(await c.req.json());
+  const userId = await verifyMfaToken(mfaToken);
+  if (!userId) throw new AppError(401, 'mfa_expired', 'Sign in again');
+  const db = getDb();
+  const limits = [{ key: `mfa:${userId}`, max: 5, minutes: 15 }];
+  await assertNotLimited(db, limits);
+  const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  if (!user?.totpEnabledAt) throw new AppError(401, 'mfa_expired', 'Sign in again');
+  if (!(await checkSecondFactor(db, user, code))) {
+    await recordAttempt(db, limits);
+    throw new AppError(422, 'mfa_bad_code', 'The code is not valid');
+  }
+  await clearAttempts(db, [limits[0]!.key]);
   const [last] = await businessesFor(db, user.id);
   if (!last) throw new AppError(401, 'no_business', 'This login has no business');
-  return c.json(await issueSession(db, user, last.id));
+  return c.json(await issueSession(c, db, user, last.id));
+});
+
+authRoutes.post('/auth/logout', (c) => {
+  clearSessionCookie(c);
+  return c.json({ ok: true });
 });
 
 // ---------- Authenticated ----------
@@ -209,6 +284,11 @@ authRoutes.get('/auth/me', requireAuth, async (c) => {
   const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')) });
   if (!user || !tenant) throw new AppError(401, 'unauthorized');
+  // Sessions from before the cookie (token kept by the browser) move to the cookie here.
+  if (c.get('authVia') === 'bearer') {
+    const header = c.req.header('authorization')!;
+    setSessionCookie(c, header.slice(7));
+  }
   return c.json({
     user: await sessionUser(db, user, tenant.id),
     tenant: toTenantDto(tenant),
@@ -227,7 +307,64 @@ authRoutes.post('/auth/switch', requireAuth, async (c) => {
     columns: { id: true },
   });
   if (!m) throw notFound('business');
-  return c.json(await issueSession(db, user, tenantId));
+  return c.json(await issueSession(c, db, user, tenantId));
+});
+
+// ---------- Two-step sign-in ----------
+
+/** Shared demo logins can't turn it on: it would lock every visitor out. */
+async function assertNotDemoUser(db: Db, userId: string) {
+  const res = await db.execute(sql`select 1 from memberships m join tenants t on t.id = m.tenant_id
+    where m.user_id = ${userId} and t.slug like '%-demo' limit 1`);
+  if (res.rows.length) throw new AppError(403, 'demo_account', 'Not available on the demo account');
+}
+
+/** Step 1: a new secret (not active until a code from the app confirms it). */
+authRoutes.post('/auth/2fa/setup', requireAuth, async (c) => {
+  const db = getDb();
+  const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
+  if (!user) throw new AppError(401, 'unauthorized');
+  if (user.totpEnabledAt) throw conflict('mfa_already_on', 'Two-step sign-in is already on');
+  await assertNotDemoUser(db, user.id);
+  const secret = generateTotpSecret();
+  await db.update(users).set({ totpSecretEnc: encryptSecret(secret), totpLastStep: null }).where(eq(users.id, user.id));
+  return c.json({ secret, otpauthUrl: otpauthUrl(secret, user.email) } satisfies TotpSetupDto);
+});
+
+/** Step 2: the first code turns it on and returns the recovery codes (shown only once). */
+authRoutes.post('/auth/2fa/enable', requireAuth, async (c) => {
+  const { code } = totpEnableSchema.parse(await c.req.json());
+  const db = getDb();
+  const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
+  if (!user?.totpSecretEnc) throw new AppError(422, 'mfa_not_started', 'Start the setup first');
+  if (user.totpEnabledAt) throw conflict('mfa_already_on', 'Two-step sign-in is already on');
+  const step = verifyTotp(decryptSecret(user.totpSecretEnc), code, null);
+  if (step == null) throw new AppError(422, 'mfa_bad_code', 'The code is not valid');
+  const recoveryCodes = generateRecoveryCodes();
+  await db
+    .update(users)
+    .set({ totpEnabledAt: new Date(), totpLastStep: step, totpRecovery: recoveryCodes.map(hashRecovery) })
+    .where(eq(users.id, user.id));
+  return c.json({ recoveryCodes });
+});
+
+/** Turning it off asks for the password and a code (or a recovery code). */
+authRoutes.post('/auth/2fa/disable', requireAuth, async (c) => {
+  const { password, code } = totpDisableSchema.parse(await c.req.json());
+  const db = getDb();
+  const limits = [{ key: `mfa-off:${c.get('userId')}`, max: 5, minutes: 15 }];
+  await assertNotLimited(db, limits);
+  const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
+  if (!user?.totpEnabledAt) throw new AppError(422, 'mfa_not_on', 'Two-step sign-in is off');
+  if (!(await verifyPassword(password, user.passwordHash)) || !(await checkSecondFactor(db, user, code))) {
+    await recordAttempt(db, limits);
+    throw new AppError(422, 'mfa_bad_code', 'Wrong password or code');
+  }
+  await db
+    .update(users)
+    .set({ totpEnabledAt: null, totpSecretEnc: null, totpLastStep: null, totpRecovery: null })
+    .where(eq(users.id, user.id));
+  return c.json({ ok: true });
 });
 
 /** Anyone signed in can open another business of their own (they become its owner). */
@@ -241,9 +378,13 @@ authRoutes.post('/businesses', requireAuth, async (c) => {
   const tenant = await db.transaction(async (tx) => {
     const t = await createBusiness(tx, { ...input, plan: 'standard' });
     await tx.insert(memberships).values({ tenantId: t.id, userId: user.id, role: 'owner' });
+    // With card billing on, it stays read-only until its subscription is paid (Plan y uso).
+    if (billingProvider()) {
+      await tx.update(tenants).set({ billingStatus: 'past_due', billingPastDueSince: new Date(0) }).where(eq(tenants.id, t.id));
+    }
     return t;
   });
-  return c.json(await issueSession(db, user, tenant.id), 201);
+  return c.json(await issueSession(c, db, user, tenant.id), 201);
 });
 
 /** Own account: name and password. */
@@ -275,8 +416,12 @@ authRoutes.get('/tenant/plan', requireAuth, requireBusinessManager, async (c) =>
 });
 
 /**
- * Owner changes the plan. With card billing connected this returns a checkout page and the plan
- * changes when the payment is confirmed; until then it applies right away without a charge.
+ * Owner changes the plan. With card billing connected:
+ * - to Gratis: the subscription is cancelled and the plan changes now;
+ * - between paid plans with a live subscription: the monthly amount changes from the next charge;
+ * - otherwise: a subscription is created and the owner goes to Mercado Pago to enter the card;
+ *   the plan changes when Mercado Pago confirms it (webhook).
+ * Without billing (and for demo businesses) the plan changes right away without a charge.
  */
 authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
   const { plan } = planChangeSchema.parse(await c.req.json());
@@ -288,16 +433,54 @@ authRoutes.put('/tenant/plan', requireAuth, requireOwner, async (c) => {
     const owned = await db.select({ id: memberships.id }).from(memberships).where(and(eq(memberships.userId, c.get('userId')), eq(memberships.role, 'owner')));
     if (owned.length > 1) throw new AppError(402, 'plan_limit_businesses', 'The free plan includes one business');
   }
-  const billing = billingProvider();
-  if (billing && plan !== 'free') {
-    const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
-    const info = await planInfo(db, tenantId, true);
-    const returnUrl = `${new URL(c.req.url).origin}/settings#plan`;
-    const url = await billing.checkoutUrl({ tenantId, plan, extraLocations: info.extraLocations, extraBusiness: info.extraBusiness, email: user!.email, returnUrl });
-    return c.json({ checkoutUrl: url, plan: info });
+  const tenant = (await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
+  const billing = isDemoSlug(tenant.slug) ? null : billingProvider();
+  const done = async () => c.json({ checkoutUrl: null, plan: await planInfo(db, tenantId, billing !== null) });
+  if (!billing) {
+    await db.update(tenants).set({ plan }).where(eq(tenants.id, tenantId));
+    return done();
   }
-  await db.update(tenants).set({ plan }).where(eq(tenants.id, tenantId));
-  return c.json({ checkoutUrl: null, plan: await planInfo(db, tenantId, billing !== null) });
+  const live = tenant.billingSubscriptionId && (tenant.billingStatus === 'active' || tenant.billingStatus === 'past_due');
+  if (plan === 'free') {
+    if (tenant.billingSubscriptionId) await billing.cancel(tenant.billingSubscriptionId).catch((e) => console.warn('[billing] cancel failed:', e));
+    await db
+      .update(tenants)
+      .set({ plan, billingStatus: 'none', billingSubscriptionId: null, billingPendingPlan: null, billingAmountCents: null, billingPastDueSince: null })
+      .where(eq(tenants.id, tenantId));
+    return done();
+  }
+  const amount = await monthlyAmountFor(db, tenantId, plan);
+  if (amount == null) throw new AppError(422, 'plan_unavailable', 'This plan has no price yet');
+  if (live && tenant.billingStatus === 'active') {
+    await billing.updateAmount(tenant.billingSubscriptionId!, amount);
+    await db.update(tenants).set({ plan, billingAmountCents: amount }).where(eq(tenants.id, tenantId));
+    return done();
+  }
+  // New subscription (first time, after a cancellation, or to replace a card that keeps failing).
+  const user = await db.query.users.findFirst({ where: eq(users.id, c.get('userId')) });
+  const returnUrl = `${(process.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, '')}/settings?tab=plan&billing=return`;
+  const names: Record<PlanId, string> = { free: 'Gratis', individual: 'Individual', standard: 'Estándar', premium: 'Premium' };
+  const sub = await billing.createSubscription({
+    tenantId,
+    plan,
+    amountCents: amount,
+    email: user!.email,
+    reason: `Lugali · Plan ${names[plan]} · ${tenant.name}`.slice(0, 120),
+    returnUrl,
+  });
+  // The old pending link (if any) stops mattering; a live one is replaced when the new one is paid.
+  if (tenant.billingSubscriptionId && tenant.billingStatus === 'pending') {
+    await billing.cancel(tenant.billingSubscriptionId).catch(() => undefined);
+  }
+  await db
+    .update(tenants)
+    .set({
+      billingStatus: tenant.billingStatus === 'past_due' ? 'past_due' : live ? tenant.billingStatus : 'pending',
+      billingSubscriptionId: live ? tenant.billingSubscriptionId : sub.id,
+      billingPendingPlan: plan,
+    })
+    .where(eq(tenants.id, tenantId));
+  return c.json({ checkoutUrl: sub.checkoutUrl, plan: await planInfo(db, tenantId, true) });
 });
 
 authRoutes.patch('/tenant', requireAuth, requireBusinessManager, async (c) => {

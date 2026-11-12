@@ -2,7 +2,7 @@ import { setPatientWords } from '../i18n';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { isHealthType, type AuthResponse, type BusinessSummary, type SessionUser, type TenantDto } from '@agenda/shared';
-import { api, tokenStore } from './api';
+import { api, sessionHint } from './api';
 
 interface AuthState {
   user: SessionUser | null;
@@ -24,26 +24,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [tenant, setTenant] = useState<TenantDto | null>(null);
-  const [loading, setLoading] = useState(Boolean(tokenStore.get()));
+  const [loading, setLoading] = useState(sessionHint.get());
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
   // Health businesses talk about "pacientes". Set while rendering (not in an effect) so the
   // children of this render, menu included, already use the right word.
   setPatientWords(Boolean(tenant && isHealthType(tenant.businessType)));
 
   useEffect(() => {
-    if (!tokenStore.get()) return;
+    if (!sessionHint.get()) return;
     api<{ user: SessionUser; tenant: TenantDto; businesses: BusinessSummary[] }>('/auth/me')
       .then((r) => {
+        // An old saved token has just been moved to the cookie: forget it.
+        if (sessionHint.legacyToken()) {
+          sessionHint.dropLegacy();
+          sessionHint.set();
+        }
         setUser(r.user);
         setTenant(r.tenant);
         setBusinesses(r.businesses ?? []);
       })
-      .catch(() => tokenStore.clear())
+      .catch(() => sessionHint.clear())
       .finally(() => setLoading(false));
   }, []);
 
   const setSession = useCallback((res: AuthResponse) => {
-    tokenStore.set(res.token);
+    sessionHint.dropLegacy();
+    sessionHint.set();
     qc.clear();
     setUser(res.user);
     setTenant(res.tenant);
@@ -55,7 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [setSession]);
 
   const logout = useCallback(() => {
-    tokenStore.clear();
+    sessionHint.clear();
+    void api('/auth/logout', { method: 'POST' }).catch(() => undefined);
     setUser(null);
     setTenant(null);
     setBusinesses([]);

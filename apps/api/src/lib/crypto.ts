@@ -1,29 +1,58 @@
 import crypto from 'node:crypto';
 
 /**
- * Symmetric encryption for secrets stored in the DB (e.g. each business's Mercado Pago token).
- * Key: DATA_ENCRYPTION_KEY if set, otherwise derived from JWT_SECRET.
- * Format: base64(iv[12] | tag[16] | ciphertext)
+ * Symmetric encryption for data stored in the DB (clinical records, each business's keys).
+ * AES-256-GCM, payload base64(iv[12] | tag[16] | ciphertext).
+ *
+ * - "v2:<payload>": key from DATA_ENCRYPTION_KEY (its own secret, so JWT_SECRET can be rotated
+ *   to sign everyone out without losing data).
+ * - "<payload>" (older rows): key derived from JWT_SECRET. Still readable; `db:reencrypt`
+ *   rewrites them as v2 on deploy.
  */
-function key(): Buffer {
-  const material = process.env.DATA_ENCRYPTION_KEY ?? process.env.JWT_SECRET;
-  if (!material) throw new Error('DATA_ENCRYPTION_KEY or JWT_SECRET must be set');
+const V2 = 'v2:';
+
+function derive(material: string): Buffer {
   return crypto.createHash('sha256').update(`agenda-data-key:${material}`).digest();
 }
+function dataKey(): Buffer | null {
+  const k = process.env.DATA_ENCRYPTION_KEY?.trim();
+  return k ? derive(k) : null;
+}
+function legacyKey(): Buffer {
+  const material = process.env.JWT_SECRET;
+  if (!material) throw new Error('JWT_SECRET must be set');
+  return derive(material);
+}
 
-export function encryptSecret(plain: string): string {
+function seal(plain: string, key: Buffer): string {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key(), iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   return Buffer.concat([iv, cipher.getAuthTag(), enc]).toString('base64');
 }
-
-export function decryptSecret(payload: string): string {
+function open(payload: string, key: Buffer): string {
   const buf = Buffer.from(payload, 'base64');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key(), buf.subarray(0, 12));
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, buf.subarray(0, 12));
   decipher.setAuthTag(buf.subarray(12, 28));
   return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8');
 }
+
+export function encryptSecret(plain: string): string {
+  const k = dataKey();
+  return k ? V2 + seal(plain, k) : seal(plain, legacyKey());
+}
+
+export function decryptSecret(payload: string): string {
+  if (payload.startsWith(V2)) {
+    const k = dataKey();
+    if (!k) throw new Error('DATA_ENCRYPTION_KEY is needed to read this data');
+    return open(payload.slice(V2.length), k);
+  }
+  return open(payload, legacyKey());
+}
+
+/** Encrypted with the old JWT_SECRET-derived key (and a data key is available to move it). */
+export const needsReencrypt = (payload: string) => !payload.startsWith(V2) && dataKey() !== null;
 
 /**
  * Signed, unguessable token for a customer's "manage my appointment" link (/c/<token>).

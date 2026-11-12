@@ -22,6 +22,8 @@ import {
   type PublicBusinessDto,
 } from '@agenda/shared';
 import { getDb, type Db } from '../db/client.js';
+import { limitPublic } from '../lib/throttle.js';
+import { assertCaptcha } from '../lib/captcha.js';
 import { appointments, customers, services, tenants, type Appointment, type Customer, type Service, type Tenant } from '../db/schema.js';
 import { hasOverlap } from '../lib/appointments.js';
 import { findUsableCoupon, resolveDiscount } from '../lib/discounts.js';
@@ -533,6 +535,8 @@ async function bookResource(requestUrl: string, tenant: Tenant, raw: unknown): P
 
 publicRoutes.post('/public/:slug/bookings', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
+  await limitPublic(getDb(), c, 'booking', 60);
+  await assertCaptcha(c);
   const body = await c.req.json();
   const booked = kindConfig(businessKind(tenant.businessType)).sessions ? await bookClass(c.req.url, tenant, body) : await bookResource(c.req.url, tenant, body);
   await notifyAppointment(booked.id, 'booked');

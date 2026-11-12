@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { publicPurchaseSchema, type OnlinePurchase } from '@agenda/shared';
 import { getDb } from '../db/client.js';
+import { limitPublic } from '../lib/throttle.js';
+import { assertCaptcha } from '../lib/captcha.js';
 import { offerings, payments } from '../db/schema.js';
 import { purchaseToken, verifyPurchaseToken } from '../lib/crypto.js';
 import { AppError, notFound } from '../lib/errors.js';
@@ -14,6 +16,8 @@ export const shopRoutes = new Hono();
 
 shopRoutes.post('/public/:slug/purchases', async (c) => {
   const tenant = await getTenantBySlug(c.req.param('slug'));
+  await limitPublic(getDb(), c, 'purchase', 20);
+  await assertCaptcha(c);
   const input = publicPurchaseSchema.parse(await c.req.json());
   const db = getDb();
   const shop = await shopFor(db, tenant);

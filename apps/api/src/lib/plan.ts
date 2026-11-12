@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { ADDON_PRICES, PLAN_LIMITS, type PlanId, type PlanInfoDto, type PlanUsage } from '@agenda/shared';
+import { ADDON_PRICES, PLAN_LIMITS, type BillingStatus, type PlanId, type PlanInfoDto, type PlanUsage } from '@agenda/shared';
+import { isReadOnly } from './billing.js';
 import type { Db } from '../db/client.js';
 import { memberships, tenants } from '../db/schema.js';
 import { AppError } from './errors.js';
@@ -112,6 +113,12 @@ async function isExtraBusiness(db: Q, tenantId: string): Promise<boolean> {
 
 export async function planInfo(db: Q, tenantId: string, billingConnected: boolean): Promise<PlanInfoDto> {
   const plan = await planOf(db, tenantId);
+  const b = (
+    await db.execute<{ status: BillingStatus; pending_plan: PlanId | null; amount: number | null; since: string | null }>(sql`
+      select billing_status as status, billing_pending_plan as pending_plan, billing_amount_cents as amount,
+             billing_past_due_since as since from tenants where id = ${tenantId}`)
+  ).rows[0];
+  const since = b?.since ? new Date(b.since) : null;
   const limits = PLAN_LIMITS[plan];
   const usage = await planUsage(db, tenantId);
   const extraLocations = Math.max(0, usage.activeLocations - limits.includedLocations);
@@ -125,6 +132,13 @@ export async function planInfo(db: Q, tenantId: string, billingConnected: boolea
     extraBusiness,
     monthlyTotalCents: base == null ? null : base + extraLocations * ADDON_PRICES.extraLocationCents,
     billingConnected,
+    billing: {
+      status: b?.status ?? 'none',
+      pendingPlan: b?.pending_plan ?? null,
+      amountCents: b?.amount == null ? null : Number(b.amount),
+      pastDueSince: since?.toISOString() ?? null,
+      readOnly: isReadOnly({ billingStatus: b?.status ?? 'none', billingPastDueSince: since }),
+    },
   };
 }
 

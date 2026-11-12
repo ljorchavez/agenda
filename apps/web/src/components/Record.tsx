@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RECORD_PHOTO_MAX_BYTES, type CustomerRecordDto, type RecordPhotoDto } from '@agenda/shared';
-import { api, ApiError, tokenStore } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateOnly, dateTime } from '../lib/format';
 import { shrink } from './Photo';
@@ -15,7 +15,7 @@ function PrivatePhoto({ photo, onOpen }: { photo: RecordPhotoDto; onOpen: (url: 
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let revoke: string | null = null;
-    void fetch(`/api/record-photos/${photo.id}`, { headers: { Authorization: `Bearer ${tokenStore.get() ?? ''}` } })
+    void fetch(`/api/record-photos/${photo.id}`, { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.blob() : null))
       .then((b) => {
         if (b) {

@@ -3,7 +3,8 @@ import { AcceptLegal } from './Legal';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
-import { SELECTABLE_PLANS, type AuthResponse, type BusinessType, type PlanId } from '@agenda/shared';
+import { SELECTABLE_PLANS, type AuthResponse, type BusinessType, type MfaChallengeDto, type PlanId } from '@agenda/shared';
+import { Captcha } from '../components/Captcha';
 import { LanguageSwitch } from '../components/Layout';
 import { PlanCards, PlanExtras } from '../components/Plans';
 import { ErrorText, Modal } from '../components/ui';
@@ -12,6 +13,9 @@ import { BusinessTypePicker } from '../components/BusinessTypePicker';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
+type LoginResult = AuthResponse | MfaChallengeDto;
+const needsCode = (r: LoginResult): r is MfaChallengeDto => 'mfaRequired' in r && r.mfaRequired;
+
 /** Sign-in form; lives in a floating window over the home page. */
 export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?: () => void }) {
   const { t } = useTranslation();
@@ -19,23 +23,28 @@ export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Two-step sign-in: the password passed, now the code from the app.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+
+  const finish = (res: LoginResult) => {
+    if (needsCode(res)) {
+      setMfaToken(res.mfaToken);
+      return;
+    }
+    setSession(res);
+    onDone?.();
+    navigate('/agenda');
+  };
 
   const login = useMutation({
-    mutationFn: () => api<AuthResponse>('/auth/login', { method: 'POST', body: { email, password } }),
-    onSuccess: (res) => {
-      setSession(res);
-      onDone?.();
-      navigate('/agenda');
-    },
+    mutationFn: () => api<LoginResult>('/auth/login', { method: 'POST', body: { email, password } }),
+    onSuccess: finish,
   });
 
   const google = useMutation({
-    mutationFn: (credential: string) => api<AuthResponse>('/auth/google', { method: 'POST', body: { credential } }),
-    onSuccess: (res) => {
-      setSession(res);
-      onDone?.();
-      navigate('/agenda');
-    },
+    mutationFn: (credential: string) => api<LoginResult>('/auth/google', { method: 'POST', body: { credential } }),
+    onSuccess: finish,
     onError: (err, credential) => {
       // New person: continue to sign-up with the Google email already filled in.
       if (err instanceof ApiError && err.code === 'google_no_account') {
@@ -47,10 +56,54 @@ export function LoginForm({ onDone, onForgot }: { onDone?: () => void; onForgot?
     },
   });
 
+  const second = useMutation({
+    mutationFn: () => api<AuthResponse>('/auth/login/2fa', { method: 'POST', body: { mfaToken, code } }),
+    onSuccess: finish,
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === 'mfa_expired') setMfaToken(null);
+    },
+  });
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     login.mutate();
   };
+
+  if (mfaToken) {
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          second.mutate();
+        }}
+        className="space-y-4"
+        data-testid="mfa-form"
+      >
+        <p className="text-sm text-slate-600">{t('mfa.loginHint')}</p>
+        <div>
+          <label className="label" htmlFor="mfa-code">{t('mfa.code')}</label>
+          <input
+            id="mfa-code"
+            required
+            autoFocus
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            className="input text-center text-lg tracking-widest"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+          <p className="mt-1 text-xs text-slate-500">{t('mfa.recoveryHint')}</p>
+        </div>
+        <ErrorText error={second.error} ns="auth" />
+        <button type="submit" className="btn-primary w-full" disabled={second.isPending}>
+          {second.isPending ? t('common.loading') : t('mfa.verify')}
+        </button>
+        <button type="button" className="w-full text-sm text-slate-500 hover:underline" onClick={() => { setMfaToken(null); setCode(''); }}>
+          {t('common.back')}
+        </button>
+      </form>
+    );
+  }
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -235,9 +288,18 @@ export function RegisterPage() {
           locale: i18n.language.startsWith('en') ? 'en' : 'es',
         },
       }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       googleSignup.clear();
       setSession(res);
+      // With card billing on, the business opens on Gratis and the owner goes to pay the plan.
+      if (plan && plan !== 'free' && res.tenant.plan !== plan) {
+        try {
+          const r = await api<{ checkoutUrl: string | null }>('/tenant/plan', { method: 'PUT', body: { plan } });
+          if (r.checkoutUrl) return window.location.assign(r.checkoutUrl);
+        } catch {
+          /* they can pay later from Configuración → Plan */
+        }
+      }
       navigate('/services');
     },
   });
@@ -314,7 +376,8 @@ export function RegisterPage() {
                   </div>
                 </>
               )}
-              {plan !== 'free' && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">{t('plans.billingSoon')}</p>}
+              {plan !== 'free' && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">{t('plans.billingNext')}</p>}
+              <Captcha />
               <ErrorText error={register.error} ns="auth" />
               <button className="btn-primary w-full" disabled={register.isPending}>
                 {register.isPending ? t('common.loading') : t('auth.register')}

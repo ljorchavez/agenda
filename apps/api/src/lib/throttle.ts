@@ -67,3 +67,14 @@ export async function pruneAuthTables(db: Pick<Db, 'execute'>): Promise<void> {
   await db.execute(sql`delete from auth_attempts where created_at < now() - interval '1 day'`);
   await db.execute(sql`delete from password_resets where expires_at < now()`);
 }
+
+/**
+ * Public forms (bookings, purchases, reviews, changes to a booking): counts every request per
+ * device and answers 429 past `max` in `minutes`, so a script can't flood a business.
+ */
+export async function limitPublic(db: Pick<Db, 'execute'>, c: Context, name: string, max: number, minutes = 60): Promise<void> {
+  if (process.env.NODE_ENV === 'test' && !process.env.TEST_PUBLIC_LIMITS) return;
+  const limits = [{ key: `${name}-ip:${clientIp(c)}`, max, minutes }];
+  await assertNotLimited(db, limits);
+  await recordAttempt(db, limits);
+}
