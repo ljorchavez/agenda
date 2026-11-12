@@ -338,7 +338,7 @@ function SaleActions({ sale }: { sale: SaleDto }) {
   const canInvoice = manager && inv.data?.available && inv.data.connected && sale.status === 'paid' && !sale.invoice && sale.payments[0];
   return (
     <span className="inline-flex flex-wrap items-center gap-3">
-      <button type="button" className="text-brand-700 hover:underline" onClick={() => openTicket(sale.id)} data-testid="pos-ticket">{t('ticket.ticket')}</button>
+      <button type="button" className="text-brand-700 hover:underline" onClick={() => openTicket(sale.id)} data-testid="sale-ticket">{t('ticket.ticket')}</button>
       {sale.invoice && <span className="text-xs text-slate-600">🧾 {`${sale.invoice.series ?? ''}${sale.invoice.folio ?? ''}`}{sale.invoice.test ? ` (${t('invoicing.testShort')})` : ''}</span>}
       {canInvoice && <button type="button" className="text-brand-700 hover:underline" onClick={() => setInvoicing(true)}>{t('invoicing.issue')}</button>}
       {manager && sale.status === 'paid' && !sale.invoice && (
