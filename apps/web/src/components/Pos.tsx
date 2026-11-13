@@ -103,6 +103,8 @@ const useProducts = (locationId: string, all = false, enabled = true) => {
       }
     },
     enabled: enabled && Boolean(locationId),
+    // React Query pauses requests offline by default; a register answers from its copy
+    networkMode: register ? 'always' : 'online',
   });
 };
 
@@ -240,6 +242,8 @@ export function PosTab() {
   };
 
   const charge = useMutation({
+    // Don't wait for the connection: a register charges offline
+    networkMode: 'always',
     // `win`: a window opened on the click (browsers block opening one later) for the ticket
     mutationFn: async (_win: Window | null): Promise<Done> => {
       const clientId = uuid();
