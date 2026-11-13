@@ -43,6 +43,8 @@ export const PAYMENT_FORMS: Record<string, string> = {
   cash: '01',
   transfer: '03',
   card: '04',
+  credit_card: '04',
+  debit_card: '28',
   mercadopago: '04',
   terminal: '04',
   other: '99',

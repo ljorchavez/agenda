@@ -222,7 +222,7 @@ export async function seedDemo() {
   }
 
   const inserted = await db.insert(appointments).values(apptValues).returning();
-  const payValues = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'transfer', 'cash'] });
+  const payValues = await seedPayments(tenantId, inserted, { manual: ['cash', 'debit_card', 'transfer', 'cash'] });
 
   console.log(
     `Seeded tenant "${tenant!.name}" with ${custs.length} customers, ${inserted.length} appointments, ${payValues} payments`,
@@ -441,7 +441,7 @@ async function seedRestaurant() {
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
   // Only groups of 6+ leave a deposit
-  await seedPayments(tenantId, inserted, { manual: ['card', 'card', 'cash', 'transfer'], depositIf: (a) => (a.partySize ?? 0) >= 6 });
+  await seedPayments(tenantId, inserted, { manual: ['credit_card', 'debit_card', 'cash', 'transfer'], depositIf: (a) => (a.partySize ?? 0) >= 6 });
   console.log(`Seeded restaurant with ${tables.length} tables, ${inserted.length} reservations`);
 }
 
@@ -466,7 +466,7 @@ async function demoCustomers(tenantId: string, count: number, phonePrefix: strin
   )) as unknown as (typeof customers.$inferSelect)[];
 }
 
-type Method = 'cash' | 'card' | 'transfer';
+type Method = 'cash' | 'credit_card' | 'debit_card' | 'transfer';
 /**
  * Payments for demo bookings, covering every collection state: online deposits (Mercado Pago),
  * deposits later settled in person, deposits never settled (they owe), unpaid past bookings,
@@ -632,7 +632,7 @@ async function seedBarbershop() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'] });
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'credit_card', 'debit_card', 'transfer'] });
   console.log(`Seeded barbershop with ${pros.length} barbers, ${inserted.length} appointments, ${paid} payments`);
 }
 
@@ -738,7 +738,7 @@ async function seedClasses() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'], depositPct: 50, online: 0.5 });
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'credit_card', 'debit_card', 'transfer'], depositPct: 50, online: 0.5 });
   console.log(`Seeded yoga studio with ${sessions.length} classes, ${inserted.length} bookings, ${paid} payments`);
 }
 
@@ -813,7 +813,7 @@ async function seedPadel() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'] });
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'credit_card', 'debit_card', 'transfer'] });
   console.log(`Seeded padel club with ${courts.length} courts, ${inserted.length} bookings, ${paid} payments`);
 }
 
@@ -911,7 +911,7 @@ async function seedDoctor() {
     }
   }
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'card', 'transfer'], depositPct: 50, online: 0.45 });
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'credit_card', 'debit_card', 'transfer'], depositPct: 50, online: 0.45 });
   console.log(`Seeded medical practice with ${docs.length} doctors, ${inserted.length} appointments, ${paid} payments`);
 }
 
@@ -1028,7 +1028,7 @@ async function sellAndUse(tenantId: string, o: typeof offerings.$inferSelect, us
       })
       .returning();
     await db.insert(payments).values({
-      tenantId, customerId, amountCents: o.priceCents, method: pick(['cash', 'card', 'transfer'] as const), status: 'paid',
+      tenantId, customerId, amountCents: o.priceCents, method: pick(['cash', 'debit_card', 'transfer'] as const), status: 'paid',
       paidAt: first.set({ hour: 11 }).toJSDate(), customerPlanId: plan!.id, notes: o.name,
     });
     for (const u of list.slice(0, perCustomer)) {
@@ -1127,7 +1127,7 @@ async function seedExtras() {
         .insert(giftCards)
         .values({ tenantId: barber.id, code, initialCents: amount, balanceCents: i === 1 ? 5000 : amount, customerId: cu.id, recipientName: ['Para Javier', 'Para Rodrigo', 'Para mi papá'][i], soldBy: demoOwnerId })
         .returning();
-      await db.insert(payments).values({ tenantId: barber.id, customerId: cu.id, amountCents: amount, method: 'card', status: 'paid', paidAt: DateTime.now().minus({ days: 10 + i }).toJSDate(), soldGiftCardId: g!.id, notes: `Tarjeta de regalo ${code}` });
+      await db.insert(payments).values({ tenantId: barber.id, customerId: cu.id, amountCents: amount, method: 'credit_card', status: 'paid', paidAt: DateTime.now().minus({ days: 10 + i }).toJSDate(), soldGiftCardId: g!.id, notes: `Tarjeta de regalo ${code}` });
     }
     // Cash closings for the last two days at each location
     const locs = await db.select().from(locations).where(eq(locations.tenantId, barber.id));
@@ -1317,7 +1317,7 @@ async function seedPractice(o: {
   // One booking per practitioner and hour
   const unique = [...new Map(rows.map((r) => [`${r.resourceId}${(r.startsAt as Date).toISOString()}`, r])).values()];
   const inserted = (await insertChunked(appointments, unique)) as unknown as (typeof appointments.$inferSelect)[];
-  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'card', 'transfer'], depositPct: 30, online: 0.4 });
+  const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'debit_card', 'transfer'], depositPct: 30, online: 0.4 });
   console.log(`Seeded ${o.name} with ${inserted.length} appointments, ${paid} payments`);
 }
 

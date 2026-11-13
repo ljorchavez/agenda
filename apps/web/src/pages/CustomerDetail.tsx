@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { isHealthType, paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
+import { inPersonMethods, isHealthType, paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -206,8 +206,7 @@ function PaymentModal({ customerId, onClose }: { customerId: string; onClose: ()
   const [amount, setAmount] = useState('');
   const { tenant } = useAuth();
   const pay = paymentSettingsOf(tenant!.settings);
-  const enabled = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
-  const options = enabled.length ? enabled : (['cash', 'card', 'transfer'] as const);
+  const options = inPersonMethods(pay);
   const [method, setMethod] = useState<PaymentMethod>(options[0]!);
   const save = useMutation({
     mutationFn: () => api('/payments', { method: 'POST', body: { customerId, amountCents: toCents(amount), method, status: 'paid' } }),

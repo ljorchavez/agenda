@@ -226,11 +226,11 @@ ok('time edits in place', (await page.locator('[role=dialog] input[type=datetime
 const dlg = page.locator('[role=dialog]');
 await dlg.getByRole('button', { name: 'Cancelar', exact: true }).click();
 await dlg.getByRole('button', { name: 'Cobrar', exact: true }).click();
-await page.selectOption('#am-method', 'card');
+await page.selectOption('#am-method', 'credit_card');
 await dlg.getByRole('button', { name: 'Registrar pago', exact: true }).click();
 await page.waitForTimeout(1000);
 const after = await api(`/appointments/${bk.id}`, null, tok);
-ok('charge in place settles it', after.paidCents >= after.priceCents && after.paidMethods.includes('card'), JSON.stringify(after.paidMethods));
+ok('charge in place settles it', after.paidCents >= after.priceCents && after.paidMethods.includes('credit_card'), JSON.stringify(after.paidMethods));
 ok('window shows both methods', ((await page.getByTestId('paid-methods').textContent()) ?? '').includes('Tarjeta'));
 await page.keyboard.press('Escape');
 await api(`/appointments/${bk.id}`, null, tok, 'DELETE').catch(() => null);

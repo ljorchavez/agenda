@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -60,7 +60,7 @@ const useHealth = () => {
 };
 
 type Line = OpenTicket['lines'][number];
-type Done = { sale: SaleDto | null; pending: PendingSale | null; changeCents: number };
+type Done = { sale: SaleDto | null; pending: PendingSale | null; changeCents: number; invoice?: boolean };
 
 /** Location picker shared by the two tabs: owners with several locations choose; others use theirs. */
 function useLocationChoice() {
@@ -179,6 +179,16 @@ export function PosTab() {
   const [free, setFree] = useState<{ name: string; price: string } | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [discard, setDiscard] = useState<string | null>(null);
+  // With invoicing on, "Cobrar" first asks whether this sale gets a factura
+  const inv = useInvoicing(manager);
+  const invoicingOn = Boolean(manager && online && inv.data?.available && inv.data.connected);
+  const [askInvoice, setAskInvoice] = useState(false);
+  const wantInvoice = useRef(false);
+  const doCharge = (withInvoice: boolean) => {
+    wantInvoice.current = withInvoice;
+    setAskInvoice(false);
+    charge.mutate(autoPrint ? window.open('', '_blank') : null);
+  };
   const [autoPrint, setAutoPrint] = useState(() => {
     try {
       return localStorage.getItem('agenda.pos.autoPrint') === '1';
@@ -238,6 +248,7 @@ export function PosTab() {
   const switchTo = (id: string) => {
     open.select(id);
     resetPayment();
+    setAskInvoice(false);
     setDiscard(null);
   };
 
@@ -291,7 +302,8 @@ export function PosTab() {
         if (d.sale) openTicket(d.sale.id, { print: true, changeCents: d.changeCents, win });
         else if (d.pending) openTicket(d.pending.clientId, { print: true, changeCents: d.changeCents, win, local: true });
       }
-      setDone(d);
+      setDone({ ...d, invoice: wantInvoice.current && Boolean(d.sale) });
+      wantInvoice.current = false;
       open.remove(open.active.id);
       resetPayment();
       void qc.invalidateQueries({ queryKey: ['products'] });
@@ -447,7 +459,7 @@ export function PosTab() {
             <p className="w-full text-xs text-slate-600">{t('pos.splitRest', { amount: money(total - splitCents), method: t(`methods.${method}`) })}</p>
           </div>
         ) : (
-          <button type="button" className="text-sm text-brand-700 hover:underline" onClick={() => setSplit({ method: method === 'cash' ? 'card' : 'cash', amount: '' })}>{t('pos.split')}</button>
+          <button type="button" className="text-sm text-brand-700 hover:underline" onClick={() => setSplit({ method: method === 'cash' ? 'debit_card' : 'cash', amount: '' })}>{t('pos.split')}</button>
         )}
         {cashDue > 0 && (
           <div className="flex items-end gap-3">
@@ -467,11 +479,21 @@ export function PosTab() {
           type="button"
           className="btn-primary w-full !py-3 text-base"
           disabled={!lines.length || charge.isPending || Boolean(shortStock) || (cashDue > 0 && received !== '' && changeCents < 0)}
-          onClick={() => charge.mutate(autoPrint ? window.open('', '_blank') : null)}
+          onClick={() => (invoicingOn ? setAskInvoice(true) : doCharge(false))}
           data-testid="pos-charge"
         >
           {charge.isPending ? t('common.loading') : t('pos.charge', { amount: money(total) })}
         </button>
+        {askInvoice && !charge.isPending && (
+          <div className="space-y-2 rounded-lg border border-brand-200 bg-brand-50 p-3" data-testid="pos-ask-invoice">
+            <p className="text-sm font-medium text-slate-800">{t('pos.askInvoice')}</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-primary" onClick={() => doCharge(true)} data-testid="pos-invoice-yes">{t('pos.invoiceYes')}</button>
+              <button type="button" className="btn-secondary" onClick={() => doCharge(false)} data-testid="pos-invoice-no">{t('pos.invoiceNo')}</button>
+              <button type="button" className="text-sm text-slate-500 hover:underline" onClick={() => setAskInvoice(false)}>{t('common.cancel')}</button>
+            </div>
+          </div>
+        )}
         <label className="flex items-center gap-2 text-xs text-slate-600">
           <input type="checkbox" checked={autoPrint} onChange={(e) => toggleAutoPrint(e.target.checked)} data-testid="pos-autoprint" /> {t('ticket.autoPrint')}
         </label>
@@ -511,7 +533,7 @@ export function PosTab() {
             <p className="text-2xl font-semibold">{money(done.sale?.totalCents ?? done.pending?.totalCents ?? 0)}</p>
             {done.changeCents > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-lg font-semibold text-emerald-800">{t('pos.change', { amount: money(done.changeCents) })}</p>}
             {done.pending && <p className="rounded-lg bg-amber-50 p-3 text-amber-900" data-testid="pos-done-offline">📶 {t('pos.offline.savedHere')}</p>}
-            {done.sale && <SaleActions sale={done.sale} />}
+            {done.sale && <SaleActions sale={done.sale} startInvoicing={done.invoice} />}
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -624,12 +646,12 @@ function RegisterSwitch({ tenantId, on, locationId }: { tenantId: string; on: bo
 }
 
 /** Invoice and (for managers) cancel buttons of a sale. */
-function SaleActions({ sale }: { sale: SaleDto }) {
+function SaleActions({ sale, startInvoicing }: { sale: SaleDto; startInvoicing?: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { manager } = useAccess();
   const inv = useInvoicing(manager);
-  const [invoicing, setInvoicing] = useState(false);
+  const [invoicing, setInvoicing] = useState(Boolean(startInvoicing));
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['sales'] });
     void qc.invalidateQueries({ queryKey: ['products'] });

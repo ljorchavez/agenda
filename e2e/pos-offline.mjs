@@ -83,7 +83,7 @@ await ctx.setOffline(true);
 await page.getByTestId('pos-offline-bar').waitFor({ timeout: 5000 }).catch(() => {});
 ok('offline banner says you can keep selling', /Sin internet: sigues vendiendo/.test((await page.getByTestId('pos-offline-bar').textContent().catch(() => '')) ?? ''));
 await products.getByRole('button', { name: /Gel fijador/ }).click();
-await page.getByTestId('pos-method-card').click();
+await page.getByTestId('pos-method-debit_card').click();
 await page.getByTestId('pos-charge').click();
 await page.getByTestId('pos-done-offline').waitFor({ timeout: 10000 }).catch(() => {});
 ok('offline sale saved on the computer', await page.getByTestId('pos-done-offline').isVisible().catch(() => false), (await page.getByTestId('pos-ticket').textContent().catch(() => ''))?.slice(-300));
@@ -114,7 +114,7 @@ await page.getByTestId('pos-pending').waitFor({ state: 'detached', timeout: 3000
 ok('back online the sale uploads itself', (await page.getByTestId('pos-pending').count()) === 0);
 const sales = await api('/sales', undefined, tok);
 const up = sales.find((s) => s.offline);
-ok('the server has it once, marked offline, paid by card', sales.filter((s) => s.offline).length === 1 && up?.payments[0]?.method === 'card' && up?.totalCents === 9000, JSON.stringify(sales.map((s) => [s.number, s.offline, s.totalCents])));
+ok('the server has it once, marked offline, paid by debit card', sales.filter((s) => s.offline).length === 1 && up?.payments[0]?.method === 'debit_card' && up?.totalCents === 9000, JSON.stringify(sales.map((s) => [s.number, s.offline, s.totalCents])));
 const stock = (await api('/products', undefined, tok)).find((p) => p.id === gel.id)?.stock;
 ok('stock went down for the offline sale', stock === 4, String(stock));
 const local = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('lugali.pos.queue.')).length);
@@ -143,6 +143,37 @@ if (SW) {
   await page.getByRole('button', { name: /Nueva venta/ }).click().catch(() => {});
   await page.getByTestId('pos-pending').waitFor({ state: 'detached', timeout: 30000 }).catch(() => {});
   ok('and uploads it afterwards', (await api('/sales', undefined, tok)).filter((s) => s.offline).length === 2);
+}
+
+// ---- With invoicing on: "Cobrar" asks whether to invoice ----
+{
+  await ctx.setOffline(false);
+  const inv = await ctx.newPage();
+  await inv.route('**/api/invoicing', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json().catch(() => ({}));
+    await route.fulfill({ response: res, json: { ...body, available: true, connected: true } });
+  });
+  await inv.goto(BASE + '/pos');
+  const prods = inv.getByTestId('pos-products');
+  await prods.waitFor({ timeout: 15000 });
+  await inv.getByTestId('pos-register').uncheck().catch(() => {});
+  await prods.getByRole('button', { name: /Agua natural/ }).click();
+  await inv.getByTestId('pos-method-credit_card').click();
+  await inv.getByTestId('pos-charge').click();
+  ok('invoicing on: charging asks about the factura first', await inv.getByTestId('pos-ask-invoice').isVisible().catch(() => false));
+  await inv.getByTestId('pos-invoice-no').click();
+  await inv.getByRole('button', { name: /Nueva venta/ }).waitFor({ timeout: 10000 });
+  ok('"just charge" sells without opening the invoice', (await inv.getByTestId('invoice-modal').count()) === 0);
+  await inv.getByRole('button', { name: /Nueva venta/ }).click();
+  await prods.getByRole('button', { name: /Agua natural/ }).click();
+  await inv.getByTestId('pos-charge').click();
+  await inv.getByTestId('pos-invoice-yes').click();
+  await inv.getByTestId('invoice-modal').waitFor({ timeout: 10000 }).catch(() => {});
+  ok('"charge and invoice" opens the invoice for the sale', await inv.getByTestId('invoice-modal').isVisible().catch(() => false));
+  const last = (await api('/sales', undefined, tok))[0];
+  ok('paid with credit card', last?.payments?.[0]?.method === 'credit_card', JSON.stringify(last?.payments));
+  await inv.close();
 }
 
 await browser.close();

@@ -6,6 +6,7 @@ import { InvoiceCell, useInvoicing } from '../components/Invoicing';
 import { addDays, addMonths, format, startOfDay, startOfMonth, startOfYear } from 'date-fns';
 import {
   MANUAL_METHODS,
+  inPersonMethods,
   OWED_STATES,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
@@ -547,8 +548,7 @@ function RecordPaymentModal({ row, onClose }: { row: CollectionDto; onClose: () 
   const { t } = useTranslation();
   const { tenant } = useAuth();
   const qc = useQueryClient();
-  const accepted = MANUAL_METHODS.filter((m) => paymentSettingsOf(tenant!.settings).methods[m]);
-  const options = accepted.length ? accepted : [...MANUAL_METHODS];
+  const options = inPersonMethods(paymentSettingsOf(tenant!.settings));
   const [amount, setAmount] = useState(String(row.balanceCents / 100));
   const [method, setMethod] = useState<(typeof MANUAL_METHODS)[number]>(options[0]!);
   const save = useMutation({

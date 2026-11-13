@@ -107,6 +107,8 @@
   "methods": {
     "cash": "Efectivo",
     "card": "Tarjeta",
+    "credit_card": "Tarjeta de crédito",
+    "debit_card": "Tarjeta de débito",
     "transfer": "Transferencia",
     "mercadopago": "Mercado Pago",
     "spei": "Mercado Pago · SPEI",
@@ -1795,7 +1797,10 @@
       "registerSwitch": "Vender sin internet en esta computadora",
       "registerHelp": "Guarda una copia del catálogo y de tu sesión para seguir cobrando si se va el internet; las ventas se suben solas al volver. Úsalo solo en la computadora de la caja. Si pasa más de {{hours}} horas sin conectarse, deja de vender sin internet.",
       "ticketMissing": "No se encontró esta venta en esta computadora."
-    }
+    },
+    "askInvoice": "¿Generar factura de esta venta?",
+    "invoiceYes": "Sí, cobrar y facturar",
+    "invoiceNo": "No, solo cobrar"
   },
   "ticket": {
     "ticket": "Ticket",

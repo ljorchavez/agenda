@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { IVA_OPTIONS } from './invoicing';
+import { IN_PERSON_ACCEPTED, IN_PERSON_METHODS } from './methods';
 
 /**
  * Light point of sale: a product catalog with stock per location and counter sales with several
@@ -7,8 +8,8 @@ import { IVA_OPTIONS } from './invoicing';
  */
 
 /** Ways to pay at the counter (online methods and gift cards have their own flows). */
-export const POS_METHODS = ['cash', 'card', 'transfer'] as const;
-export type PosMethod = (typeof POS_METHODS)[number];
+export const POS_METHODS = IN_PERSON_METHODS;
+export type PosMethod = (typeof IN_PERSON_ACCEPTED)[number];
 
 /** SAT "No existe en el catálogo": used when a product has no clave de producto. */
 export const DEFAULT_PRODUCT_SAT_KEY = '01010101';
@@ -105,7 +106,7 @@ export const saleCreateSchema = z.object({
   customerId: z.string().uuid().nullish(),
   items: z.array(saleItemInputSchema).min(1).max(50),
   payments: z
-    .array(z.object({ method: z.enum(POS_METHODS), amountCents: money }))
+    .array(z.object({ method: z.enum(IN_PERSON_ACCEPTED), amountCents: money }))
     .min(1)
     .max(3),
   notes: optText(300),

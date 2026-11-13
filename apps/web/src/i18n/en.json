@@ -107,6 +107,8 @@
   "methods": {
     "cash": "Cash",
     "card": "Card",
+    "credit_card": "Credit card",
+    "debit_card": "Debit card",
     "transfer": "Bank transfer",
     "mercadopago": "Mercado Pago",
     "spei": "Mercado Pago · SPEI",
@@ -1795,7 +1797,10 @@
       "registerSwitch": "Sell without internet on this computer",
       "registerHelp": "Keeps a copy of the catalog and your session to keep charging if the internet drops; sales upload themselves when it's back. Use it only on the register's computer. After {{hours}} hours without connecting it stops selling offline.",
       "ticketMissing": "This sale wasn't found on this computer."
-    }
+    },
+    "askInvoice": "Issue an invoice for this sale?",
+    "invoiceYes": "Yes, charge and invoice",
+    "invoiceNo": "No, just charge"
   },
   "ticket": {
     "ticket": "Ticket",

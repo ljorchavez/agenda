@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { customClinicalTemplateSchema, professionalSchema, type Professional } from './clinical';
 import { customerFiscalSchema, invoicingSettingsSchema, type CustomerFiscal, type FiscalDocDto, type InvoiceDto } from './invoicing';
+import { IN_PERSON_ACCEPTED, IN_PERSON_METHODS } from './methods';
 
 export * from './clinical';
+export * from './methods';
 
 // ---------- Enums ----------
 
@@ -141,7 +143,7 @@ export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 export const APPOINTMENT_SOURCES = ['staff', 'online'] as const;
 export type AppointmentSource = (typeof APPOINTMENT_SOURCES)[number];
 
-export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mercadopago', 'spei', 'gift_card'] as const;
+export const PAYMENT_METHODS = ['cash', 'card', 'credit_card', 'debit_card', 'transfer', 'mercadopago', 'spei', 'gift_card'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const PAYMENT_STATUSES = ['pending', 'paid', 'refunded', 'failed'] as const;
@@ -1117,7 +1119,7 @@ export const appointmentUpdateSchema = z.object({
    * When marking as completed, registers a paid payment for the outstanding balance
    * with this method in the same request.
    */
-  paymentMethod: z.enum(['cash', 'card', 'transfer']).optional(),
+  paymentMethod: z.enum(IN_PERSON_ACCEPTED).optional(),
 });
 export type AppointmentUpdateInput = z.infer<typeof appointmentUpdateSchema>;
 
@@ -1167,7 +1169,7 @@ export type PaymentCreateInput = z.infer<typeof paymentCreateSchema>;
 /** Methods processed by the platform (Mercado Pago, including SPEI through it); never entered by hand. */
 export const ONLINE_METHODS = ['mercadopago', 'spei'] as const;
 /** Methods the business records itself when money changes hands in person. */
-export const MANUAL_METHODS = ['cash', 'card', 'transfer'] as const;
+export const MANUAL_METHODS = IN_PERSON_METHODS;
 
 // ---------- Collections (cobros): every booking with its money state ----------
 
@@ -1656,10 +1658,10 @@ export interface OfferingDto {
 }
 
 /** Manual methods to take money for a sale (online sales come later). */
-export const SALE_METHODS = ['cash', 'card', 'transfer'] as const;
+export const SALE_METHODS = IN_PERSON_METHODS;
 export const planSaleSchema = z.object({
   offeringId: z.string().uuid(),
-  method: z.enum(SALE_METHODS),
+  method: z.enum(IN_PERSON_ACCEPTED),
   /** Price actually charged; defaults to the catalog price */
   priceCents: z.number().int().min(0).optional(),
   startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -1690,7 +1692,7 @@ export interface CustomerPlanDto {
 
 export const giftCardSaleSchema = z.object({
   amountCents: z.number().int().min(100).max(10_000_000),
-  method: z.enum(SALE_METHODS),
+  method: z.enum(IN_PERSON_ACCEPTED),
   /** Who buys it (the payment is theirs) */
   customerId: z.string().uuid(),
   recipientName: z.string().trim().max(120).nullable().optional(),
@@ -1788,7 +1790,7 @@ export interface CommissionReportDto {
 }
 
 /** Methods shown in a cash closing (gift cards spend balance, not cash) */
-export const CASH_METHODS = ['cash', 'card', 'transfer', 'mercadopago', 'spei', 'gift_card'] as const;
+export const CASH_METHODS = ['cash', 'credit_card', 'debit_card', 'card', 'transfer', 'mercadopago', 'spei', 'gift_card'] as const;
 export interface CashSummaryDto {
   day: string;
   locationId: string;

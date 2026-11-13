@@ -28,6 +28,8 @@ import {
   type PaymentDto,
   type ResourceDto,
   type TimeBlockDto,
+  inPersonMethods,
+  type InPersonMethod,
 } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
 import { ErrorText, Loading, MenuButton, MethodTags, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
@@ -958,8 +960,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const { manager, scoped } = useAccess();
   const apptLocs = useMyLocations(null);
   const pay = paymentSettingsOf(tenant!.settings);
-  const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
-  const offline = inPerson.length ? inPerson : (['cash', 'card', 'transfer'] as const);
+  const offline = inPersonMethods(pay);
   const online = tenant?.mercadoPago.connected
     ? (['mercadopago', 'spei'] as const).filter((m) => pay.methods[m])
     : [];
@@ -1023,7 +1024,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
   const [when, setWhen] = useState(toLocalInput(new Date(appt.startsAt)));
   // Party size / bill / payment
   const [party, setParty] = useState(String(appt.partySize ?? 2));
-  const [method, setMethod] = useState<'cash' | 'card' | 'transfer' | 'gift_card'>(offline[0]!);
+  const [method, setMethod] = useState<InPersonMethod | 'gift_card'>(offline[0]!);
   const [giftCode, setGiftCode] = useState('');
   const packagesOn = PLAN_LIMITS[tenant!.plan].packages;
   const [amount, setAmount] = useState('');

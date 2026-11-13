@@ -155,6 +155,13 @@
       "when": 1795800000000,
       "tag": "0021_customer_fiscal_doc",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795900000000,
+      "tag": "0022_card_types",
+      "breakpoints": true
     }
   ]
 }

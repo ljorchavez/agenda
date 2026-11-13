@@ -200,7 +200,7 @@ export function CashTab() {
         {s && (
           <>
             <ul className="divide-y divide-slate-100 text-sm">
-              {CASH_METHODS.map((m) => (
+              {CASH_METHODS.filter((m) => m !== 'card' || s.byMethod[m]).map((m) => (
                 <li key={m} className="flex justify-between py-1.5"><span>{t(`methods.${m}`)}</span><span className="font-medium">{money(s.byMethod[m] ?? 0)}</span></li>
               ))}
               <li className="flex justify-between py-1.5 font-semibold"><span>{t('cash.total')}</span><span>{money(s.totalCents)}</span></li>

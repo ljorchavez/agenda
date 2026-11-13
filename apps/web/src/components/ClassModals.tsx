@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { paymentSettingsOf, type AppointmentDto, type ClassSessionDto, type CustomerDto } from '@agenda/shared';
+import { inPersonMethods, paymentSettingsOf, type AppointmentDto, type ClassSessionDto, type CustomerDto } from '@agenda/shared';
 import { ErrorText, Loading, Modal, StatusBadge } from './ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
@@ -105,8 +105,7 @@ export function SessionModal({ id, onClose, onOpen }: { id: string; onClose: () 
   const { manager } = useAccess();
   const pros = useResources();
   const pay = paymentSettingsOf(tenant!.settings);
-  const inPerson = (['cash', 'card', 'transfer'] as const).filter((m) => pay.methods[m]);
-  const methods = inPerson.length ? inPerson : (['cash', 'card', 'transfer'] as const);
+  const methods = inPersonMethods(pay);
   const [method, setMethod] = useState<(typeof methods)[number]>(methods[0]!);
   const q = useQuery({
     queryKey: ['class-session', id],
