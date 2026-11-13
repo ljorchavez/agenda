@@ -5,7 +5,8 @@ import { ageOn, isHealthType, type PortalDto, type PrescriptionCheckDto } from '
 import { getDb } from '../db/client.js';
 import { clinicalNotes, customers, recordAccessLog, recordPhotos, tenants } from '../db/schema.js';
 import { decryptSecret, manageToken, PORTAL_DAYS, portalCode, portalToken, portalTokenExpiry, verifyPortalCode, verifyPortalToken, verifyPrescriptionToken } from '../lib/crypto.js';
-import { escapeHtml, sendEmail } from '../lib/email.js';
+import { sendEmail } from '../lib/email.js';
+import { renderEmail } from '../lib/email-layout.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { appUrl, isUndeliverable } from '../lib/notify.js';
 import { assertNotLimited, clientIp, recordAttempt } from '../lib/throttle.js';
@@ -49,7 +50,17 @@ portalRoutes.post('/public/:slug/portal/link', async (c) => {
       to: email,
       subject: `Tu código de acceso a ${tenant.name}: ${code}`,
       text: `Hola ${first}:\n\nTu código para entrar es ${code} (vale 10 minutos).\n\nO entra directo con este enlace para ver ${word}:\n${link}\n\nUna vez dentro, tu teléfono recuerda tu sesión. Si no lo pediste, ignora este correo.\n\n— ${tenant.name}`,
-      html: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Hola ${escapeHtml(first)}:</p><p>Tu código para entrar es</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p style="color:#64748b;font-size:13px">Vale 10 minutos.</p><p>O entra directo para ver ${escapeHtml(word)}:</p><p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">Entrar a mi portal</a></p><p style="color:#64748b;font-size:13px">Una vez dentro, tu teléfono recuerda tu sesión. Si no lo pediste, ignora este correo.</p><p style="color:#475569">${escapeHtml(tenant.name)}</p></div>`,
+      html: renderEmail({
+        preheader: `Tu código es ${code}. Vale 10 minutos.`,
+        brand: { name: tenant.name },
+        badge: { text: 'Código de acceso', tone: 'info' },
+        title: 'Entra a tu portal',
+        intro: [`Hola ${first}:`, 'Escribe este código en la página para entrar:'],
+        highlight: { value: code, caption: 'Vale 10 minutos', mono: true },
+        button: { label: 'Entrar a mi portal', href: link },
+        outro: [`O usa el botón para ver ${word} directo. Una vez dentro, tu teléfono recuerda tu sesión.`],
+        footnote: 'Si no lo pediste, ignora este correo.',
+      }),
     });
   }
   // Same answer either way: nobody can find out who is a patient here.

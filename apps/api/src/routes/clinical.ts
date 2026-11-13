@@ -25,7 +25,8 @@ import { randomUUID } from 'node:crypto';
 import { put } from '@vercel/blob';
 import { z } from 'zod';
 import { assertPhotoRoom } from '../lib/plan.js';
-import { escapeHtml, sendEmail } from '../lib/email.js';
+import { sendEmail } from '../lib/email.js';
+import { renderEmail } from '../lib/email-layout.js';
 import { appUrl } from '../lib/notify.js';
 import { getDb, type Db } from '../db/client.js';
 import { appointments, clinicalNotes, customerRecords, customers, recordAccessLog, recordPhotos, tenants, users, type ClinicalNote } from '../db/schema.js';
@@ -419,7 +420,15 @@ clinicalRoutes.post('/clinical-notes/:id/send', async (c) => {
     to: cu.email,
     subject: `Tu receta de ${t.name}`,
     text: `Hola ${first}:\n\nAquí está tu receta. Puedes verla, imprimirla o mostrarla en la farmacia:\n${link}\n\n— ${t.name}`,
-    html: `<div style="font-family:system-ui,sans-serif;color:#0f172a"><p>Hola ${escapeHtml(first)}:</p><p>Aquí está tu receta. Puedes verla, imprimirla o mostrarla en la farmacia.</p><p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">Ver receta</a></p><p style="color:#475569">${escapeHtml(t.name)}</p></div>`,
+    html: renderEmail({
+      preheader: 'Puedes verla, imprimirla o mostrarla en la farmacia.',
+      brand: { name: t.name },
+      badge: { text: 'Receta médica', tone: 'info' },
+      title: 'Aquí está tu receta',
+      intro: [`Hola ${first}:`, 'Tu receta ya está firmada. Puedes verla, imprimirla o mostrarla en la farmacia desde tu teléfono.'],
+      button: { label: 'Ver receta', href: link },
+      outro: ['La receta incluye un código para que la farmacia verifique que es auténtica.'],
+    }),
   });
   if (!sent) throw new AppError(502, 'email_failed', 'The email could not be sent');
   const u = await me(db, c);

@@ -8,7 +8,8 @@ import { businessKind, isHealthType, type BusinessType } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { messageLogs } from '../db/schema.js';
 import { manageToken, portalToken } from './crypto.js';
-import { escapeHtml, sendEmail } from './email.js';
+import { sendEmail } from './email.js';
+import { renderEmail } from './email-layout.js';
 import { isWhatsAppConfigured, sendTemplate, whatsappAllowedFor, WHATSAPP_TEMPLATES } from '../integrations/whatsapp.js';
 
 export type AppointmentEmail = 'booked' | 'rescheduled' | 'cancelled' | 'reminder';
@@ -69,6 +70,11 @@ const COPY = {
       reminder: 'Te esperamos:',
     },
     hello: (n: string) => `Hola ${n}:`,
+    badge: { booked: 'Confirmada', rescheduled: 'Nueva fecha', cancelled: 'Cancelada', reminder: 'Recordatorio' },
+    service: 'Servicio',
+    when: 'Cuándo',
+    guests: 'Personas',
+    phone: 'Teléfono',
     with: 'Con',
     people: (n: number) => `${n} personas`,
     where: 'Dónde',
@@ -92,6 +98,11 @@ const COPY = {
       reminder: 'See you soon:',
     },
     hello: (n: string) => `Hi ${n},`,
+    badge: { booked: 'Confirmed', rescheduled: 'New date', cancelled: 'Cancelled', reminder: 'Reminder' },
+    service: 'Service',
+    when: 'When',
+    guests: 'People',
+    phone: 'Phone',
     with: 'With',
     people: (n: number) => `${n} people`,
     where: 'Where',
@@ -126,17 +137,27 @@ export function appointmentEmail(r: Row, kind: AppointmentEmail) {
   const portal = `${appUrl()}/p/${r.slug}?t=${portalToken(r.customer_id)}`;
   const portalText = isHealthType(r.business_type) ? t.portalHealth : t.portal;
   const text = [t.hello(first), '', t.lead[kind], ...lines, '', `${button}: ${link}`, `${portalText}: ${portal}`, '', `— ${r.business_name}`].join('\n');
-  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:520px">
-<p>${escapeHtml(t.hello(first))}</p>
-<p>${escapeHtml(t.lead[kind])}</p>
-<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin:12px 0;${kind === 'cancelled' ? 'text-decoration:line-through;color:#64748b' : ''}">
-${lines.map((l, i) => `<div style="${i < 2 ? 'font-weight:600;' : 'color:#475569;'}margin:2px 0">${escapeHtml(l)}</div>`).join('\n')}
-</div>
-<p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">${escapeHtml(button)}</a></p>
-<p><a href="${portal}" style="color:#0f766e">${escapeHtml(portalText)}</a></p>
-<p style="color:#475569">${escapeHtml(r.business_name)}</p>
-<p style="color:#94a3b8;font-size:12px">${escapeHtml(t.footer)}</p>
-</div>`;
+  const whenCap = whenText.charAt(0).toUpperCase() + whenText.slice(1);
+  const html = renderEmail({
+    lang: r.locale === 'en' ? 'en' : 'es',
+    preheader: `${r.service_name} · ${whenCap}`,
+    brand: { name: r.business_name },
+    badge: { text: t.badge[kind], tone: kind === 'cancelled' ? 'danger' : kind === 'reminder' ? 'info' : 'success' },
+    title: subject,
+    intro: [t.hello(first), t.lead[kind]],
+    details: [
+      { label: t.service, value: r.service_name, strong: true },
+      { label: t.when, value: whenCap, strong: true },
+      ...(r.resource_name ? [{ label: t.with, value: r.resource_name }] : []),
+      ...(r.party_size && r.party_size > 1 ? [{ label: t.guests, value: String(r.party_size) }] : []),
+      ...(r.address ? [{ label: t.where, value: r.address }] : []),
+      ...(r.phone ? [{ label: t.phone, value: r.phone }] : []),
+    ],
+    detailsStruck: kind === 'cancelled',
+    button: { label: button, href: link },
+    secondary: { label: portalText, href: portal },
+    footnote: t.footer,
+  });
   return { subject, text, html };
 }
 

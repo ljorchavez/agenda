@@ -5,7 +5,8 @@ import { forgotPasswordSchema, resetPasswordSchema } from '@agenda/shared';
 import { getDb } from '../db/client.js';
 import { passwordResets, users } from '../db/schema.js';
 import { hashPassword } from '../lib/auth.js';
-import { escapeHtml, sendEmail } from '../lib/email.js';
+import { sendEmail } from '../lib/email.js';
+import { renderEmail } from '../lib/email-layout.js';
 import { AppError } from '../lib/errors.js';
 import { assertNotLimited, clearAttempts, clientIp, forgotLimits, loginLimits, recordAttempt, resetLimits } from '../lib/throttle.js';
 
@@ -23,14 +24,14 @@ const isDemoEmail = (email: string) => email.endsWith('@agenda.mx') || DEMO_LOGI
 
 const COPY = {
   es: {
-    subject: 'Restablece tu contraseña de Agenda',
+    subject: 'Restablece tu contraseña de Lugali',
     hello: (name: string) => `Hola ${name}:`,
     body: 'Recibimos una solicitud para restablecer tu contraseña. Abre este enlace para elegir una nueva (vence en 1 hora):',
     button: 'Elegir nueva contraseña',
     ignore: 'Si no fuiste tú, ignora este correo: tu contraseña no cambia.',
   },
   en: {
-    subject: 'Reset your Agenda password',
+    subject: 'Reset your Lugali password',
     hello: (name: string) => `Hi ${name},`,
     body: 'We received a request to reset your password. Open this link to choose a new one (it expires in 1 hour):',
     button: 'Choose a new password',
@@ -64,9 +65,15 @@ passwordRoutes.post('/auth/forgot-password', async (c) => {
       to: user.email,
       subject: t.subject,
       text: `${t.hello(user.name)}\n\n${t.body}\n${link}\n\n${t.ignore}`,
-      html: `<p>${escapeHtml(t.hello(user.name))}</p><p>${escapeHtml(t.body)}</p>
-<p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0f766e;color:#fff;border-radius:8px;text-decoration:none">${escapeHtml(t.button)}</a></p>
-<p style="color:#64748b;font-size:13px">${escapeHtml(t.ignore)}</p>`,
+      html: renderEmail({
+        lang: input.locale === 'en' ? 'en' : 'es',
+        preheader: t.body,
+        badge: { text: input.locale === 'en' ? 'Security' : 'Seguridad', tone: 'info' },
+        title: t.subject,
+        intro: [t.hello(user.name), t.body],
+        button: { label: t.button, href: link },
+        outro: [t.ignore],
+      }),
     });
   }
   // Same answer either way, so nobody can find out which emails have an account.
