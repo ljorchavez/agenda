@@ -100,7 +100,7 @@ export function SatKeyField({ value, onChange, productName }: { value: string | 
           placeholder="01010101"
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value.replace(/\D/g, '') || null)}
-          data-testid="product-sat"
+          data-testid="pf-sat"
         />
         <button
           type="button"
@@ -109,7 +109,7 @@ export function SatKeyField({ value, onChange, productName }: { value: string | 
             setOpen((o) => !o);
             if (!q && productName.trim()) setQ(productName.trim().split(/\s+/).slice(0, 2).join(' '));
           }}
-          data-testid="product-sat-search"
+          data-testid="pf-sat-search"
         >
           🔎 {t('pos.fields.searchSat')}
         </button>

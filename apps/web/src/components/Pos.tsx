@@ -1038,13 +1038,13 @@ function ProductModal({
         <div className="block text-sm">
           <span className="label">{t('pos.fields.skuLabel')}</span>
           <div className="flex gap-1">
-            <input className="input font-mono" maxLength={60} value={v.sku ?? ''} onChange={(e) => set({ sku: e.target.value })} data-testid="product-sku" />
+            <input className="input font-mono" maxLength={60} value={v.sku ?? ''} onChange={(e) => set({ sku: e.target.value })} data-testid="pf-sku" />
             {cameraScanAvailable() && (
               <button type="button" className="btn-secondary !px-2" title={t('pos.scan.button')} aria-label={t('pos.scan.button')} onClick={() => setScanning(true)}>📷</button>
             )}
           </div>
           {!v.sku && v.name.trim() && (
-            <button type="button" className="mt-1 text-xs text-brand-700 hover:underline" onClick={() => set({ sku: suggestSku(v.name, skus) })} data-testid="product-sku-suggest">
+            <button type="button" className="mt-1 text-xs text-brand-700 hover:underline" onClick={() => set({ sku: suggestSku(v.name, skus) })} data-testid="pf-sku-suggest">
               {t('pos.fields.suggestSku', { sku: suggestSku(v.name, skus) })}
             </button>
           )}

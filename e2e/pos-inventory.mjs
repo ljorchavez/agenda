@@ -194,13 +194,13 @@ await page.getByTestId('product-form').locator('input[required]').first().fill('
 const catOptions = await page.getByTestId('product-category-select').locator('option').allTextContents();
 ok('category is a list (with the new ones)', ['Barba', 'Pelo', 'Bebidas'].every((c) => catOptions.includes(c)), catOptions.join(','));
 await page.getByTestId('product-category-select').selectOption('Barba');
-await page.getByTestId('product-sku-suggest').click();
-ok('suggested SKU from the name', (await page.getByTestId('product-sku').inputValue()) === 'ACE-BAR-30ML', await page.getByTestId('product-sku').inputValue());
-await page.getByTestId('product-sku').fill('7501234567890');
-await page.getByTestId('product-sat-search').click();
+await page.getByTestId('pf-sku-suggest').click();
+ok('suggested SKU from the name', (await page.getByTestId('pf-sku').inputValue()) === 'ACE-BAR-30ML', await page.getByTestId('pf-sku').inputValue());
+await page.getByTestId('pf-sku').fill('7501234567890');
+await page.getByTestId('pf-sat-search').click();
 await page.getByTestId('sat-results').getByText('No existe en el catálogo').waitFor({ timeout: 8000 }).catch(() => {});
 await page.getByTestId('sat-results').getByText('No existe en el catálogo').click();
-ok('SAT key picked from the list', (await page.getByTestId('product-sat').inputValue()) === '01010101');
+ok('SAT key picked from the list', (await page.getByTestId('pf-sat').inputValue()) === '01010101');
 await page.getByTestId('product-form').locator('input[type=number]').first().fill('150');
 await page.getByTestId('product-form').getByRole('button', { name: 'Guardar' }).click();
 await page.waitForTimeout(800);
