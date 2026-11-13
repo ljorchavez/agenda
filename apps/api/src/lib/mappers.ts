@@ -90,6 +90,11 @@ export function toTenantDto(t: Tenant): TenantDto {
   };
 }
 
+/** The CSF's public description (never its storage path). */
+export function fiscalDocDto(d: Customer['fiscalDoc'] | null | undefined) {
+  return d ? { fileName: d.fileName, contentType: d.contentType, sizeBytes: d.sizeBytes, uploadedAt: d.uploadedAt } : null;
+}
+
 export function toCustomerDto(c: Customer): CustomerDto {
   return {
     id: c.id,
@@ -102,6 +107,7 @@ export function toCustomerDto(c: Customer): CustomerDto {
     address: c.address ?? null,
     curp: c.curp ?? null,
     fiscal: c.fiscal ?? null,
+    fiscalDoc: fiscalDocDto(c.fiscalDoc),
     archived: Boolean(c.archivedAt),
     createdAt: iso(c.createdAt)!,
   };

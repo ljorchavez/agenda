@@ -6,18 +6,27 @@ import { z } from 'zod';
  * key (FACTURAPI_USER_KEY); each invoice has a cost per timbre.
  */
 
-/** Regímenes fiscales (SAT c_RegimenFiscal) most used by small businesses and professionals. */
+/** Regímenes fiscales (SAT c_RegimenFiscal): the usual ones first, then the rest of the catalog. */
 export const TAX_SYSTEMS: readonly (readonly [string, string])[] = [
   ['612', 'Personas Físicas con Actividades Empresariales y Profesionales'],
   ['626', 'Régimen Simplificado de Confianza (RESICO)'],
-  ['621', 'Incorporación Fiscal'],
-  ['601', 'General de Ley Personas Morales'],
-  ['603', 'Personas Morales con Fines no Lucrativos'],
   ['605', 'Sueldos y Salarios e Ingresos Asimilados a Salarios'],
+  ['601', 'General de Ley Personas Morales'],
+  ['621', 'Incorporación Fiscal'],
   ['606', 'Arrendamiento'],
-  ['608', 'Demás ingresos'],
-  ['616', 'Sin obligaciones fiscales'],
   ['625', 'Plataformas Tecnológicas'],
+  ['616', 'Sin obligaciones fiscales'],
+  ['603', 'Personas Morales con Fines no Lucrativos'],
+  ['607', 'Enajenación o Adquisición de Bienes'],
+  ['608', 'Demás ingresos'],
+  ['610', 'Residentes en el Extranjero sin Establecimiento Permanente en México'],
+  ['611', 'Ingresos por Dividendos (socios y accionistas)'],
+  ['614', 'Ingresos por intereses'],
+  ['615', 'Ingresos por obtención de premios'],
+  ['620', 'Sociedades Cooperativas de Producción que optan por diferir sus ingresos'],
+  ['622', 'Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras'],
+  ['623', 'Opcional para Grupos de Sociedades'],
+  ['624', 'Coordinados'],
 ];
 /** Usos de CFDI (SAT c_UsoCFDI) a customer usually picks. */
 export const CFDI_USES: readonly (readonly [string, string])[] = [
@@ -88,6 +97,26 @@ export const customerFiscalSchema = z.object({
   email: z.string().trim().toLowerCase().email().nullable().optional(),
 });
 export type CustomerFiscal = z.infer<typeof customerFiscalSchema>;
+
+/** What was read from a Constancia de Situación Fiscal (SAT): to review before saving. */
+export interface CsfReadDto {
+  fiscal: Partial<Pick<CustomerFiscal, 'rfc' | 'legalName' | 'taxSystem' | 'zip'>>;
+  /** Every régimen listed, in order (the first one is suggested) */
+  regimes: string[];
+  personType: 'fisica' | 'moral' | null;
+  /** "ACTIVO" when registered and active with the SAT */
+  status: string | null;
+  /** not_csf · no_text (a photo or scan) · inactive · missing_<field> */
+  warnings: string[];
+}
+
+/** The customer's saved Constancia de Situación Fiscal (the file stays private). */
+export interface FiscalDocDto {
+  fileName: string | null;
+  contentType: string;
+  sizeBytes: number;
+  uploadedAt: string;
+}
 
 export const invoiceRequestSchema = z.object({
   /** null: público en general */

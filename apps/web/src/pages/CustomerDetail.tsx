@@ -12,6 +12,7 @@ import { StarRating } from '../components/Rating';
 import { CustomerPlansSection } from '../components/Sales';
 import { RecordSection } from '../components/Record';
 import { ClinicalRecordSection } from '../components/ClinicalRecord';
+import { FiscalSummary } from '../components/FiscalFields';
 
 interface Detail extends CustomerWithStats {
   appointments: {
@@ -172,6 +173,7 @@ export function CustomerDetailPage() {
       <div className="mt-6 grid items-stretch gap-6 lg:grid-cols-2">
         <CustomerPlansSection customerId={id} />
         <RecordSection customerId={id} clinical={health} />
+        <FiscalSummary customer={data} onEdit={() => setEditing(true)} />
       </div>
 
       {manager && (

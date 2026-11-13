@@ -9,6 +9,7 @@ import { pickResource } from '../src/lib/resources.js';
 import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 import { whatsappAllowedFor } from '../src/integrations/whatsapp.js';
+import { parseCsfText } from '../src/lib/csf.js';
 
 describe('slugify', () => {
   it('removes accents and spaces', () => {
@@ -202,5 +203,40 @@ describe('whatsappAllowedFor', () => {
     delete process.env.WHATSAPP_TEST_TO;
     expect(whatsappAllowedFor('medico-demo', '+523120000001')).toBe(false);
     if (prev !== undefined) process.env.WHATSAPP_TEST_TO = prev;
+  });
+});
+
+describe('parseCsfText (Constancia de Situación Fiscal)', () => {
+  it('reads a persona física with several regimes, the first one listed wins', () => {
+    const text = `CÉDULA DE IDENTIFICACIÓN FISCAL CONSTANCIA DE SITUACIÓN FISCAL RFC: PELJ850312AB1 CURP: PELJ850312HCMRPN09
+      Datos de Identificación del Contribuyente: RFC: PELJ850312AB1 CURP: PELJ850312HCMRPN09 Nombre (s): JUAN CARLOS
+      Primer Apellido: PÉREZ Segundo Apellido: LÓPEZ Fecha inicio de operaciones: 01 DE ENERO DE 2010
+      Estatus en el padrón: ACTIVO Fecha de último cambio de estado: 01 DE ENERO DE 2010 Nombre Comercial:
+      Datos del domicilio registrado Código Postal:28017 Tipo de Vialidad: CALLE
+      Regímenes: Régimen Fecha Inicio Fecha Fin Régimen Simplificado de Confianza 01/01/2022
+      Régimen de Sueldos y Salarios e Ingresos Asimilados a Salarios 01/01/2010
+      Obligaciones: Descripción de la Obligación Declaración anual de ISR. Sueldos y salarios`;
+    const r = parseCsfText(text);
+    expect(r.fiscal).toEqual({ rfc: 'PELJ850312AB1', legalName: 'JUAN CARLOS PÉREZ LÓPEZ', zip: '28017', taxSystem: '626' });
+    expect(r.regimes).toEqual(['626', '605']);
+    expect(r).toMatchObject({ personType: 'fisica', status: 'ACTIVO', warnings: [] });
+  });
+
+  it('reads a persona moral without the régimen capital', () => {
+    const text = `CONSTANCIA DE SITUACIÓN FISCAL RFC: ABC120101XY9 Denominación/Razón Social: CAFÉ DEL PUERTO
+      Régimen Capital: SOCIEDAD ANONIMA DE CAPITAL VARIABLE Nombre Comercial: CAFÉ DEL PUERTO
+      Fecha inicio de operaciones: 01 DE ENERO DE 2012 Estatus en el padrón: SUSPENDIDO Fecha de último cambio
+      Código Postal: 06600 Regímenes: Régimen General de Ley Personas Morales 01/01/2012 Obligaciones: ...`;
+    const r = parseCsfText(text);
+    expect(r.fiscal).toEqual({ rfc: 'ABC120101XY9', legalName: 'CAFÉ DEL PUERTO', zip: '06600', taxSystem: '601' });
+    expect(r.personType).toBe('moral');
+    expect(r.warnings).toEqual(['inactive']);
+  });
+
+  it('says so when there is nothing to read or it is another document', () => {
+    expect(parseCsfText('').warnings).toEqual(['no_text']);
+    const other = parseCsfText('Recibo de luz CFE, total a pagar 350 pesos, periodo septiembre');
+    expect(other.warnings).toContain('not_csf');
+    expect(other.warnings).toContain('missing_rfc');
   });
 });

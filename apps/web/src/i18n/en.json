@@ -1867,5 +1867,32 @@
     "deleteWarning": "This can't be undone. Download your data first.",
     "typeName": "Type the business name ({{name}}) to confirm",
     "deleteForGood": "Delete for good"
+  },
+  "fiscal": {
+    "title": "Invoicing details",
+    "upload": "Upload tax certificate (CSF)",
+    "reading": "Reading…",
+    "filled": "We filled in the details from the certificate. Review them before saving.",
+    "noText": "We couldn't read text from the file (is it a photo or scan?). Use the PDF downloaded from the SAT, or fill in the details by hand.",
+    "notCsf": "This file doesn't look like a Constancia de Situación Fiscal. Check the details by hand.",
+    "missing": "Not found: {{fields}}. Fill them in by hand.",
+    "inactive": "Note: the SAT status says “{{status}}”.",
+    "severalRegimes": "Several tax regimes ({{list}}). Pick the one that applies.",
+    "notStored": "We read the details, but the file wasn't kept: private storage isn't connected yet.",
+    "willStore": "The certificate ({{name}}) is kept when the customer is created.",
+    "email": "Email for invoices",
+    "emailHint": "If different from the contact email",
+    "add": "Add",
+    "none": "No invoicing details yet. Add them or upload the certificate to invoice faster.",
+    "viewDoc": "View certificate",
+    "deleteDocConfirm": "Delete the saved certificate?",
+    "unsupported_csf": "Upload a PDF (or a JPG/PNG photo) of the certificate.",
+    "csf_too_large": "The file is larger than 5 MB.",
+    "field": {
+      "rfc": "RFC",
+      "legalName": "Legal name",
+      "taxSystem": "Tax regime",
+      "zip": "ZIP code"
+    }
   }
 }

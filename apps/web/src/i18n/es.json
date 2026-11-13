@@ -1867,5 +1867,32 @@
     "deleteWarning": "Esto no se puede deshacer. Te recomendamos descargar tus datos antes.",
     "typeName": "Escribe el nombre del negocio ({{name}}) para confirmar",
     "deleteForGood": "Eliminar para siempre"
+  },
+  "fiscal": {
+    "title": "Datos para facturar",
+    "upload": "Subir constancia (CSF)",
+    "reading": "Leyendo…",
+    "filled": "Llenamos los datos con tu constancia. Revísalos antes de guardar.",
+    "noText": "No pudimos leer texto del archivo (¿es foto o escaneo?). Usa el PDF que descargas del SAT o llena los datos a mano.",
+    "notCsf": "Este archivo no parece una Constancia de Situación Fiscal. Revisa los datos a mano.",
+    "missing": "No encontramos: {{fields}}. Complétalos a mano.",
+    "inactive": "Ojo: el estatus en el padrón dice «{{status}}».",
+    "severalRegimes": "Tiene varios regímenes ({{list}}). Elige el que aplica a esta factura.",
+    "notStored": "Leímos los datos, pero el archivo no se guardó: falta conectar el almacenamiento privado.",
+    "willStore": "La constancia ({{name}}) se guarda al crear el cliente.",
+    "email": "Correo para facturas",
+    "emailHint": "Si es otro que el de contacto",
+    "add": "Agregar",
+    "none": "Sin datos fiscales. Agrégalos o sube su constancia para facturarle más rápido.",
+    "viewDoc": "Ver constancia",
+    "deleteDocConfirm": "¿Eliminar la constancia guardada?",
+    "unsupported_csf": "Sube un PDF (o una foto JPG/PNG) de la constancia.",
+    "csf_too_large": "El archivo pesa más de 5 MB.",
+    "field": {
+      "rfc": "RFC",
+      "legalName": "Razón social",
+      "taxSystem": "Régimen",
+      "zip": "Código postal"
+    }
   }
 }

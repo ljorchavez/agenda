@@ -1888,6 +1888,49 @@ d('API (integration)', () => {
     expect((await call('POST', '/sales', { items: [{ productId: pomada.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 15000 }] }, tok)).status).toBe(404);
   });
 
+  it('customer invoicing details: saved with the customer, read from the SAT constancia', async () => {
+    const reg = (await call('POST', '/auth/register', { businessName: 'Factura Clientes', businessType: 'nutrition', name: 'Dueña Fiscal', email: 'csf@test.mx', password: 'password123' })).body;
+    const tok = reg.token;
+    const fiscal = { rfc: 'pelj850312ab1', legalName: 'Juan Pérez López', taxSystem: '626', zip: '28017', use: 'D01', email: 'Facturas@Test.mx' };
+    const cu = (await call('POST', '/customers', { name: 'Juan Pérez', phone: '5577002200', fiscal }, tok)).body;
+    expect(cu.fiscal).toMatchObject({ rfc: 'PELJ850312AB1', taxSystem: '626', use: 'D01', email: 'facturas@test.mx' });
+    // Editing other fields keeps them; null clears them
+    expect((await call('PUT', `/customers/${cu.id}`, { name: 'Juan P.' }, tok)).body.fiscal.rfc).toBe('PELJ850312AB1');
+    expect((await call('PUT', `/customers/${cu.id}`, { name: 'Juan P.', fiscal: null }, tok)).body.fiscal).toBeNull();
+    expect((await call('PUT', `/customers/${cu.id}`, { name: 'Juan P.', fiscal: { ...fiscal, zip: '123' } }, tok)).status).toBe(422);
+
+    // A PDF like the SAT's (with a text layer)
+    const lines = [
+      'CONSTANCIA DE SITUACION FISCAL',
+      'RFC: PELJ850312AB1',
+      'Nombre (s): JUAN CARLOS Primer Apellido: P\xc9REZ Segundo Apellido: L\xd3PEZ',
+      'Fecha inicio de operaciones: 01 DE ENERO DE 2010 Estatus en el padr\xf3n: ACTIVO Fecha de ultimo cambio',
+      'C\xf3digo Postal:28017',
+      'Reg\xedmenes: R\xe9gimen Fecha Inicio R\xe9gimen Simplificado de Confianza 01/01/2022',
+      'Obligaciones: Declaracion anual',
+    ];
+    const csf = (body: Uint8Array, name = 'csf.pdf', type = 'application/pdf') => {
+      const fd = new FormData();
+      fd.append('file', new File([body], name, { type }));
+      return fd;
+    };
+    const send = async (path: string, fd: FormData) => {
+      const res = await app.request(`/api${path}`, { method: 'POST', body: fd, headers: { authorization: `Bearer ${tok}` } });
+      return { status: res.status, body: await res.json() };
+    };
+    const read = await send('/customers/csf/read', csf(minimalPdf(lines)));
+    expect(read.status).toBe(200);
+    expect(read.body).toMatchObject({ fiscal: { rfc: 'PELJ850312AB1', legalName: 'JUAN CARLOS PÉREZ LÓPEZ', zip: '28017', taxSystem: '626' }, personType: 'fisica', status: 'ACTIVO', warnings: [] });
+    // On a customer: read even while the private store isn't connected (the file just isn't kept)
+    const onCustomer = await send(`/customers/${cu.id}/fiscal-doc`, csf(minimalPdf(lines)));
+    expect(onCustomer.body).toMatchObject({ stored: false, doc: null, read: { fiscal: { rfc: 'PELJ850312AB1' } } });
+    // A photo can't be read: said so; other files are refused
+    expect((await send('/customers/csf/read', csf(new Uint8Array([255, 216, 255]), 'csf.jpg', 'image/jpeg'))).body.warnings).toEqual(['no_text']);
+    expect((await send('/customers/csf/read', csf(new Uint8Array([1, 2]), 'a.txt', 'text/plain'))).body.error).toBe('unsupported_csf');
+    expect((await send('/customers/csf/read', csf(new Uint8Array(6 * 1024 * 1024), 'big.pdf'))).body.error).toBe('csf_too_large');
+    expect((await call('GET', `/customers/${cu.id}/fiscal-doc`, undefined, tok)).status).toBe(404);
+  });
+
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Consultorio Prueba', businessType: 'medical', name: 'Dra. Ana Ruiz', email: 'nom004@test.mx', password: 'password123',
@@ -2057,3 +2100,26 @@ d('API (integration)', () => {
     expect((await app.request(new URL(again.url).pathname)).status).toBe(200);
   });
 });
+
+/** A one-page PDF with real text (Helvetica, WinAnsi): enough for a text-layer reader. */
+function minimalPdf(lines: string[]): Uint8Array {
+  const esc = (l: string) => l.replace(/[()\\]/g, '\\$&');
+  const stream = `BT /F1 9 Tf 20 800 Td ${lines.map((l) => `(${esc(l)}) Tj 0 -14 Td`).join(' ')} ET`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(Buffer.byteLength(out, 'latin1'));
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(out, 'latin1');
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((n) => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(out, 'latin1'));
+}

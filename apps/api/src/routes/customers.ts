@@ -1,5 +1,7 @@
-import { Hono } from 'hono';
-import { deleteCustomerPhotos } from './records.js';
+import { randomUUID } from 'node:crypto';
+import { Hono, type Context } from 'hono';
+import { del, put } from '@vercel/blob';
+import { deleteCustomerPhotos, photoToken } from './records.js';
 import { and, eq, sql } from 'drizzle-orm';
 import {
   customerInputSchema,
@@ -8,10 +10,11 @@ import {
 } from '@agenda/shared';
 import type { CustomerFiscal } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { customers } from '../db/schema.js';
-import { conflict, notFound } from '../lib/errors.js';
+import { customers, type Customer } from '../db/schema.js';
+import { AppError, conflict, notFound } from '../lib/errors.js';
+import { readCsf } from '../lib/csf.js';
 import { assertCanAddCustomer } from '../lib/plan.js';
-import { toCustomerDto } from '../lib/mappers.js';
+import { fiscalDocDto, toCustomerDto } from '../lib/mappers.js';
 import { getScope, paymentScopeSql, scopeSql, type Scope } from '../lib/access.js';
 import { requireManager, type AppEnv } from '../middleware/auth.js';
 
@@ -53,6 +56,7 @@ type StatsRow = {
   address?: string | null;
   curp?: string | null;
   fiscal?: CustomerFiscal | null;
+  fiscal_doc?: Customer['fiscalDoc'] | null;
   archived_at?: Date | string | null;
   created_at: Date;
   visits: number | string;
@@ -87,6 +91,7 @@ function toStats(r: StatsRow): CustomerWithStats {
     address: r.address ?? null,
     curp: r.curp ?? null,
     fiscal: r.fiscal ?? null,
+    fiscalDoc: fiscalDocDto(r.fiscal_doc),
     archived: Boolean(r.archived_at),
     createdAt: new Date(r.created_at).toISOString(),
     visits,
@@ -119,7 +124,7 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
     filters.push(sql`(c.name ilike ${like} or c.phone ilike ${like} or c.email ilike ${like})`);
   }
   return sql`
-    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.fiscal, c.archived_at,
+    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.fiscal, c.fiscal_doc, c.archived_at,
       coalesce(v.visits, 0) as visits, v.last_visit, v.first_visit,
       coalesce(v.no_shows, 0) as no_shows,
       v.avg_rating, coalesce(v.rating_count, 0) as rating_count,
@@ -231,6 +236,7 @@ function normalize(input: ReturnType<typeof customerInputSchema.parse>) {
     ...(input.sex !== undefined ? { sex: input.sex } : {}),
     ...(input.address !== undefined ? { address: input.address || null } : {}),
     ...(input.curp !== undefined ? { curp: input.curp || null } : {}),
+    ...(input.fiscal !== undefined ? { fiscal: input.fiscal ? { ...input.fiscal, email: input.fiscal.email || null } : null } : {}),
     ...(input.archived !== undefined ? { archivedAt: input.archived ? new Date() : null } : {}),
   };
 }
@@ -289,5 +295,70 @@ customerRoutes.delete('/customers/:id', requireManager, async (c) => {
     .where(and(eq(customers.id, c.req.param('id')), eq(customers.tenantId, c.get('tenantId'))))
     .returning({ id: customers.id });
   if (!row) throw notFound('customer');
+  return c.body(null, 204);
+});
+
+// ---------- Constancia de Situación Fiscal ----------
+
+const CSF_TYPES: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const CSF_MAX_BYTES = 5 * 1024 * 1024;
+
+async function csfFile(c: Context<AppEnv>): Promise<File> {
+  const body = await c.req.parseBody();
+  const file = body['file'];
+  if (!(file instanceof File)) throw new AppError(422, 'validation_error', 'Send the file in the "file" field');
+  if (!CSF_TYPES[file.type]) throw new AppError(422, 'unsupported_csf', 'Use a PDF (or a JPG/PNG picture) of the constancia');
+  if (file.size > CSF_MAX_BYTES) throw new AppError(422, 'csf_too_large', 'The file is larger than 5 MB');
+  return file;
+}
+
+/** The customer, if this user can see them (team members: only who they attended). */
+async function visibleCustomer(c: Context<AppEnv>, id: string): Promise<Customer> {
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const scope = await getScope(db, c);
+  if (!scope.all) {
+    const visible = await db.execute(statsQuery(tenantId, { customerId: id, scope }));
+    if (!visible.rows.length) throw notFound('customer');
+  }
+  const cu = await db.query.customers.findFirst({ where: and(eq(customers.id, id), eq(customers.tenantId, tenantId)) });
+  if (!cu) throw notFound('customer');
+  return cu;
+}
+
+/** Reads a constancia without keeping it (new customer form): data to review. */
+customerRoutes.post('/customers/csf/read', async (c) => c.json(await readCsf(await csfFile(c))));
+
+/** Keeps the customer's constancia (private) and returns what it says, to review and save. */
+customerRoutes.post('/customers/:id/fiscal-doc', async (c) => {
+  const cu = await visibleCustomer(c, c.req.param('id'));
+  const file = await csfFile(c);
+  const read = await readCsf(file);
+  const token = photoToken();
+  // Without private storage connected the data is still read; the file just isn't kept
+  if (!token) return c.json({ doc: fiscalDocDto(cu.fiscalDoc), read, stored: false });
+  const blob = await put(`fiscal/${cu.tenantId}/${randomUUID()}/${randomUUID()}.${CSF_TYPES[file.type]}`, file, { access: 'private', token, contentType: file.type });
+  const doc = { path: blob.url, fileName: file.name ? file.name.slice(0, 200) : null, contentType: file.type, sizeBytes: file.size, uploadedAt: new Date().toISOString() };
+  await getDb().update(customers).set({ fiscalDoc: doc }).where(eq(customers.id, cu.id));
+  if (cu.fiscalDoc) await del(cu.fiscalDoc.path, { token }).catch(() => undefined);
+  return c.json({ doc: fiscalDocDto(doc), read, stored: true }, 201);
+});
+
+customerRoutes.get('/customers/:id/fiscal-doc', async (c) => {
+  const cu = await visibleCustomer(c, c.req.param('id'));
+  const token = photoToken();
+  if (!cu.fiscalDoc || !token) throw notFound('fiscal_doc');
+  const res = await fetch(cu.fiscalDoc.path, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok || !res.body) throw notFound('fiscal_doc');
+  return new Response(res.body, {
+    headers: { 'content-type': cu.fiscalDoc.contentType, 'cache-control': 'private, no-store', 'content-disposition': `inline; filename="constancia-${cu.fiscal?.rfc ?? 'fiscal'}.${CSF_TYPES[cu.fiscalDoc.contentType] ?? 'pdf'}"` },
+  });
+});
+
+customerRoutes.delete('/customers/:id/fiscal-doc', async (c) => {
+  const cu = await visibleCustomer(c, c.req.param('id'));
+  const token = photoToken();
+  if (cu.fiscalDoc && token) await del(cu.fiscalDoc.path, { token }).catch(() => undefined);
+  await getDb().update(customers).set({ fiscalDoc: null }).where(eq(customers.id, cu.id));
   return c.body(null, 204);
 });

@@ -218,6 +218,8 @@ export const customers = pgTable(
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     /** Fiscal data to invoice them (RFC, razón social, régimen, CP, uso CFDI) */
     fiscal: jsonb('fiscal').$type<CustomerFiscal>(),
+    /** Constancia de Situación Fiscal in the private Blob store */
+    fiscalDoc: jsonb('fiscal_doc').$type<{ path: string; fileName: string | null; contentType: string; sizeBytes: number; uploadedAt: string }>(),
     ...timestamps,
   },
   (t) => [

@@ -10,6 +10,7 @@ import { useCustomers } from '../lib/queries';
 import { SortTh, useSort, type SortDir } from '../components/SortableTable';
 import { StarRating } from '../components/Rating';
 import { FILTER_CTRL } from '../components/FilterBar';
+import { FiscalFields, fiscalPayload, useFiscalForm } from '../components/FiscalFields';
 
 /** Columns sorted on the server (the list is paginated); first click direction per column. */
 type SortKey = 'name' | 'visits' | 'totalSpent' | 'rating' | 'lastVisit' | 'frequency' | 'nextAppointment';
@@ -128,10 +129,13 @@ export function CustomerFormModal({ customer, onClose }: { customer?: CustomerDt
     notes: customer?.notes ?? '',
   });
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const [fiscal, setFiscal] = useFiscalForm(customer);
+  // New customer: the constancia read before saving is kept once the customer exists
+  const [pendingCsf, setPendingCsf] = useState<File | null>(null);
 
   const save = useMutation({
-    mutationFn: () =>
-      api<CustomerDto>(customer ? `/customers/${customer.id}` : '/customers', {
+    mutationFn: async () => {
+      const saved = await api<CustomerDto>(customer ? `/customers/${customer.id}` : '/customers', {
         method: customer ? 'PUT' : 'POST',
         body: {
           name: form.name,
@@ -139,8 +143,17 @@ export function CustomerFormModal({ customer, onClose }: { customer?: CustomerDt
           email: form.email || null,
           birthday: form.birthday || null,
           notes: form.notes || null,
+          fiscal: fiscalPayload(fiscal),
         },
-      }),
+      });
+      if (!customer && pendingCsf) {
+        const fd = new FormData();
+        fd.append('file', pendingCsf);
+        // The customer is saved either way; the file is a nice-to-have
+        await api(`/customers/${saved.id}/fiscal-doc`, { method: 'POST', body: fd }).catch(() => undefined);
+      }
+      return saved;
+    },
     onSuccess: (c) => {
       void qc.invalidateQueries({ queryKey: ['customers'] });
       void qc.invalidateQueries({ queryKey: ['customer', c.id] });
@@ -174,6 +187,7 @@ export function CustomerFormModal({ customer, onClose }: { customer?: CustomerDt
           <label className="label">{t('customers.notes')}</label>
           <textarea className="input" rows={3} value={form.notes} onChange={set('notes')} />
         </div>
+        <FiscalFields value={fiscal} onChange={setFiscal} customer={customer} onPendingFile={setPendingCsf} />
         <ErrorText error={save.error} ns="customers" />
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>

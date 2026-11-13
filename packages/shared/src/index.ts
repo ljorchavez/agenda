@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { customClinicalTemplateSchema, professionalSchema, type Professional } from './clinical';
-import { invoicingSettingsSchema, type CustomerFiscal, type InvoiceDto } from './invoicing';
+import { customerFiscalSchema, invoicingSettingsSchema, type CustomerFiscal, type FiscalDocDto, type InvoiceDto } from './invoicing';
 
 export * from './clinical';
 
@@ -1034,6 +1034,8 @@ export const customerInputSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal('').transform(() => null)),
+  /** Data to invoice them (CFDI 4.0); null removes it */
+  fiscal: customerFiscalSchema.nullable().optional(),
   /** Archived customers are hidden from lists (records kept 5 years) */
   archived: z.boolean().optional(),
 });
@@ -1322,6 +1324,8 @@ export interface CustomerDto {
   curp: string | null;
   /** Fiscal data for CFDI invoices */
   fiscal?: CustomerFiscal | null;
+  /** Their Constancia de Situación Fiscal, if uploaded */
+  fiscalDoc?: FiscalDocDto | null;
   archived: boolean;
   createdAt: string;
 }
