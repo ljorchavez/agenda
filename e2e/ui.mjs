@@ -411,7 +411,13 @@ ok('plans: Individual $249 and Premium $799 + IVA', indText.includes('249') && i
   await page.getByTestId('appointment-forms').getByRole('button', { name: 'Guardar' }).click().catch(() => {});
   await page.getByTestId('appointment-forms').filter({ hasText: 'Comer mejor' }).waitFor({ timeout: 6000 }).catch(() => {});
   ok('team saves the answers in the appointment', ((await page.getByTestId('appointment-forms').textContent().catch(() => '')) ?? '').includes('Comer mejor'));
-  const after = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
+  // The save may still be on its way: look a few times
+  let after = null;
+  for (let i = 0; i < 10; i++) {
+    after = (await api('/forms', null, ntok)).find((f) => f.name === 'Historia clínica nutricional');
+    if ((after?.responses ?? 0) > (before?.responses ?? 0)) break;
+    await page.waitForTimeout(500);
+  }
   ok('answers counted', (after?.responses ?? 0) === (before?.responses ?? 0) + 1, `${before?.responses} -> ${after?.responses}`);
   await page.keyboard.press('Escape');
   // Client record shows the answered questionnaire
