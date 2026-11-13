@@ -1051,6 +1051,7 @@ function ProductModal({
   locationId,
   categories,
   skus,
+  lookup,
   onClose,
   onDone,
 }: {
