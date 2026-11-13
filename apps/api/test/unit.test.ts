@@ -11,7 +11,7 @@ import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 import { whatsappAllowedFor } from '../src/integrations/whatsapp.js';
 import { parseCsfText } from '../src/lib/csf.js';
 import { readCsv, readXlsx, writeXlsx } from '@agenda/shared/xlsx';
-import { strToU8, zipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { planImport, toCentsCell, type Existing } from '../src/lib/product-import.js';
 
 describe('slugify', () => {
@@ -248,6 +248,19 @@ describe('xlsx', () => {
   it('writes and reads back text, numbers and booleans', () => {
     const rows = [['ID', 'Producto', 'Precio', 'Activo'], ['a1', 'Café & "pan" <ok>', 89.5, true], [null, 'Agua', 15, false]];
     expect(readXlsx(writeXlsx(rows, { sheet: 'Inventario' }))).toEqual(rows);
+  });
+
+  it('dropdown lists live in a hidden sheet and do not change what is read', () => {
+    const rows = [['ID', 'Producto', 'Categoría', 'Activo'], [1, 'Gel', 'Cabello', 'Sí']];
+    const file = writeXlsx(rows, { lists: [{ col: 2, values: ['Cabello', 'Barba'], allowOther: true }, { col: 3, values: ['Sí', 'No'] }] });
+    expect(readXlsx(file)).toEqual(rows);
+    const parts = unzipSync(file);
+    const sheet = strFromU8(parts['xl/worksheets/sheet1.xml']!);
+    expect(sheet).toContain('sqref="C2:C2000"><formula1>Listas!$A$1:$A$2</formula1>');
+    expect(sheet).toContain('showErrorMessage="0" sqref="C2');
+    expect(sheet).toContain('showErrorMessage="1" sqref="D2');
+    expect(strFromU8(parts['xl/workbook.xml']!)).toContain('name="Listas" sheetId="2" state="hidden"');
+    expect(strFromU8(parts['xl/worksheets/sheet2.xml']!)).toContain('Barba');
   });
 
   it('reads files saved by Excel (shared strings, gaps, rich text)', () => {
