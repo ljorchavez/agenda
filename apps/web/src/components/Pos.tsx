@@ -544,6 +544,7 @@ export function PosTab() {
         {lines.length === 0 ? (
           <p className="text-sm text-slate-500">{open.tickets.length > 1 ? t('pos.tickets.empty') : t('pos.emptyTicket')}</p>
         ) : (
+          <>
           <ul ref={cartList} className="-mr-2 max-h-[40vh] divide-y divide-slate-100 overflow-y-auto pr-2 text-sm" data-testid="pos-cart">
             {lines.map((l) => (
               <li key={l.key} className="flex items-center gap-2 py-1.5">
@@ -590,7 +591,8 @@ export function PosTab() {
               </li>
             ))}
           </ul>
-          {manager && lines.length > 0 && <p className="-mt-1 text-[11px] text-slate-400">{t('pos.cartHint')}</p>}
+          {manager && <p className="-mt-1 text-[11px] text-slate-400">{t('pos.cartHint')}</p>}
+          </>
         )}
         {lines.some((l) => l.rx) && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-rx">⚕️ {t('pos.rxNotice')}</p>}
         {shortStock && <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{t('pos.notEnough', { name: shortStock.name, n: shortStock.max })}</p>}
