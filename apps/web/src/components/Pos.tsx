@@ -171,7 +171,7 @@ export function PosTab() {
   const lines = open.active.lines;
   const customerId = open.active.customerId;
   const setLines = (fn: (ls: Line[]) => Line[]) => open.update((tk) => ({ ...tk, lines: fn(tk.lines) }));
-  const setCustomerId = (id: string) => open.update((tk) => ({ ...tk, customerId: id }));
+  const setCustomerId = (id: string, c?: { name: string }) => open.update((tk) => ({ ...tk, customerId: id, customerName: id ? (c?.name ?? tk.customerName) : null }));
   const [q, setQ] = useState('');
   const [method, setMethod] = useState<PosMethod>('cash');
   const [split, setSplit] = useState<{ method: PosMethod; amount: string } | null>(null);
@@ -262,7 +262,7 @@ export function PosTab() {
       const pending = addPending(tenantId, {
         clientId, locationId, soldAt, body,
         items: lines.map((l) => ({ name: l.name, qty: l.qty, unitCents: l.unitCents, totalCents: l.qty * l.unitCents })),
-        payments, totalCents: total, customerName: null, createdByName: user?.name ?? null,
+        payments, totalCents: total, customerName: customerId ? open.active.customerName : null, createdByName: user?.name ?? null,
       });
       const keepOffline = (): Done => {
         if (offlineExpired(tenantId)) {
@@ -354,7 +354,11 @@ export function PosTab() {
             return (
               <span key={tk.id} className={`inline-flex items-center rounded-lg border text-sm ${isActive ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-700'}`}>
                 <button type="button" className="px-2.5 py-1 font-medium" onClick={() => switchTo(tk.id)} aria-pressed={isActive} data-testid="pos-ticket-tab">
-                  {t('pos.tickets.label', { n: i + 1 })}
+                  {tk.customerId && tk.customerName ? (
+                    <span className="inline-block max-w-[9rem] truncate align-bottom" title={tk.customerName} data-testid="pos-ticket-customer">{tk.customerName}</span>
+                  ) : (
+                    t('pos.tickets.label', { n: i + 1 })
+                  )}
                   {tk.lines.length ? ` · ${money(sum)}` : ''}
                 </button>
                 {open.tickets.length > 1 &&
@@ -417,7 +421,7 @@ export function PosTab() {
           {offlineNow ? (
             <p className="text-xs text-slate-500">{t('pos.offline.noCustomer')}</p>
           ) : (
-            <CustomerPicker key={open.active.id} value={customerId} onChange={setCustomerId} forBooking={false} optional />
+            <CustomerPicker key={open.active.id} value={customerId} valueName={open.active.customerName} onChange={setCustomerId} forBooking={false} optional />
           )}
         </div>
         <div>

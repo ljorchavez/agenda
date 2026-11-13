@@ -18,9 +18,12 @@ export function CustomerPicker({
   newCustomer,
   onNewCustomer,
   optional,
+  valueName,
 }: {
   value: string;
-  onChange: (id: string) => void;
+  onChange: (id: string, customer?: CustomerWithStats) => void;
+  /** Name of the customer already set (e.g. coming back to an open ticket), to show it picked */
+  valueName?: string | null;
   forBooking: boolean;
   newCustomer?: NewCustomer | null;
   onNewCustomer?: (c: NewCustomer | null) => void;
@@ -56,15 +59,16 @@ export function CustomerPicker({
     setPicked(c);
     setForceNew(false);
     onNewCustomer?.(null);
-    onChange(c.id);
+    onChange(c.id, c);
   };
 
-  if (value && picked?.id === value) {
+  const shown = value && picked?.id === value ? picked : value && valueName ? { name: valueName, phone: null } : null;
+  if (shown) {
     return (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-brand-600 bg-brand-50 px-3 py-2" data-testid="picked-customer">
         <div className="min-w-0">
-          <div className="truncate font-medium text-slate-900">{picked.name}</div>
-          {picked.phone && <div className="text-xs text-slate-600">{picked.phone}</div>}
+          <div className="truncate font-medium text-slate-900">{shown.name}</div>
+          {shown.phone && <div className="text-xs text-slate-600">{shown.phone}</div>}
         </div>
         <button
           type="button"

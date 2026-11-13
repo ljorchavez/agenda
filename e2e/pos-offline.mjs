@@ -26,6 +26,7 @@ const tok = reg.token;
 await api('/tenant/plan', { plan: 'standard' }, tok, 'PUT');
 const gel = await api('/products', { name: 'Gel fijador', priceCents: 9000, initialStock: 5 }, tok);
 const agua = await api('/products', { name: 'Agua natural', priceCents: 1500, trackStock: false }, tok);
+await api('/customers', { name: 'Rosa Martínez', phone: '5512340099' }, tok);
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'es-MX' });
@@ -57,6 +58,15 @@ ok('after charging, back to the waiting ticket', (await tabs.count()) === 1 && /
 await page.reload();
 await products.waitFor({ timeout: 15000 });
 ok('waiting tickets survive a reload', /180/.test(await total()), await total());
+// Picking a customer names the tab; switching away and back keeps them picked
+await page.getByRole('searchbox', { name: /Cliente/ }).fill('Rosa');
+await page.getByRole('button', { name: /Rosa Martínez/ }).first().click();
+ok('the tab shows the customer name', /Rosa Martínez · \$180/.test((await tabs.nth(0).textContent()) ?? ''), (await tabs.nth(0).textContent()) ?? '');
+await page.getByTestId('pos-new-ticket').click();
+ok('a new ticket has no customer', (await page.getByTestId('picked-customer').count()) === 0 && /Cliente 2/.test((await tabs.nth(1).textContent()) ?? ''));
+await tabs.nth(0).click();
+ok('back on the first ticket, Rosa is still picked', /Rosa Martínez/.test((await page.getByTestId('picked-customer').textContent().catch(() => '')) ?? ''));
+await page.getByTestId('pos-ticket-discard').nth(1).click();
 // Discarding a ticket with products asks first
 await page.getByTestId('pos-new-ticket').click();
 await page.getByTestId('pos-ticket-discard').first().click();
