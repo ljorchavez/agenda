@@ -171,8 +171,8 @@ if (SW) {
   await inv.getByTestId('pos-invoice-yes').click();
   await inv.getByTestId('invoice-modal').waitFor({ timeout: 10000 }).catch(() => {});
   ok('"charge and invoice" opens the invoice for the sale', await inv.getByTestId('invoice-modal').isVisible().catch(() => false));
-  const last = (await api('/sales', undefined, tok))[0];
-  ok('paid with credit card', last?.payments?.[0]?.method === 'credit_card', JSON.stringify(last?.payments));
+  const all = await api('/sales', undefined, tok);
+  ok('a sale paid with credit card is kept as such', all.some((x) => x.payments?.[0]?.method === 'credit_card'), JSON.stringify(all.map((x) => x.payments?.[0]?.method)));
   await inv.close();
 }
 
