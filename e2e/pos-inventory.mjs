@@ -46,10 +46,10 @@ ok('old Productos link opens it in Punto de venta', /\/pos\?tab=products/.test(p
 
 // ---- Punto de venta tabs ----
 await page.goto(BASE + '/pos');
-const posTabs = await page.getByRole('tab').allTextContents();
-ok('POS tabs: Vender, Ventas, Productos, Corte de caja', ['Vender', 'Ventas', 'Productos', 'Corte de caja'].every((x) => posTabs.includes(x)), posTabs.join(','));
 const products = page.getByTestId('pos-products');
 await products.waitFor({ timeout: 15000 });
+const posTabs = (await page.getByRole('tab').allTextContents()).map((x) => x.trim());
+ok('POS tabs: Vender, Ventas, Productos, Corte de caja', ['Vender', 'Ventas', 'Productos', 'Corte de caja'].every((x) => posTabs.includes(x)), posTabs.join(','));
 await products.getByRole('button', { name: /Gel/ }).click();
 await products.getByRole('button', { name: /Agua natural/ }).click();
 await page.getByTestId('pos-method-credit_card').click();
@@ -84,24 +84,24 @@ await page.getByTestId('pos-tab-products').click();
 await page.getByTestId('product-row').first().waitFor({ timeout: 10000 });
 const gelRow = page.getByTestId('product-row').filter({ hasText: 'Gel' });
 await gelRow.getByTestId('product-name').dblclick();
-await gelRow.getByTestId('product-name-input').fill('Gel fijador');
-await gelRow.getByTestId('product-name-input').press('Enter');
+await page.getByTestId('product-name-input').fill('Gel fijador');
+await page.getByTestId('product-name-input').press('Enter');
 await page.waitForTimeout(800);
 await gelRow.getByTestId('product-price').dblclick();
-await gelRow.getByTestId('product-price-input').fill('95.50');
-await gelRow.getByTestId('product-price-input').press('Enter');
+await page.getByTestId('product-price-input').fill('95.50');
+await page.getByTestId('product-price-input').press('Enter');
 await page.waitForTimeout(800);
 await gelRow.getByTestId('product-stock').dblclick();
-await gelRow.getByTestId('product-stock-input').fill('7');
-await gelRow.getByTestId('product-stock-input').press('Enter');
+await page.getByTestId('product-stock-input').fill('7');
+await page.getByTestId('product-stock-input').press('Enter');
 await page.waitForTimeout(800);
 let saved = (await api('/products', undefined, tok)).find((p) => p.id === gel.id);
 ok('double click: name changed', saved?.name === 'Gel fijador', saved?.name);
 ok('double click: price changed', saved?.priceCents === 9550, String(saved?.priceCents));
 ok('double click: stock counted', saved?.stock === 7, String(saved?.stock));
 await gelRow.getByTestId('product-name').dblclick();
-await gelRow.getByTestId('product-name-input').fill('No se guarda');
-await gelRow.getByTestId('product-name-input').press('Escape');
+await page.getByTestId('product-name-input').fill('No se guarda');
+await page.getByTestId('product-name-input').press('Escape');
 await page.waitForTimeout(400);
 ok('Esc cancels the edit', (await api('/products', undefined, tok)).find((p) => p.id === gel.id)?.name === 'Gel fijador');
 

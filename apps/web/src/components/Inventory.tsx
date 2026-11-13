@@ -33,7 +33,7 @@ const WIDTHS: Record<ProductSheetColumn, number> = { id: 38, name: 32, sku: 14, 
 
 function save(bytes: Uint8Array, name: string) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.href = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   a.download = name;
   document.body.appendChild(a);
   a.click();
