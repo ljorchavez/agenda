@@ -13,7 +13,7 @@ const yes = (b: boolean) => (b ? 'Sí' : 'No');
 
 function cellOf(p: ProductDto, c: ProductSheetColumn): Cell {
   switch (c) {
-    case 'id': return p.id;
+    case 'id': return p.number;
     case 'name': return p.name;
     case 'sku': return p.sku;
     case 'category': return p.category;
@@ -29,7 +29,7 @@ function cellOf(p: ProductDto, c: ProductSheetColumn): Cell {
   }
 }
 
-const WIDTHS: Record<ProductSheetColumn, number> = { id: 38, name: 32, sku: 14, category: 16, price: 10, cost: 10, trackStock: 18, stock: 11, minStock: 9, iva: 8, satKey: 12, rx: 15, active: 8 };
+const WIDTHS: Record<ProductSheetColumn, number> = { id: 8, name: 32, sku: 14, category: 16, price: 10, cost: 10, trackStock: 18, stock: 11, minStock: 9, iva: 8, satKey: 12, rx: 15, active: 8 };
 
 function save(bytes: Uint8Array, name: string) {
   const a = document.createElement('a');
@@ -42,14 +42,23 @@ function save(bytes: Uint8Array, name: string) {
 }
 
 /** Downloads the products shown (or an empty template) as an Excel file to edit and upload back. */
-export async function downloadInventory(list: ProductDto[] | null, opts: { health: boolean; locationName?: string | null }) {
+export async function downloadInventory(list: ProductDto[] | null, opts: { health: boolean; locationName?: string | null; categories?: string[] }) {
   const { writeXlsx } = await import('@agenda/shared/xlsx');
   const cols = columnsFor(opts.health);
   const rows: Cell[][] = [cols.map((c) => PRODUCT_SHEET_HEADERS[c])];
   for (const p of list ?? []) rows.push(cols.map((c) => cellOf(p, c)));
   const day = new Date().toISOString().slice(0, 10);
   const place = opts.locationName ? `-${opts.locationName.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}` : '';
-  save(writeXlsx(rows, { sheet: 'Inventario', widths: cols.map((c) => WIDTHS[c]) }), list ? `inventario${place}-${day}.xlsx` : 'plantilla-inventario.xlsx');
+  // Dropdowns to fill it in without typos (categories also take new ones)
+  const choices: Partial<Record<ProductSheetColumn, { values: string[]; allowOther?: boolean }>> = {
+    category: { values: opts.categories ?? [], allowOther: true },
+    trackStock: { values: ['Sí', 'No'] },
+    iva: { values: ['16', '0', 'exento'] },
+    rx: { values: ['Sí', 'No'] },
+    active: { values: ['Sí', 'No'] },
+  };
+  const lists = cols.flatMap((c, col) => (choices[c] ? [{ col, ...choices[c]! }] : []));
+  save(writeXlsx(rows, { sheet: 'Inventario', widths: cols.map((c) => WIDTHS[c]), lists }), list ? `inventario${place}-${day}.xlsx` : 'plantilla-inventario.xlsx');
 }
 
 async function readTable(file: File): Promise<Cell[][]> {
@@ -161,11 +170,14 @@ export function EditableCell<T>({
   inputMode,
   className = '',
   testId,
+  allowEmpty,
 }: {
   value: string;
   display: ReactNode;
   parse: (s: string) => T | null;
-  onSave: (v: T) => Promise<unknown>;
+  onSave: (v: T | null) => Promise<unknown>;
+  /** An empty cell clears the value (saves null) */
+  allowEmpty?: boolean;
   canEdit: boolean;
   inputMode?: 'decimal' | 'numeric' | 'text';
   className?: string;
@@ -195,8 +207,8 @@ export function EditableCell<T>({
   }
   const commit = async () => {
     if (draft.trim() === value.trim()) return setEditing(false);
-    const v = parse(draft);
-    if (v === null) return setBad(true);
+    const v = allowEmpty && draft.trim() === '' ? null : parse(draft);
+    if (v === null && !(allowEmpty && draft.trim() === '')) return setBad(true);
     setBusy(true);
     try {
       await onSave(v);

@@ -16,7 +16,7 @@ import {
   PAYMENT_STATUSES,
 } from '@agenda/shared';
 import { getDb } from '../db/client.js';
-import { appointments, customers, invoices, locations, memberships, payments, services, tenants } from '../db/schema.js';
+import { appointments, customers, invoices, locations, memberships, payments, sales, services, tenants } from '../db/schema.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { apiBaseUrl, createOnlinePayment } from '../lib/online-payments.js';
 import { toPaymentDto } from '../lib/mappers.js';
@@ -55,7 +55,8 @@ paymentRoutes.get('/payments', async (c) => {
       p: payments,
       customerName: customers.name,
       businessName: tenants.name,
-      locationId: appointments.locationId,
+      // A booking's location, or the counter's for a POS sale
+      locationId: sql<string | null>`coalesce(${appointments.locationId}, ${sales.locationId})`,
       locationName: locations.name,
       serviceName: services.name,
       invoice: {
@@ -71,7 +72,8 @@ paymentRoutes.get('/payments', async (c) => {
     .innerJoin(customers, eq(customers.id, payments.customerId))
     .innerJoin(tenants, eq(tenants.id, payments.tenantId))
     .leftJoin(appointments, eq(appointments.id, payments.appointmentId))
-    .leftJoin(locations, eq(locations.id, appointments.locationId))
+    .leftJoin(sales, eq(sales.id, payments.saleId))
+    .leftJoin(locations, eq(locations.id, sql`coalesce(${appointments.locationId}, ${sales.locationId})`))
     .leftJoin(services, eq(services.id, appointments.serviceId))
     .leftJoin(invoices, and(eq(invoices.paymentId, payments.id), ne(invoices.status, 'canceled')))
     .where(and(...filters))

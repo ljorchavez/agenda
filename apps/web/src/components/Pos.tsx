@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import {
   IVA_OPTIONS,
   isHealthType,
@@ -28,7 +27,6 @@ import {
   loadLocation,
   loadTickets,
   markOnline,
-  OFFLINE_MAX_MS,
   offlineExpired,
   recordSent,
   retryPending,
@@ -37,7 +35,6 @@ import {
   saveLocation,
   saveSession,
   saveTickets,
-  setRegister,
   takeFromCatalog,
   uuid,
   type OpenTicket,
@@ -53,6 +50,7 @@ import { UpgradeNote, useFeature } from './Sales';
 import { openTicket } from '../pages/Ticket';
 import { ErrorText, Loading, Modal } from './ui';
 import { EditableCell, ImportModal, downloadInventory } from './Inventory';
+import { headCells, rowCells, useColumns } from './Columns';
 
 /** Prescriptions only matter in health businesses (doctors, dentists…). */
 const useHealth = () => {
@@ -205,12 +203,12 @@ export function PosTab() {
       /* ignore */
     }
   };
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const sales = useQuery({
-    queryKey: ['sales', locationId, today],
-    queryFn: () => api<SaleDto[]>(`/sales?locationId=${locationId}&from=${new Date(`${today}T00:00:00`).toISOString()}`),
-    enabled: enabled && Boolean(locationId),
-  });
+  // Ready to sell without internet: keep the session so the app opens offline
+  useEffect(() => {
+    if (reg.on && tenantId && navigator.onLine) {
+      void api<{ user: SessionUser; tenant: TenantDto; businesses: BusinessSummary[] }>('/auth/me').then(saveSession).catch(() => undefined);
+    }
+  }, [reg.on, tenantId]);
   // The register keeps the ticket header (business name, address…) to print offline
   useQuery({
     queryKey: ['pos-header', locationId],
@@ -500,14 +498,11 @@ export function PosTab() {
         </label>
       </section>
 
-      <section className="card lg:col-span-5">
-        <h2 className="mb-2 font-semibold">{t('pos.todaySales')}</h2>
-        <PendingList pending={reg.pending.filter((p) => p.locationId === locationId)} />
-        <SalesList sales={sales.data ?? []} />
-        {sales.data?.length === 0 && !reg.pending.length && <p className="text-sm text-slate-500">{t('pos.noSales')}</p>}
-      </section>
-
-      {manager && tenantId && <RegisterSwitch tenantId={tenantId} on={reg.on} locationId={locationId} />}
+      {reg.pending.some((p) => p.locationId === locationId) && (
+        <section className="card lg:col-span-5">
+          <PendingList pending={reg.pending.filter((p) => p.locationId === locationId)} />
+        </section>
+      )}
 
       {free && (
         <Modal open title={t('pos.freeLine')} onClose={() => setFree(null)}>
@@ -622,29 +617,6 @@ function PendingList({ pending }: { pending: PendingSale[] }) {
   );
 }
 
-/** The owner marks this computer as a register: it keeps what it needs to sell without internet. */
-function RegisterSwitch({ tenantId, on, locationId }: { tenantId: string; on: boolean; locationId: string }) {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const toggle = (v: boolean) => {
-    setRegister(tenantId, v);
-    if (v) {
-      markOnline(tenantId);
-      // Copies now: catalog, ticket header and the session
-      void qc.invalidateQueries({ queryKey: ['products', locationId] });
-      void qc.invalidateQueries({ queryKey: ['pos-header', locationId] });
-      void api<{ user: SessionUser; tenant: TenantDto; businesses: BusinessSummary[] }>('/auth/me').then(saveSession).catch(() => undefined);
-    }
-  };
-  return (
-    <section className="card space-y-1 text-sm lg:col-span-5">
-      <label className="flex items-center gap-2 font-medium">
-        <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} data-testid="pos-register" /> {t('pos.offline.registerSwitch')}
-      </label>
-      <p className="text-xs text-slate-500">{t('pos.offline.registerHelp', { hours: OFFLINE_MAX_MS / 3600_000 })}</p>
-    </section>
-  );
-}
 
 /** Invoice and (for managers) cancel buttons of a sale. */
 export function SaleActions({ sale, startInvoicing }: { sale: SaleDto; startInvoicing?: boolean }) {
@@ -681,27 +653,6 @@ export function SaleActions({ sale, startInvoicing }: { sale: SaleDto; startInvo
   );
 }
 
-function SalesList({ sales }: { sales: SaleDto[] }) {
-  const { t } = useTranslation();
-  return (
-    <ul className="divide-y divide-slate-100 text-sm" data-testid="pos-sales">
-      {sales.map((s) => (
-        <li key={s.id} className={`flex flex-wrap items-center justify-between gap-2 py-2 ${s.status === 'canceled' ? 'opacity-50' : ''}`}>
-          <div className="min-w-0">
-            <div className="font-medium">
-              #{s.number} · {money(s.totalCents)} {s.status === 'canceled' && <span className="text-xs text-rose-700">({t('pos.canceled')})</span>}
-            </div>
-            <div className="truncate text-xs text-slate-500">
-              {dateTime(s.createdAt)} · {s.items.map((i) => `${i.qty}× ${i.name}`).join(', ')}
-              {s.customerName ? ` · ${s.customerName}` : ''} · {s.payments.map((p) => t(`methods.${p.method}`)).join(' + ')}
-            </div>
-          </div>
-          <SaleActions sale={s} />
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 // ---------- Catalog and stock ----------
 
@@ -726,18 +677,6 @@ export function ProductsTab() {
   const remove = useMutation({ mutationFn: (id: string) => api(`/products/${id}`, { method: 'DELETE' }), onSuccess: refresh });
   const all = products.data ?? [];
   const categories = useMemo(() => [...new Set(all.map((p) => p.category).filter((c): c is string => Boolean(c)))].sort((a, b) => a.localeCompare(b, 'es')), [all]);
-  if (!enabled) return <UpgradeNote feature="cash" />;
-  const q = f.q.trim().toLocaleLowerCase('es');
-  const list = all.filter(
-    (p) =>
-      (!q || [p.name, p.sku, p.category].some((x) => x?.toLocaleLowerCase('es').includes(q))) &&
-      (!f.category || (f.category === '-' ? !p.category : p.category === f.category)) &&
-      (!f.status || (f.status === 'active' ? p.active : !p.active)) &&
-      (!f.stock ||
-        (f.stock === 'low' ? p.low : f.stock === 'out' ? p.trackStock && p.stock <= 0 : f.stock === 'in' ? p.trackStock && p.stock > 0 : !p.trackStock)),
-  );
-  const low = all.filter((p) => p.active && p.low);
-  const filtered = Boolean(q || f.category || f.stock || f.status !== 'active');
   const saveField = async (p: ProductDto, patch: Partial<ProductInput>) => {
     await api(`/products/${p.id}`, { method: 'PUT', body: { ...productInputOf(p), ...patch } });
     refresh();
@@ -746,6 +685,108 @@ export function ProductsTab() {
     await api(`/products/${p.id}/stock`, { method: 'POST', body: { locationId, mode: 'set', qty, note: null } });
     refresh();
   };
+  const text = (max: number) => (s: string) => (s.trim().length <= max ? s.trim() || null : null);
+  const pesos = (s: string) => {
+    const n = Number(s.replace(/[$,\s]/g, ''));
+    return s.trim() !== '' && Number.isFinite(n) && n >= 0 ? toCents(String(n)) : null;
+  };
+  const whole = (s: string) => {
+    const n = Number(s.trim());
+    return Number.isInteger(n) && n >= 0 && n <= 100_000 ? n : null;
+  };
+  const NONE = <span className="text-slate-300">—</span>;
+  const yesNo = (p: ProductDto, k: 'trackStock' | 'active' | 'requiresPrescription', label: string) => (
+    <span
+      className={`whitespace-nowrap ${businessManager ? 'cursor-pointer rounded px-1 -mx-1 hover:bg-brand-50' : ''}`}
+      title={businessManager ? t('pos.inventory.dblClick') : undefined}
+      onDoubleClick={() => businessManager && void saveField(p, { [k]: !p[k] })}
+      data-testid={`product-${k}`}
+    >
+      {p[k] ? `✓ ${label}` : <span className="text-slate-400">{t('common.no')}</span>}
+    </span>
+  );
+  const R = 'text-right';
+  const { cols, menu } = useColumns<ProductDto>('products', [
+    { key: 'number', label: 'ID', className: 'text-slate-500 tabular-nums', td: (p) => (p.number != null ? `#${p.number}` : '') },
+    {
+      key: 'name', label: t('pos.product'), required: true,
+      td: (p) => <EditableCell value={p.name} display={<span className="font-medium">{p.name}</span>} parse={(s) => (s.trim() ? s.trim().slice(0, 120) : null)} onSave={(name) => saveField(p, { name })} canEdit={businessManager} testId="product-name" />,
+    },
+    {
+      key: 'category', label: t('pos.category'),
+      td: (p) => <EditableCell value={p.category ?? ''} display={p.category ?? NONE} parse={text(60)} allowEmpty onSave={(category) => saveField(p, { category })} canEdit={businessManager} testId="product-category" />,
+    },
+    {
+      key: 'sku', label: t('pos.sku'),
+      td: (p) => <EditableCell value={p.sku ?? ''} display={p.sku ?? NONE} parse={text(60)} allowEmpty onSave={(sku) => saveField(p, { sku })} canEdit={businessManager} testId="product-sku" />,
+    },
+    {
+      key: 'price', label: t('pos.price'), className: R,
+      td: (p) => <EditableCell value={String(p.priceCents / 100)} display={money(p.priceCents)} parse={pesos} onSave={(priceCents) => saveField(p, { priceCents })} canEdit={businessManager} inputMode="decimal" className="!w-24 text-right" testId="product-price" />,
+    },
+    {
+      key: 'cost', label: t('pos.cost'), className: R,
+      td: (p) => <EditableCell value={p.costCents == null ? '' : String(p.costCents / 100)} display={p.costCents == null ? NONE : money(p.costCents)} parse={pesos} allowEmpty onSave={(costCents) => saveField(p, { costCents })} canEdit={businessManager} inputMode="decimal" className="!w-24 text-right" testId="product-cost" />,
+    },
+    {
+      key: 'stock', label: t('pos.stock'), className: R,
+      td: (p) =>
+        p.trackStock ? (
+          <span className={`font-semibold ${p.low ? 'text-amber-700' : ''}`}>
+            <EditableCell value={String(p.stock)} display={p.stock} parse={whole} onSave={(qty) => saveStock(p, qty)} canEdit={manager} inputMode="numeric" className="!w-20 text-right" testId="product-stock" />
+          </span>
+        ) : NONE,
+    },
+    {
+      key: 'minStock', label: t('pos.minStock'), className: R,
+      td: (p) => <EditableCell value={p.minStock == null ? '' : String(p.minStock)} display={p.minStock ?? NONE} parse={whole} allowEmpty onSave={(minStock) => saveField(p, { minStock })} canEdit={businessManager} inputMode="numeric" className="!w-20 text-right" testId="product-min" />,
+    },
+    { key: 'trackStock', label: t('pos.trackStock'), td: (p) => yesNo(p, 'trackStock', t('common.yes')) },
+    {
+      key: 'iva', label: 'IVA',
+      td: (p) => (
+        <EditableCell
+          value={p.iva}
+          display={p.iva === 'exento' ? t('pos.ivaExempt') : `${p.iva}%`}
+          parse={(s) => { const v = s.trim().toLowerCase().replace('%', ''); return v === '16' || v === '0' ? v : v.startsWith('exent') ? 'exento' : null; }}
+          onSave={(iva) => saveField(p, { iva: iva as ProductInput['iva'] })}
+          canEdit={businessManager}
+          className="!w-20"
+          testId="product-iva"
+        />
+      ),
+    },
+    {
+      key: 'satKey', label: t('pos.satKey'), className: 'font-mono text-xs',
+      td: (p) => <EditableCell value={p.satKey ?? ''} display={p.satKey ?? NONE} parse={(s) => (/^\d{8}$/.test(s.trim()) ? s.trim() : null)} allowEmpty onSave={(satKey) => saveField(p, { satKey })} canEdit={businessManager} inputMode="numeric" className="!w-28" testId="product-sat" />,
+    },
+    ...(health ? [{ key: 'rx', label: t('pos.rx'), td: (p: ProductDto) => yesNo(p, 'requiresPrescription', t('common.yes')) }] : []),
+    { key: 'active', label: t('pos.active'), td: (p) => yesNo(p, 'active', t('common.yes')) },
+    {
+      key: 'actions', label: t('columns.actions'), required: true, className: 'text-right',
+      td: (p) => (
+        <span className="inline-flex flex-wrap justify-end gap-2 text-xs">
+          {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'in' })} data-testid="stock-in">{t('pos.receive')}</button>}
+          {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'set' })}>{t('pos.count')}</button>}
+          <button type="button" className="text-brand-700 hover:underline" onClick={() => setMoves(p)}>{t('pos.history')}</button>
+          {businessManager && <button type="button" className="text-brand-700 hover:underline" onClick={() => setEdit({ id: p.id, v: { ...p } })}>{t('common.edit')}</button>}
+          {businessManager && p.active && <button type="button" className="text-rose-700 hover:underline" onClick={() => window.confirm(t('pos.deleteConfirm')) && remove.mutate(p.id)}>{t('common.delete')}</button>}
+        </span>
+      ),
+    },
+  ]);
+  if (!enabled) return <UpgradeNote feature="cash" />;
+  const q = f.q.trim().toLocaleLowerCase('es').replace(/^#/, '');
+  const list = all.filter(
+    (p) =>
+      (!q || String(p.number) === q || [p.name, p.sku, p.category].some((x) => x?.toLocaleLowerCase('es').includes(q))) &&
+      (!f.category || (f.category === '-' ? !p.category : p.category === f.category)) &&
+      (!f.status || (f.status === 'active' ? p.active : !p.active)) &&
+      (!f.stock ||
+        (f.stock === 'low' ? p.low : f.stock === 'out' ? p.trackStock && p.stock <= 0 : f.stock === 'in' ? p.trackStock && p.stock > 0 : !p.trackStock)),
+  );
+  const low = all.filter((p) => p.active && p.low);
+  const filtered = Boolean(q || f.category || f.stock || f.status !== 'active');
   return (
     <section className="card space-y-3" data-testid="products-tab">
       <div className="flex flex-wrap items-center gap-2">
@@ -774,13 +815,14 @@ export function ProductsTab() {
           <option value="">{t('pos.inventory.allStatus')}</option>
         </select>
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          <button type="button" className="btn-secondary !py-1 text-sm" disabled={!list.length} onClick={() => void downloadInventory(list, { health, locationName })} data-testid="products-export">
+          {menu}
+          <button type="button" className="btn-secondary !py-1 text-sm" disabled={!list.length} onClick={() => void downloadInventory(list, { health, locationName, categories })} data-testid="products-export">
             ⬇ {filtered ? t('pos.inventory.exportFiltered', { count: list.length }) : t('pos.inventory.export')}
           </button>
           {businessManager && (
             <>
               <button type="button" className="btn-secondary !py-1 text-sm" onClick={() => setImporting(true)} data-testid="products-import">⬆ {t('pos.inventory.import')}</button>
-              <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => void downloadInventory(null, { health })}>{t('pos.inventory.template')}</button>
+              <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => void downloadInventory(null, { health, categories })}>{t('pos.inventory.template')}</button>
             </>
           )}
         </span>
@@ -795,72 +837,12 @@ export function ProductsTab() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                <th className="py-2 pr-3">{t('pos.product')}</th>
-                <th className="py-2 pr-3 text-right">{t('pos.price')}</th>
-                <th className="py-2 pr-3 text-right">{t('pos.stock')}</th>
-                <th className="py-2" />
-              </tr>
+              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">{headCells(cols)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {list.map((p) => (
                 <tr key={p.id} className={p.active ? '' : 'opacity-50'} data-testid="product-row">
-                  <td className="py-2 pr-3">
-                    <EditableCell
-                      value={p.name}
-                      display={<span className="font-medium">{p.name}</span>}
-                      parse={(s) => (s.trim() ? s.trim().slice(0, 120) : null)}
-                      onSave={(name) => saveField(p, { name })}
-                      canEdit={businessManager}
-                      testId="product-name"
-                    />
-                    <div className="text-xs text-slate-500">
-                      {[p.category, p.sku, health && p.requiresPrescription ? t('pos.rx') : null, p.iva === 'exento' ? t('pos.ivaExempt') : `IVA ${p.iva}%`].filter(Boolean).join(' · ')}
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 text-right">
-                    <EditableCell
-                      value={String(p.priceCents / 100)}
-                      display={money(p.priceCents)}
-                      parse={(s) => {
-                        const n = Number(s.replace(/[$,\s]/g, ''));
-                        return s.trim() !== '' && Number.isFinite(n) && n >= 0 ? toCents(String(n)) : null;
-                      }}
-                      onSave={(priceCents) => saveField(p, { priceCents })}
-                      canEdit={businessManager}
-                      inputMode="decimal"
-                      className="!w-24 text-right"
-                      testId="product-price"
-                    />
-                  </td>
-                  <td className={`py-2 pr-3 text-right font-semibold ${p.low ? 'text-amber-700' : ''}`}>
-                    {p.trackStock ? (
-                      <EditableCell
-                        value={String(p.stock)}
-                        display={p.stock}
-                        parse={(s) => {
-                          const n = Number(s.trim());
-                          return Number.isInteger(n) && n >= 0 && n <= 100_000 ? n : null;
-                        }}
-                        onSave={(qty) => saveStock(p, qty)}
-                        canEdit={manager}
-                        inputMode="numeric"
-                        className="!w-20 text-right"
-                        testId="product-stock"
-                      />
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className="py-2 text-right">
-                    <span className="inline-flex flex-wrap justify-end gap-2 text-xs">
-                      {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'in' })} data-testid="stock-in">{t('pos.receive')}</button>}
-                      {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'set' })}>{t('pos.count')}</button>}
-                      <button type="button" className="text-brand-700 hover:underline" onClick={() => setMoves(p)}>{t('pos.history')}</button>
-                      {businessManager && <button type="button" className="text-brand-700 hover:underline" onClick={() => setEdit({ id: p.id, v: { ...p } })}>{t('common.edit')}</button>}
-                      {businessManager && p.active && <button type="button" className="text-rose-700 hover:underline" onClick={() => window.confirm(t('pos.deleteConfirm')) && remove.mutate(p.id)}>{t('common.delete')}</button>}
-                    </span>
-                  </td>
+                  {rowCells(cols, p, 'py-2 pr-3 align-top')}
                 </tr>
               ))}
             </tbody>

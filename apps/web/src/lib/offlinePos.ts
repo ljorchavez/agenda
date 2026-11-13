@@ -76,9 +76,10 @@ export const uuid = () =>
 
 // ---------- This computer as a register ----------
 
-export const isRegister = (tenantId: string | undefined) => Boolean(tenantId && get<{ on: boolean } | null>(k.register(tenantId), null)?.on);
+/** Every computer sells offline unless it was turned off on purpose. */
+export const isRegister = (tenantId: string | undefined) => Boolean(tenantId && get<{ on: boolean } | null>(k.register(tenantId), null)?.on !== false);
 export function setRegister(tenantId: string, on: boolean) {
-  put(k.register(tenantId), on ? { on: true, since: new Date().toISOString() } : null);
+  put(k.register(tenantId), on ? { on: true, since: new Date().toISOString() } : { on: false });
   if (!on) forgetCopies(tenantId);
   notify();
 }

@@ -49,6 +49,8 @@ export type ProductInput = z.input<typeof productInputSchema>;
 
 export interface ProductDto {
   id: string;
+  /** 1, 2, 3… per business (the ID in spreadsheets) */
+  number: number | null;
   name: string;
   sku: string | null;
   category: string | null;

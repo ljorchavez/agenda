@@ -162,6 +162,13 @@
       "when": 1795900000000,
       "tag": "0022_card_types",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1796000000000,
+      "tag": "0023_tenant_numbers",
+      "breakpoints": true
     }
   ]
 }

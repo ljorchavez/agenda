@@ -98,6 +98,7 @@ export function fiscalDocDto(d: Customer['fiscalDoc'] | null | undefined) {
 export function toCustomerDto(c: Customer): CustomerDto {
   return {
     id: c.id,
+    number: c.number ?? null,
     name: c.name,
     phone: c.phone,
     email: c.email,

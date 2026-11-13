@@ -112,12 +112,13 @@ export function planImport(table: Cell[][], existing: Map<string, Existing>, opt
     const shownName = blank(rawName) ? null : text(rawName!);
 
     const idCell = get('id');
-    const id = blank(idCell) ? null : text(idCell!);
+    // The product's number (1, 2, 3…) or, in older files, its long ID
+    const id = blank(idCell) ? null : text(idCell!).replace(/^#/, '');
     const prev = id ? existing.get(id) : undefined;
     if (id && !prev) return fail('unknown_id', shownName);
-    if (id) {
-      if (seen.has(id)) return fail('duplicate_id', shownName);
-      seen.add(id);
+    if (prev) {
+      if (seen.has(prev.id)) return fail('duplicate_id', shownName);
+      seen.add(prev.id);
     }
     const base: Record<string, unknown> = prev
       ? { ...prev.input }

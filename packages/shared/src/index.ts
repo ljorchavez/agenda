@@ -1316,6 +1316,8 @@ export interface CustomerStats {
 
 export interface CustomerDto {
   id: string;
+  /** 1, 2, 3… per business */
+  number: number | null;
   name: string;
   phone: string | null;
   email: string | null;

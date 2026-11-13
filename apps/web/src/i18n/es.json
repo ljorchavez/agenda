@@ -23,7 +23,9 @@
     "add": "Agregar",
     "done": "Listo",
     "crash": "Algo falló en esta pantalla. Ya nos llegó el aviso.",
-    "reload": "Volver a cargar"
+    "reload": "Volver a cargar",
+    "yes": "Sí",
+    "no": "No"
   },
   "nav": {
     "dashboard": "Inicio",
@@ -326,7 +328,8 @@
       "commissions": "Comisiones",
       "cash": "Corte de caja",
       "pos": "Vender",
-      "products": "Productos"
+      "products": "Productos",
+      "reports": "Reportes"
     },
     "originLabel": "Origen",
     "origin": {
@@ -1809,9 +1812,10 @@
     "invoiceNo": "No, solo cobrar",
     "tabs": {
       "sell": "Vender",
-      "sales": "Ventas",
+      "sales": "Historial",
       "products": "Productos",
-      "cash": "Corte de caja"
+      "cash": "Corte de caja",
+      "reports": "Reportes"
     },
     "salesTab": {
       "presets": {
@@ -1832,7 +1836,9 @@
       "units_one": "{{count}} pieza",
       "units_other": "{{count}} piezas",
       "avg": "Ticket promedio",
-      "ticket": "Ticket"
+      "ticket": "Ticket",
+      "allLocations": "Todas",
+      "seller": "Vendió"
     },
     "inventory": {
       "export": "Descargar Excel",
@@ -1850,7 +1856,7 @@
       "dblClick": "Doble clic para cambiar",
       "dblClickHint": "Doble clic en el nombre, precio o existencia para cambiarlo.",
       "importTitle": "Subir inventario desde Excel",
-      "importHelp": "Descarga tu inventario, cámbialo en Excel y súbelo. Las filas con ID actualizan ese producto; las filas sin ID crean productos nuevos. Si dejas vacía la celda de nombre, precio o existencia, no cambia. Si quitas una columna, tampoco.",
+      "importHelp": "Descarga tu inventario, cámbialo en Excel y súbelo. Las filas con ID (el número del producto) actualizan ese producto; las filas sin ID crean productos nuevos. Si dejas vacía la celda de nombre, precio o existencia, no cambia. Si quitas una columna, tampoco.",
       "stockAt": "La existencia se aplica en {{place}}.",
       "pickFile": "Elegir archivo (.xlsx o .csv)",
       "otherFile": "Elegir otro archivo",
@@ -1996,5 +2002,13 @@
       "taxSystem": "Régimen",
       "zip": "Código postal"
     }
+  },
+  "columns": {
+    "button": "Columnas",
+    "help": "Muestra, oculta y ordena las columnas.",
+    "up": "Subir",
+    "down": "Bajar",
+    "reset": "Restablecer",
+    "actions": "Acciones"
   }
 }

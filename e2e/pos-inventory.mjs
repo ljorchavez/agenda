@@ -49,7 +49,8 @@ await page.goto(BASE + '/pos');
 const products = page.getByTestId('pos-products');
 await products.waitFor({ timeout: 15000 });
 const posTabs = (await page.getByRole('tab').allTextContents()).map((x) => x.trim());
-ok('POS tabs: Vender, Ventas, Productos, Corte de caja', ['Vender', 'Ventas', 'Productos', 'Corte de caja'].every((x) => posTabs.includes(x)), posTabs.join(','));
+ok('POS tabs: Vender, Historial, Productos, Corte de caja, Reportes', ['Vender', 'Historial', 'Productos', 'Corte de caja', 'Reportes'].every((x) => posTabs.includes(x)), posTabs.join(','));
+ok('Vender no longer lists today\'s sales', (await page.getByTestId('pos-sales').count()) === 0 && (await page.getByTestId('pos-register').count()) === 0);
 await products.getByRole('button', { name: /Gel/ }).click();
 await products.getByRole('button', { name: /Agua natural/ }).click();
 await page.getByTestId('pos-method-credit_card').click();
@@ -120,7 +121,7 @@ await page.setInputFiles('[data-testid=import-file]', xlsxPath);
 await page.getByTestId('import-summary').waitFor({ timeout: 10000 });
 ok('same file back (only the filtered product): nothing to change', /0 y se actualizarán 0 productos \(1 sin cambios\)/.test((await page.getByTestId('import-summary').textContent()) ?? '') && (await page.getByTestId('import-apply').count()) === 0, (await page.getByTestId('import-summary').textContent()) ?? '');
 
-const csv = `ID,Producto,Precio,Existencia,Categoría\n${gel.id},Gel fijador,99,12,Cabello\n,Cera mate,"$120.00",4,Cabello\n,Sin precio,,1,\n`;
+const csv = `ID,Producto,Precio,Existencia,Categoría\n${gel.number},Gel fijador,99,12,Cabello\n,Cera mate,"$120.00",4,Cabello\n,Sin precio,,1,\n`;
 writeFileSync('/tmp/inventario-e2e.csv', csv);
 await page.setInputFiles('[data-testid=import-file]', '/tmp/inventario-e2e.csv');
 await page.getByTestId('import-apply').waitFor({ timeout: 10000 });
@@ -135,6 +136,29 @@ ok('new product created with stock', after.find((p) => p.name === 'Cera mate')?.
 await page.getByTestId('import-modal').getByRole('button', { name: 'Cerrar', exact: true }).click();
 await page.waitForTimeout(500);
 ok('list refreshed', (await page.getByTestId('product-row').filter({ hasText: 'Cera mate' }).count()) === 1);
+
+// ---- Columns: hide and reorder (kept in this browser) ----
+ok('products show the ID number', /#1/.test((await page.getByTestId('product-row').first().textContent()) ?? ''));
+await page.getByTestId('cols-products').click();
+await page.getByTestId('col-toggle-sku').uncheck();
+await page.getByTestId('col-up-price').click();
+await page.getByTestId('col-up-price').click();
+await page.keyboard.press('Escape');
+const heads = async () => (await page.locator('[data-testid=products-tab] thead th').allTextContents()).map((x) => x.trim().toLowerCase());
+let h = await heads();
+ok('hide a column', !h.includes('sku'), h.join(','));
+ok('move a column', h.indexOf('precio') >= 0 && h.indexOf('precio') < h.indexOf('categoría'), h.join(','));
+const priceBefore = h.indexOf('precio');
+await page.reload();
+await page.getByTestId('product-row').first().waitFor({ timeout: 10000 });
+h = await heads();
+ok('column choice kept after reload', !h.includes('sku') && h.indexOf('precio') === priceBefore, h.join(','));
+
+// ---- Reports inside Punto de venta ----
+await page.getByTestId('pos-tab-reports').click();
+await page.getByTestId('reports-pos').waitFor({ timeout: 10000 }).catch(() => {});
+await page.getByTestId('pos-kpis').waitFor({ timeout: 10000 }).catch(() => {});
+ok('POS reports: only point-of-sale blocks', await page.getByTestId('pos-kpis').isVisible().catch(() => false) && (await page.getByText('Citas en el tiempo').count()) === 0);
 
 // ---- Corte de caja in POS ----
 await page.getByTestId('pos-tab-cash').click();

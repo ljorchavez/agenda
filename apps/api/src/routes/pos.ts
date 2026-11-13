@@ -85,6 +85,7 @@ const toProductDto = (p: Product, byLoc: Record<string, number>, locationId: str
   const stock = locationId ? byLoc[locationId] ?? 0 : Object.values(byLoc).reduce((a, b) => a + b, 0);
   return {
     id: p.id,
+    number: p.number ?? null,
     name: p.name,
     sku: p.sku,
     category: p.category,
@@ -189,9 +190,12 @@ posRoutes.post('/products/import', requireBusinessManager, async (c) => {
   const locationId = (await locationForWrite(db, c, input.locationId, { create: true }))!;
   const all = await db.select().from(products).where(eq(products.tenantId, tenantId));
   const stock = await stockMap(db, tenantId, all.map((p) => p.id));
-  const existing = new Map<string, Existing>(
-    all.map((p) => [p.id, { id: p.id, input: productValues(p as never) as Existing['input'], stock: stock.get(p.id)?.[locationId] ?? 0 }]),
-  );
+  const existing = new Map<string, Existing>();
+  for (const p of all) {
+    const e: Existing = { id: p.id, input: productValues(p as never) as Existing['input'], stock: stock.get(p.id)?.[locationId] ?? 0 };
+    existing.set(p.id, e);
+    if (p.number != null) existing.set(String(p.number), e);
+  }
   const plan = planImport(input.table, existing, { health: isHealthType(tenant?.businessType ?? 'other') });
   if (plan.headerError) throw new AppError(422, plan.headerError, 'The first row must have the column names (Producto, Precio…)');
   const result: ProductImportResult = {

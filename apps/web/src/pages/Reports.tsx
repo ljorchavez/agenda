@@ -112,16 +112,27 @@ interface Layout {
 }
 const isWidget = (w: string): w is Widget => (WIDGETS as readonly string[]).includes(w);
 
-function loadLayout(): Layout {
+/** Report views: everything (Reportes), money (Cobros) and the counter (Punto de venta), each with its own layout. */
+export type ReportScope = 'all' | 'payments' | 'pos';
+const SCOPE_WIDGETS: Record<ReportScope, readonly Widget[]> = {
+  all: WIDGETS,
+  payments: ['kpis', 'revenue', 'methods', 'locations', 'sources', 'topCustomers', 'services', 'resources'],
+  pos: ['posKpis', 'posSales', 'posProducts', 'posCategories'],
+};
+const layoutKey = (scope: ReportScope) => (scope === 'all' ? LAYOUT_KEY : `${LAYOUT_KEY}.${scope}`);
+
+function loadLayout(scope: ReportScope = 'all'): Layout {
+  const allowed = SCOPE_WIDGETS[scope];
   try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
+    const raw = localStorage.getItem(layoutKey(scope));
     if (raw) {
       const l = JSON.parse(raw) as { order?: string[]; hidden?: string[] };
-      const order = (l.order ?? []).filter(isWidget);
+      const order = (l.order ?? []).filter(isWidget).filter((w) => allowed.includes(w));
       // Blocks added after the layout was saved go at the end.
-      for (const w of WIDGETS) if (!order.includes(w)) order.push(w);
+      for (const w of allowed) if (!order.includes(w)) order.push(w);
       return { order, hidden: (l.hidden ?? []).filter(isWidget) };
     }
+    if (scope !== 'all') return { order: [...allowed], hidden: [] };
     // Earlier version only saved the visible blocks.
     const old = localStorage.getItem(OLD_WIDGET_KEY);
     if (old) {
@@ -135,9 +146,9 @@ function loadLayout(): Layout {
   return { order: [...WIDGETS], hidden: [] };
 }
 
-function storeLayout(l: Layout) {
+function storeLayout(l: Layout, scope: ReportScope = 'all') {
   try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+    localStorage.setItem(layoutKey(scope), JSON.stringify(l));
   } catch {
     /* ignore */
   }
@@ -228,14 +239,20 @@ function UpcomingCard() {
 }
 
 export function ReportsPage() {
+  return <ReportsView scope="all" />;
+}
+
+/** The reports with their filters and blocks; Cobros and Punto de venta show their own selection. */
+export function ReportsView({ scope }: { scope: ReportScope }) {
   const { t, i18n } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const [layout, setLayout] = useState<Layout>(loadLayout);
+  const [layout, setLayout] = useState<Layout>(() => loadLayout(scope));
   const widgets = layout.order.filter((w) => !layout.hidden.includes(w));
   const updateLayout = (l: Layout) => {
     setLayout(l);
-    storeLayout(l);
+    storeLayout(l, scope);
   };
+  const pos = scope === 'pos';
   /** New order of the visible blocks; hidden ones keep their place. */
   const saveWidgets = (visibleOrder: Widget[]) => {
     const queue = [...visibleOrder];
@@ -775,15 +792,22 @@ export function ReportsPage() {
 
   return (
     <>
-      <PageHeader
-        title={t('reports.title')}
-        actions={
-          <>
-            <button className="btn-secondary" onClick={() => setCustomizing(true)}>{t('reports.customize')}</button>
-            <button className="btn-secondary" onClick={exportCsv} disabled={!data}>{t('reports.exportCsv')}</button>
-          </>
-        }
-      />
+      {scope === 'all' ? (
+        <PageHeader
+          title={t('reports.title')}
+          actions={
+            <>
+              <button className="btn-secondary" onClick={() => setCustomizing(true)}>{t('reports.customize')}</button>
+              <button className="btn-secondary" onClick={exportCsv} disabled={!data}>{t('reports.exportCsv')}</button>
+            </>
+          }
+        />
+      ) : (
+        <div className="mb-3 flex flex-wrap justify-end gap-2" data-testid={`reports-${scope}`}>
+          <button className="btn-secondary !py-1 text-sm" onClick={() => setCustomizing(true)}>{t('reports.customize')}</button>
+          {!pos && <button className="btn-secondary !py-1 text-sm" onClick={exportCsv} disabled={!data}>{t('reports.exportCsv')}</button>}
+        </div>
+      )}
 
       {/* Filters: period on top, the rest behind "Filtros" */}
       <FilterBar
@@ -827,19 +851,19 @@ export function ReportsPage() {
           <option value="week">{t('reports.granularity.week')}</option>
           <option value="month">{t('reports.granularity.month')}</option>
         </select>
-        <select className={FILTER_CTRL} aria-label={t('reports.service')} value={serviceId} onChange={(e) => set({ service: e.target.value })}>
+        {!pos && <select className={FILTER_CTRL} aria-label={t('reports.service')} value={serviceId} onChange={(e) => set({ service: e.target.value })}>
           <option value="">{t('reports.service')}: {t('reports.all')}</option>
           {services.data?.map((s) => (
             <option key={s.id} value={s.id}>{s.name}{s.active ? '' : ` (${t('services.inactive')})`}</option>
           ))}
-        </select>
+        </select>}
         {!scoped && !ownLocation && locs.multi && (
           <select className={FILTER_CTRL} aria-label={t('locations.location')} value={loc} onChange={(e) => set({ loc: e.target.value, who: null })}>
             <option value="">{t('locations.location')}: {t('reports.all')}</option>
             {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         )}
-        {!scoped && resources.length > 1 && (
+        {!pos && !scoped && resources.length > 1 && (
           <select className={FILTER_CTRL} aria-label={t(`kinds.${kind}.resource`)} value={who} onChange={(e) => set({ who: e.target.value })}>
             <option value="">{t(`kinds.${kind}.resource`)}: {t('reports.all')}</option>
             {resources.map((u) => (
@@ -847,11 +871,13 @@ export function ReportsPage() {
             ))}
           </select>
         )}
-        <select className={FILTER_CTRL} aria-label={t('reports.source')} value={source} onChange={(e) => set({ source: e.target.value })}>
-          <option value="">{t('reports.source')}: {t('reports.all')}</option>
-          <option value="online">{t('source.online')}</option>
-          <option value="staff">{t('source.staff')}</option>
-        </select>
+        {!pos && (
+          <select className={FILTER_CTRL} aria-label={t('reports.source')} value={source} onChange={(e) => set({ source: e.target.value })}>
+            <option value="">{t('reports.source')}: {t('reports.all')}</option>
+            <option value="online">{t('source.online')}</option>
+            <option value="staff">{t('source.staff')}</option>
+          </select>
+        )}
       </FilterBar>
 
       {range.from > range.to && <p className="mb-4 text-sm text-rose-700">{t('reports.invalidRange')}</p>}

@@ -75,7 +75,9 @@ await page.getByTestId('pos-ticket-discard-yes').click();
 ok('confirmed: only the empty ticket stays', (await tabs.count()) === 1 && /^\$0(\.00)?$/.test(await total()), await total());
 
 // ---- Without internet ----
-await page.getByTestId('pos-register').check();
+// Every computer is ready to sell offline (no switch): the catalog copy is kept on its own
+await page.reload();
+await products.waitFor({ timeout: 15000 });
 await page.waitForFunction(() => Object.keys(localStorage).some((k) => k.startsWith('lugali.pos.catalog.')) && Object.keys(localStorage).some((k) => k.startsWith('lugali.pos.header.')), null, { timeout: 10000 }).catch(() => {});
 ok('register keeps a copy of the catalog and ticket header', await page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('lugali.pos.header.'))));
 
@@ -157,7 +159,6 @@ if (SW) {
   await inv.goto(BASE + '/pos');
   const prods = inv.getByTestId('pos-products');
   await prods.waitFor({ timeout: 15000 });
-  await inv.getByTestId('pos-register').uncheck().catch(() => {});
   await prods.getByRole('button', { name: /Agua natural/ }).click();
   await inv.getByTestId('pos-method-credit_card').click();
   await inv.getByTestId('pos-charge').click();

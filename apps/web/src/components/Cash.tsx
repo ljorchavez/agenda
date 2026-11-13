@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, startOfMonth } from 'date-fns';
@@ -8,6 +8,7 @@ import { useAccess } from '../lib/auth';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
 import { useMyLocations, useResources, useServices } from '../lib/queries';
 import { ErrorText, Loading } from './ui';
+import { rowCells, useColumns } from './Columns';
 import { UpgradeNote, useFeature } from './Sales';
 
 const ymd = (d: Date) => format(d, 'yyyy-MM-dd');
@@ -35,9 +36,17 @@ export function CommissionsTab() {
     enabled,
   });
   const [editing, setEditing] = useState(false);
-  if (!enabled) return <UpgradeNote feature="cash" />;
   const d = rep.data;
   const total = (k: 'soldCents' | 'commissionCents') => (d?.rows ?? []).reduce((a, r) => a + r[k], 0);
+  type Row = CommissionReportDto['rows'][number];
+  const { cols, menu } = useColumns<Row>('commissions', [
+    { key: 'person', label: t('cash.person'), required: true, className: 'font-medium', td: (r) => r.resourceName },
+    { key: 'completed', label: t('cash.completed'), className: 'text-right', td: (r) => r.completed },
+    { key: 'sold', label: t('cash.sold'), className: 'text-right', td: (r) => money(r.soldCents) },
+    { key: 'commission', label: t('cash.commission'), className: 'text-right font-semibold text-emerald-800', td: (r) => money(r.commissionCents) },
+  ]);
+  const foot: Record<string, ReactNode> = { person: t('cash.total'), sold: money(total('soldCents')), commission: money(total('commissionCents')) };
+  if (!enabled) return <UpgradeNote feature="cash" />;
   return (
     <div className="space-y-4" data-testid="commissions-tab">
       <div className="flex flex-wrap items-end gap-3">
@@ -63,27 +72,23 @@ export function CommissionsTab() {
           ⬇ CSV
         </button>
         {manager && <button type="button" className="btn-secondary" onClick={() => setEditing((e) => !e)}>{t('cash.setRates')}</button>}
+        <span className="ml-auto">{menu}</span>
       </div>
       {editing && <CommissionRates />}
       {rep.isLoading ? <Loading /> : (
         <div className="card overflow-x-auto !p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500">
-              <tr><th className="px-3 py-2">{t('cash.person')}</th><th className="px-3 py-2 text-right">{t('cash.completed')}</th><th className="px-3 py-2 text-right">{t('cash.sold')}</th><th className="px-3 py-2 text-right">{t('cash.commission')}</th></tr>
+              <tr>{cols.map((c) => <th key={c.key} className={`px-3 py-2 ${c.className?.includes('text-right') ? 'text-right' : ''}`}>{c.label}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {(d?.rows ?? []).map((r) => (
-                <tr key={r.resourceId}>
-                  <td className="px-3 py-2 font-medium">{r.resourceName}</td>
-                  <td className="px-3 py-2 text-right">{r.completed}</td>
-                  <td className="px-3 py-2 text-right">{money(r.soldCents)}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-emerald-800">{money(r.commissionCents)}</td>
-                </tr>
-              ))}
-              {d?.rows.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-500">{t('cash.noCompleted')}</td></tr>}
+              {(d?.rows ?? []).map((r) => <tr key={r.resourceId}>{rowCells(cols, r, 'px-3 py-2')}</tr>)}
+              {d?.rows.length === 0 && <tr><td colSpan={cols.length} className="px-3 py-4 text-center text-slate-500">{t('cash.noCompleted')}</td></tr>}
             </tbody>
             {(d?.rows.length ?? 0) > 1 && (
-              <tfoot className="bg-slate-50 font-semibold"><tr><td className="px-3 py-2" colSpan={2}>{t('cash.total')}</td><td className="px-3 py-2 text-right">{money(total('soldCents'))}</td><td className="px-3 py-2 text-right">{money(total('commissionCents'))}</td></tr></tfoot>
+              <tfoot className="bg-slate-50 font-semibold">
+                <tr>{cols.map((c) => <td key={c.key} className={`px-3 py-2 ${c.className?.includes('text-right') ? 'text-right' : ''}`}>{foot[c.key] ?? ''}</td>)}</tr>
+              </tfoot>
             )}
           </table>
         </div>

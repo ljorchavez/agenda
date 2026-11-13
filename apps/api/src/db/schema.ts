@@ -205,6 +205,8 @@ export const customers = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** 1, 2, 3… per business (set by a trigger; the hidden counter customer has none) */
+    number: integer('number'),
     name: text('name').notNull(),
     phone: text('phone'),
     email: text('email'),
@@ -716,6 +718,8 @@ export const products = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    /** 1, 2, 3… per business (set by a trigger): easy to read and to use in spreadsheets */
+    number: integer('number'),
     name: text('name').notNull(),
     sku: text('sku'),
     category: text('category'),

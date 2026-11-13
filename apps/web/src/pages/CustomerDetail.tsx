@@ -84,7 +84,7 @@ export function CustomerDetailPage() {
   return (
     <>
       <PageHeader
-        title={data.archived ? `${data.name} · ${t("customers.archived")}` : data.name}
+        title={`${data.number != null ? `#${data.number} · ` : ''}${data.archived ? `${data.name} · ${t("customers.archived")}` : data.name}`}
         actions={
           <>
             {data.phone && (

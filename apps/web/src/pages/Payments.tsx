@@ -23,6 +23,8 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateTime, money, toCents } from '../lib/format';
 import { SortTh, sortRows, useSort } from '../components/SortableTable';
+import { headCells, rowCells, useColumns } from '../components/Columns';
+import { ReportsView } from './Reports';
 import { FILTER_CTRL, FilterBar } from '../components/FilterBar';
 
 type Preset = 'thisMonth' | 'lastMonth' | 'next7' | 'next30' | 'last7' | 'last30' | 'thisYear' | 'custom';
@@ -141,6 +143,41 @@ function MovementsTab() {
   }, [filtered]);
 
   const showLocation = locationOptions.length > 1;
+  const sortTh = (k: Key, label: string, extra: { align?: 'right'; className?: string } = {}) => (key: string) => <SortTh key={key} label={label} k={k} sort={sort} onSort={toggle} {...extra} />;
+  const { cols, menu } = useColumns<PaymentDto>('movements', [
+    { key: 'date', label: t('payments.date'), th: sortTh('date', t('payments.date')), className: 'whitespace-nowrap', td: (p) => dateTime(p.paidAt ?? p.createdAt) },
+    {
+      key: 'customer', label: t('payments.customer'), required: true, th: sortTh('customer', t('payments.customer')),
+      td: (p) => (
+        <>
+          {p.tenantId && p.tenantId !== tenant?.id ? <span>{p.customerName}</span> : <Link className="hover:text-brand-700" to={`/customers/${p.customerId}`}>{p.customerName}</Link>}
+          {p.serviceName && <div className="text-xs text-slate-500">{p.serviceName}</div>}
+        </>
+      ),
+    },
+    ...(allBusinesses ? [{ key: 'business', label: t('payments.business'), th: sortTh('business', t('payments.business')), td: (p: PaymentDto) => p.businessName }] : []),
+    ...(showLocation ? [{ key: 'location', label: t('locations.location'), th: sortTh('location', t('locations.location')), td: (p: PaymentDto) => p.locationName ?? '—' }] : []),
+    {
+      key: 'origin', label: t('payments.originLabel'), th: sortTh('origin', t('payments.originLabel')),
+      td: (p) => (
+        <span data-testid="movement-origin" className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${originOf(p) === 'pos' ? 'bg-violet-50 text-violet-700' : originOf(p) === 'booking' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
+          {t(`payments.origin.${originOf(p)}`)}
+        </span>
+      ),
+    },
+    { key: 'method', label: t('payments.method'), th: sortTh('method', t('payments.method')), td: (p) => t(`methods.${p.method}`) },
+    {
+      key: 'status', label: t('payments.status'), th: sortTh('status', t('payments.status')),
+      td: (p) => (
+        <>
+          {t(`paymentStatus.${p.status}`)}
+          {p.status === 'pending' && p.checkoutUrl && <a className="ml-2 text-brand-700 hover:underline" href={p.checkoutUrl} target="_blank" rel="noreferrer">link</a>}
+        </>
+      ),
+    },
+    { key: 'amount', label: t('payments.amount'), th: sortTh('amount', t('payments.amount'), { align: 'right' }), className: 'text-right font-medium', td: (p) => money(p.amountCents) },
+    ...(invoicing ? [{ key: 'invoice', label: t('invoicing.column'), className: 'whitespace-nowrap text-right', td: (p: PaymentDto) => (!p.tenantId || p.tenantId === tenant?.id) && <InvoiceCell payment={p} /> }] : []),
+  ]);
 
   return (
     <>
@@ -214,6 +251,7 @@ function MovementsTab() {
         <span>{t('payments.pendingTotal')}: <b className="text-amber-700">{money(totals.pending)}</b></span>
         {totals.refunded > 0 && <span>{t('payments.refundedTotal')}: <b className="text-slate-600">{money(totals.refunded)}</b></span>}
         <span className="text-slate-500">{t('payments.count')}: {filtered.length}</span>
+        <span className="ml-auto">{menu}</span>
       </div>
 
       {isLoading ? (
@@ -224,47 +262,11 @@ function MovementsTab() {
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>
-                <SortTh label={t('payments.date')} k="date" sort={sort} onSort={toggle} />
-                <SortTh label={t('payments.customer')} k="customer" sort={sort} onSort={toggle} />
-                {allBusinesses && <SortTh label={t('payments.business')} k="business" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
-                {showLocation && <SortTh label={t('locations.location')} k="location" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
-                <SortTh label={t('payments.originLabel')} k="origin" sort={sort} onSort={toggle} />
-                <SortTh label={t('payments.method')} k="method" sort={sort} onSort={toggle} />
-                <SortTh label={t('payments.status')} k="status" sort={sort} onSort={toggle} />
-                <SortTh label={t('payments.amount')} k="amount" sort={sort} onSort={toggle} align="right" />
-                {invoicing && <th className="px-4 py-3 text-right font-medium">{t('invoicing.column')}</th>}
-              </tr>
+              <tr>{headCells(cols)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {pageRows.map((p) => (
-                <tr key={p.id}>
-                  <td className="whitespace-nowrap px-4 py-3">{dateTime(p.paidAt ?? p.createdAt)}</td>
-                  <td className="px-4 py-3">
-                    {p.tenantId && p.tenantId !== tenant?.id ? (
-                      <span>{p.customerName}</span>
-                    ) : (
-                      <Link className="hover:text-brand-700" to={`/customers/${p.customerId}`}>{p.customerName}</Link>
-                    )}
-                    {p.serviceName && <div className="text-xs text-slate-500">{p.serviceName}</div>}
-                  </td>
-                  {allBusinesses && <td className="hidden px-4 py-3 md:table-cell">{p.businessName}</td>}
-                  {showLocation && <td className="hidden px-4 py-3 md:table-cell">{p.locationName ?? '—'}</td>}
-                  <td className="px-4 py-3" data-testid="movement-origin">
-                    <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${originOf(p) === 'pos' ? 'bg-violet-50 text-violet-700' : originOf(p) === 'booking' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
-                      {t(`payments.origin.${originOf(p)}`)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{t(`methods.${p.method}`)}</td>
-                  <td className="px-4 py-3">
-                    {t(`paymentStatus.${p.status}`)}
-                    {p.status === 'pending' && p.checkoutUrl && (
-                      <a className="ml-2 text-brand-700 hover:underline" href={p.checkoutUrl} target="_blank" rel="noreferrer">link</a>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium">{money(p.amountCents)}</td>
-                  {invoicing && <td className="whitespace-nowrap px-4 py-3 text-right">{(!p.tenantId || p.tenantId === tenant?.id) && <InvoiceCell payment={p} />}</td>}
-                </tr>
+                <tr key={p.id}>{rowCells(cols, p)}</tr>
               ))}
             </tbody>
           </table>
@@ -280,12 +282,12 @@ export function PaymentsPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const { manager, scoped } = useAccess();
-  type Tab = 'bookings' | 'movements' | 'commissions' | 'cash';
+  type Tab = 'bookings' | 'movements' | 'commissions' | 'cash' | 'reports';
   const tabs: Tab[] = [
     'bookings',
     'movements',
     ...(manager || scoped ? (['commissions'] as Tab[]) : []),
-    ...(manager ? (['cash'] as Tab[]) : []),
+    ...(manager ? (['cash', 'reports'] as Tab[]) : []),
   ];
   const asked = params.get('tab') as Tab | null;
   // Selling and products moved to Punto de venta: old links land there
@@ -317,6 +319,8 @@ export function PaymentsPage() {
         <MovementsTab />
       ) : tab === 'commissions' ? (
         <CommissionsTab />
+      ) : tab === 'reports' ? (
+        <ReportsView scope="payments" />
       ) : (
         <CashTab />
       )}
@@ -418,6 +422,51 @@ function CollectionsTab() {
   }, [filtered, sort]);
   const { pageRows, pager } = usePaged(rows);
   const showLocation = locationOptions.length > 1;
+  const sortTh = (k: Key, label: string, extra: { align?: 'right'; className?: string } = {}) => (key: string) => <SortTh key={key} label={label} k={k} sort={sort} onSort={toggle} {...extra} />;
+  const { cols, menu } = useColumns<CollectionDto>('collections', [
+    {
+      key: 'date', label: t('collections.booking'), th: sortTh('date', t('collections.booking')), className: 'whitespace-nowrap',
+      td: (r) => (
+        <>
+          {dateTime(r.startsAt)}
+          <div className="text-xs text-slate-500">{t(`status.${r.status}`)}</div>
+        </>
+      ),
+    },
+    {
+      key: 'customer', label: t('payments.customer'), required: true, th: sortTh('customer', t('payments.customer')),
+      td: (r) => (
+        <>
+          {r.tenantId === tenant?.id ? <Link className="hover:text-brand-700" to={`/customers/${r.customerId}`}>{r.customerName}</Link> : r.customerName}
+          <div className="text-xs text-slate-500">{[r.serviceName, r.resourceName].filter(Boolean).join(' · ')}</div>
+        </>
+      ),
+    },
+    ...(allBusinesses ? [{ key: 'business', label: t('payments.business'), th: sortTh('business', t('payments.business')), td: (r: CollectionDto) => r.businessName }] : []),
+    ...(showLocation ? [{ key: 'location', label: t('locations.location'), th: sortTh('location', t('locations.location')), td: (r: CollectionDto) => r.locationName ?? '—' }] : []),
+    {
+      key: 'state', label: t('collections.state'), th: sortTh('state', t('collections.state')),
+      td: (r) => (
+        <>
+          <StateBadge state={r.state} />
+          {r.methods.length > 0 && <div className="mt-0.5 text-xs text-slate-500">{r.methods.map((m) => t(`methods.${m}`)).join(', ')}</div>}
+        </>
+      ),
+    },
+    { key: 'price', label: t('collections.price'), th: sortTh('price', t('collections.price'), { align: 'right' }), className: 'text-right', td: (r) => money(r.priceCents) },
+    { key: 'paid', label: t('collections.paid'), th: sortTh('paid', t('collections.paid'), { align: 'right' }), className: 'text-right text-emerald-700', td: (r) => money(r.paidCents) },
+    {
+      key: 'balance', label: t('collections.balance'), th: sortTh('balance', t('collections.balance'), { align: 'right' }), className: 'text-right font-semibold',
+      td: (r) => <span className={r.balanceCents ? (OWED_STATES.includes(r.state) ? 'text-rose-700' : 'text-slate-800') : 'text-slate-400'}>{money(r.balanceCents)}</span>,
+    },
+    {
+      key: 'actions', label: t('columns.actions'), required: true, className: 'text-right',
+      td: (r) =>
+        r.balanceCents > 0 && r.tenantId === tenant?.id && (
+          <button type="button" className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setPaying(r)}>{t('collections.record')}</button>
+        ),
+    },
+  ]);
 
   const tile = (s: CollectionState) => {
     const x = tiles.get(s)!;
@@ -493,6 +542,7 @@ function CollectionsTab() {
       </div>
 
       {data?.length === MAX_ROWS && <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{t('payments.tooMany', { count: MAX_ROWS })}</p>}
+      <div className="mb-2 flex justify-end">{menu}</div>
 
       {isLoading ? (
         <Loading />
@@ -502,52 +552,11 @@ function CollectionsTab() {
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>
-                <SortTh label={t('collections.booking')} k="date" sort={sort} onSort={toggle} />
-                <SortTh label={t('payments.customer')} k="customer" sort={sort} onSort={toggle} />
-                {allBusinesses && <SortTh label={t('payments.business')} k="business" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
-                {showLocation && <SortTh label={t('locations.location')} k="location" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
-                <SortTh label={t('collections.state')} k="state" sort={sort} onSort={toggle} />
-                <SortTh label={t('collections.price')} k="price" sort={sort} onSort={toggle} align="right" className="hidden sm:table-cell" />
-                <SortTh label={t('collections.paid')} k="paid" sort={sort} onSort={toggle} align="right" className="hidden sm:table-cell" />
-                <SortTh label={t('collections.balance')} k="balance" sort={sort} onSort={toggle} align="right" />
-                <th className="px-4 py-3" />
-              </tr>
+              <tr>{headCells(cols)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {pageRows.map((r) => (
-                <tr key={r.appointmentId}>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    {dateTime(r.startsAt)}
-                    <div className="text-xs text-slate-500">{t(`status.${r.status}`)}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {r.tenantId === tenant?.id ? (
-                      <Link className="hover:text-brand-700" to={`/customers/${r.customerId}`}>{r.customerName}</Link>
-                    ) : (
-                      r.customerName
-                    )}
-                    <div className="text-xs text-slate-500">{[r.serviceName, r.resourceName].filter(Boolean).join(' · ')}</div>
-                  </td>
-                  {allBusinesses && <td className="hidden px-4 py-3 md:table-cell">{r.businessName}</td>}
-                  {showLocation && <td className="hidden px-4 py-3 md:table-cell">{r.locationName ?? '—'}</td>}
-                  <td className="px-4 py-3">
-                    <StateBadge state={r.state} />
-                    {r.methods.length > 0 && <div className="mt-0.5 text-xs text-slate-500">{r.methods.map((m) => t(`methods.${m}`)).join(', ')}</div>}
-                  </td>
-                  <td className="hidden px-4 py-3 text-right sm:table-cell">{money(r.priceCents)}</td>
-                  <td className="hidden px-4 py-3 text-right text-emerald-700 sm:table-cell">{money(r.paidCents)}</td>
-                  <td className={`px-4 py-3 text-right font-semibold ${r.balanceCents ? (OWED_STATES.includes(r.state) ? 'text-rose-700' : 'text-slate-800') : 'text-slate-400'}`}>
-                    {money(r.balanceCents)}
-                  </td>
-                  <td className="px-2 py-3 text-right">
-                    {r.balanceCents > 0 && r.tenantId === tenant?.id && (
-                      <button type="button" className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setPaying(r)}>
-                        {t('collections.record')}
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <tr key={r.appointmentId}>{rowCells(cols, r)}</tr>
               ))}
             </tbody>
           </table>

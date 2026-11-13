@@ -1935,9 +1935,20 @@ d('API (integration)', () => {
     const reg = (await call('POST', '/auth/register', { businessName: 'Inventario Excel', businessType: 'barbershop', name: 'Dueño Inv', email: 'inv-xlsx@test.mx', password: 'password123' })).body;
     const tok = reg.token;
     const gel = (await call('POST', '/products', { name: 'Gel', priceCents: 9000, initialStock: 5 }, tok)).body;
+    // Numbers per business: 1, 2, 3… (another business starts at 1 too)
+    expect(gel.number).toBe(1);
+    const c1 = (await call('POST', '/customers', { name: 'Cliente Uno', phone: '5577003301' }, tok)).body;
+    const c2 = (await call('POST', '/customers', { name: 'Cliente Dos', phone: '5577003302' }, tok)).body;
+    expect([c1.number, c2.number]).toEqual([1, 2]);
+    expect((await call('GET', '/customers?q=%232', undefined, tok)).body.items.map((x: { id: string }) => x.id)).toEqual([c2.id]);
+    // A counter sale's payment carries the location it was sold at
+    await call('PUT', '/tenant/plan', { plan: 'standard' }, tok);
+    await call('POST', '/sales', { items: [{ productId: gel.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 9000 }] }, tok);
+    const pay = (await call('GET', '/payments', undefined, tok)).body.find((x: { saleId: string | null }) => x.saleId);
+    expect(pay.locationName).toBeTruthy();
     const table = [
       ['ID', 'Producto', 'Precio', 'Existencia', 'Categoría'],
-      [gel.id, 'Gel fijador', '$95.00', 8, 'Cabello'],
+      [gel.number, 'Gel fijador', '$95.00', 8, 'Cabello'],
       [null, 'Cera mate', 120, 3, 'Cabello'],
       [null, 'Sin precio', null, 1, null],
     ];
@@ -1952,7 +1963,7 @@ d('API (integration)', () => {
     expect(list.find((p) => p.id === gel.id)).toMatchObject({ name: 'Gel fijador', priceCents: 9500, stock: 8, category: 'Cabello' });
     expect(list.find((p) => p.name === 'Cera mate')).toMatchObject({ priceCents: 12000, stock: 3 });
     const moves = (await call('GET', `/products/${gel.id}/moves`, undefined, tok)).body;
-    expect(moves[0]).toMatchObject({ qtyChange: 3, reason: 'adjust', note: 'Actualización por Excel' });
+    expect(moves[0]).toMatchObject({ qtyChange: 4, reason: 'adjust', note: 'Actualización por Excel' });
     // The same file again: nothing to do
     expect((await call('POST', '/products/import', { table: table.slice(0, 2) }, tok)).body).toMatchObject({ created: 0, updated: 0, unchanged: 1 });
     expect((await call('POST', '/products/import', { table: [['Precio'], [1]] }, tok)).body.error).toBe('import_headers');

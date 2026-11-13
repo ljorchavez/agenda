@@ -23,7 +23,9 @@
     "add": "Add",
     "done": "Done",
     "crash": "Something went wrong on this screen. We have been notified.",
-    "reload": "Reload"
+    "reload": "Reload",
+    "yes": "Yes",
+    "no": "No"
   },
   "nav": {
     "dashboard": "Home",
@@ -326,7 +328,8 @@
       "commissions": "Commissions",
       "cash": "Cash closing",
       "pos": "Sell",
-      "products": "Products"
+      "products": "Products",
+      "reports": "Reports"
     },
     "originLabel": "Source",
     "origin": {
@@ -1809,9 +1812,10 @@
     "invoiceNo": "No, just charge",
     "tabs": {
       "sell": "Sell",
-      "sales": "Sales",
+      "sales": "History",
       "products": "Products",
-      "cash": "Cash closing"
+      "cash": "Cash closing",
+      "reports": "Reports"
     },
     "salesTab": {
       "presets": {
@@ -1832,7 +1836,9 @@
       "units_one": "{{count}} item",
       "units_other": "{{count}} items",
       "avg": "Average ticket",
-      "ticket": "Ticket"
+      "ticket": "Ticket",
+      "allLocations": "All",
+      "seller": "Sold by"
     },
     "inventory": {
       "export": "Download Excel",
@@ -1850,7 +1856,7 @@
       "dblClick": "Double click to change",
       "dblClickHint": "Double click a name, price or stock to change it.",
       "importTitle": "Upload inventory from Excel",
-      "importHelp": "Download your inventory, edit it in Excel and upload it. Rows with an ID update that product; rows without one create new products. An empty name, price or stock cell, or a missing column, keeps what is saved.",
+      "importHelp": "Download your inventory, edit it in Excel and upload it. Rows with an ID (the product number) update that product; rows without one create new products. An empty name, price or stock cell, or a missing column, keeps what is saved.",
       "stockAt": "Stock is set at {{place}}.",
       "pickFile": "Choose file (.xlsx or .csv)",
       "otherFile": "Choose another file",
@@ -1996,5 +2002,13 @@
       "taxSystem": "Tax regime",
       "zip": "ZIP code"
     }
+  },
+  "columns": {
+    "button": "Columns",
+    "help": "Show, hide and reorder columns.",
+    "up": "Move up",
+    "down": "Move down",
+    "reset": "Reset",
+    "actions": "Actions"
   }
 }

@@ -47,6 +47,7 @@ function orderBy(sortParam: string | undefined, dirParam: string | undefined) {
 
 type StatsRow = {
   id: string;
+  number?: number | null;
   name: string;
   phone: string | null;
   email: string | null;
@@ -82,6 +83,7 @@ function toStats(r: StatsRow): CustomerWithStats {
       : null;
   return {
     id: r.id,
+    number: r.number ?? null,
     name: r.name,
     phone: r.phone,
     email: r.email,
@@ -121,10 +123,10 @@ function statsQuery(tenantId: string, opts: { customerId?: string; q?: string; s
   else filters.push(opts.archived ? sql`c.archived_at is not null and c.notes is distinct from '__venta_mostrador__'` : sql`c.archived_at is null`);
   if (opts.q) {
     const like = `%${opts.q}%`;
-    filters.push(sql`(c.name ilike ${like} or c.phone ilike ${like} or c.email ilike ${like})`);
+    filters.push(sql`(c.name ilike ${like} or c.phone ilike ${like} or c.email ilike ${like} or c.number::text = ${opts.q.replace(/^#/, '')})`);
   }
   return sql`
-    select c.id, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.fiscal, c.fiscal_doc, c.archived_at,
+    select c.id, c.number, c.name, c.phone, c.email, c.notes, c.birthday, c.created_at, c.sex, c.address, c.curp, c.fiscal, c.fiscal_doc, c.archived_at,
       coalesce(v.visits, 0) as visits, v.last_visit, v.first_visit,
       coalesce(v.no_shows, 0) as no_shows,
       v.avg_rating, coalesce(v.rating_count, 0) as rating_count,

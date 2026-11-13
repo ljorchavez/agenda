@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { CustomerDto } from '@agenda/shared';
+import type { CustomerDto, CustomerWithStats } from '@agenda/shared';
 import { Empty, ErrorText, Loading, Modal, PageHeader, Pager } from '../components/ui';
 import { api } from '../lib/api';
 import { dateOnly, money } from '../lib/format';
@@ -10,6 +10,7 @@ import { useCustomers } from '../lib/queries';
 import { SortTh, useSort, type SortDir } from '../components/SortableTable';
 import { StarRating } from '../components/Rating';
 import { FILTER_CTRL } from '../components/FilterBar';
+import { headCells, rowCells, useColumns } from '../components/Columns';
 import { FiscalFields, fiscalPayload, useFiscalForm } from '../components/FiscalFields';
 
 /** Columns sorted on the server (the list is paginated); first click direction per column. */
@@ -44,6 +45,39 @@ export function CustomersPage() {
   const { data, isLoading } = useCustomers(debounced, `${sort.key}&dir=${sort.dir}${archived ? '&archived=1' : ''}`, false, { size: PAGE_SIZE, index: page });
   // A new search or order starts again on page 1
   useEffect(() => setPage(0), [debounced, sort.key, sort.dir, archived]);
+  const sortTh = (k: SortKey, label: string, extra: { align?: 'right' } = {}) => (key: string) => <SortTh key={key} label={label} k={k} sort={sort} onSort={toggle} {...extra} />;
+  const none = <span className="text-slate-400">{t('common.none')}</span>;
+  const { cols, menu } = useColumns<CustomerWithStats>('customers', [
+    { key: 'number', label: 'ID', className: 'text-slate-500 tabular-nums', td: (c) => (c.number != null ? `#${c.number}` : '') },
+    {
+      key: 'name', label: t('customers.name'), required: true, th: sortTh('name', t('customers.name')),
+      td: (c) => (
+        <>
+          {/* Real link: keyboard, middle-click and "open in new tab" keep working */}
+          <Link to={`/customers/${c.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-900 hover:text-brand-700">{c.name}</Link>
+          <div className="text-xs text-slate-500">{c.phone ?? c.email ?? ''}</div>
+        </>
+      ),
+    },
+    { key: 'phone', label: t('customers.phone'), hidden: true, className: 'whitespace-nowrap', td: (c) => c.phone ?? none },
+    { key: 'email', label: t('customers.email'), hidden: true, td: (c) => c.email ?? none },
+    { key: 'visits', label: t('customers.visits'), th: sortTh('visits', t('customers.visits'), { align: 'right' }), className: 'text-right', td: (c) => c.visits },
+    { key: 'totalSpent', label: t('customers.totalSpent'), th: sortTh('totalSpent', t('customers.totalSpent'), { align: 'right' }), className: 'text-right font-medium', td: (c) => money(c.totalSpentCents) },
+    {
+      key: 'rating', label: t('rating.average'), th: sortTh('rating', t('rating.average')),
+      td: (c) =>
+        c.avgRating != null ? (
+          <span className="inline-flex items-center gap-1.5" title={t('rating.basedOn', { count: c.ratingCount })}>
+            <StarRating value={c.avgRating} size="sm" />
+            <span className="text-xs text-slate-500">{c.avgRating.toFixed(1)}</span>
+          </span>
+        ) : none,
+    },
+    { key: 'lastVisit', label: t('customers.lastVisit'), th: sortTh('lastVisit', t('customers.lastVisit')), td: (c) => (c.lastVisitAt ? dateOnly(c.lastVisitAt) : none) },
+    { key: 'frequency', label: t('customers.frequency'), th: sortTh('frequency', t('customers.frequency')), td: (c) => (c.avgDaysBetweenVisits != null ? t('customers.everyNDays', { count: c.avgDaysBetweenVisits }) : none) },
+    { key: 'nextAppointment', label: t('customers.nextAppointment'), th: sortTh('nextAppointment', t('customers.nextAppointment')), td: (c) => (c.nextAppointmentAt ? dateOnly(c.nextAppointmentAt) : none) },
+    { key: 'rfc', label: 'RFC', hidden: true, className: 'font-mono text-xs', td: (c) => c.fiscal?.rfc ?? none },
+  ]);
 
   return (
     <>
@@ -54,6 +88,7 @@ export function CustomersPage() {
           <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} data-testid="show-archived" />
           {t('customers.showArchived')}
         </label>
+        <span className="ml-auto">{menu}</span>
       </div>
 
       {isLoading ? (
@@ -64,47 +99,12 @@ export function CustomersPage() {
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>
-                <SortTh label={t('customers.name')} k="name" sort={sort} onSort={toggle} />
-                <SortTh label={t('customers.visits')} k="visits" sort={sort} onSort={toggle} align="right" />
-                <SortTh label={t('customers.totalSpent')} k="totalSpent" sort={sort} onSort={toggle} align="right" />
-                <SortTh label={t('rating.average')} k="rating" sort={sort} onSort={toggle} className="hidden sm:table-cell" />
-                <SortTh label={t('customers.lastVisit')} k="lastVisit" sort={sort} onSort={toggle} className="hidden md:table-cell" />
-                <SortTh label={t('customers.frequency')} k="frequency" sort={sort} onSort={toggle} className="hidden md:table-cell" />
-                <SortTh label={t('customers.nextAppointment')} k="nextAppointment" sort={sort} onSort={toggle} className="hidden lg:table-cell" />
-              </tr>
+              <tr>{headCells(cols)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {data.items.map((c) => (
-                <tr
-                  key={c.id}
-                  className="cursor-pointer hover:bg-slate-50 focus-within:bg-slate-50"
-                  onClick={() => navigate(`/customers/${c.id}`)}
-                >
-                  <td className="px-4 py-3">
-                    {/* Real link: keyboard, middle-click and "open in new tab" keep working */}
-                    <Link to={`/customers/${c.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-900 hover:text-brand-700">
-                      {c.name}
-                    </Link>
-                    <div className="text-xs text-slate-500">{c.phone ?? c.email ?? ''}</div>
-                  </td>
-                  <td className="px-4 py-3 text-right">{c.visits}</td>
-                  <td className="px-4 py-3 text-right font-medium">{money(c.totalSpentCents)}</td>
-                  <td className="hidden px-4 py-3 sm:table-cell">
-                    {c.avgRating != null ? (
-                      <span className="inline-flex items-center gap-1.5" title={t('rating.basedOn', { count: c.ratingCount })}>
-                        <StarRating value={c.avgRating} size="sm" />
-                        <span className="text-xs text-slate-500">{c.avgRating.toFixed(1)}</span>
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">{t('common.none')}</span>
-                    )}
-                  </td>
-                  <td className="hidden px-4 py-3 md:table-cell">{c.lastVisitAt ? dateOnly(c.lastVisitAt) : t('common.none')}</td>
-                  <td className="hidden px-4 py-3 md:table-cell">
-                    {c.avgDaysBetweenVisits != null ? t('customers.everyNDays', { count: c.avgDaysBetweenVisits }) : t('common.none')}
-                  </td>
-                  <td className="hidden px-4 py-3 lg:table-cell">{c.nextAppointmentAt ? dateOnly(c.nextAppointmentAt) : t('common.none')}</td>
+                <tr key={c.id} className="cursor-pointer hover:bg-slate-50 focus-within:bg-slate-50" onClick={() => navigate(`/customers/${c.id}`)}>
+                  {rowCells(cols, c)}
                 </tr>
               ))}
             </tbody>

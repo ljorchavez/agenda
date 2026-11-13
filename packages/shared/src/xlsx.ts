@@ -27,9 +27,15 @@ export function colName(i: number): string {
 }
 const colIndex = (letters: string) => [...letters].reduce((a, ch) => a * 26 + ch.charCodeAt(0) - 64, 0) - 1;
 
-/** An .xlsx file with one sheet; the first row is bold (headers). */
-export function writeXlsx(rows: Cell[][], opts: { sheet?: string; widths?: number[] } = {}): Uint8Array {
-  const sheetName = esc((opts.sheet ?? 'Hoja1').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31));
+/** A dropdown on a column (from the second row down), with its choices kept in a hidden sheet. */
+export interface ColumnList {
+  col: number;
+  values: string[];
+  /** Also accept values not in the list (e.g. a new category) */
+  allowOther?: boolean;
+}
+
+const sheetXml = (rows: Cell[][], extra: { cols?: string; frozen?: boolean; validations?: string } = {}) => {
   const body = rows
     .map((row, r) => {
       const cells = row
@@ -45,6 +51,27 @@ export function writeXlsx(rows: Cell[][], opts: { sheet?: string; widths?: numbe
       return `<row r="${r + 1}">${cells}</row>`;
     })
     .join('');
+  const pane = extra.frozen ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${pane}${extra.cols ?? ''}<sheetData>${body}</sheetData>${extra.validations ?? ''}</worksheet>`;
+};
+
+/** An .xlsx file; the first row is bold (headers). `lists` add dropdowns to columns. */
+export function writeXlsx(rows: Cell[][], opts: { sheet?: string; widths?: number[]; lists?: ColumnList[] } = {}): Uint8Array {
+  const sheetName = esc((opts.sheet ?? 'Hoja1').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31));
+  const lists = (opts.lists ?? []).filter((l) => l.values.length);
+  // Choices go in a hidden sheet, one column per list (no 255-character limit)
+  const listRows: Cell[][] = [];
+  lists.forEach((l, i) => l.values.forEach((v, r) => ((listRows[r] ??= [])[i] = v)));
+  for (let r = 0; r < listRows.length; r++) for (let i = 0; i < lists.length; i++) listRows[r]![i] ??= null;
+  const last = Math.max(rows.length + 500, 2000);
+  const validations = lists.length
+    ? `<dataValidations count="${lists.length}">${lists
+        .map(
+          (l, i) =>
+            `<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="${l.allowOther ? 0 : 1}" sqref="${colName(l.col)}2:${colName(l.col)}${last}"><formula1>Listas!$${colName(i)}$1:$${colName(i)}$${l.values.length}</formula1></dataValidation>`,
+        )
+        .join('')}</dataValidations>`
+    : '';
   const cols = opts.widths?.length
     ? `<cols>${opts.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
     : '';
@@ -53,13 +80,19 @@ export function writeXlsx(rows: Cell[][], opts: { sheet?: string; widths?: numbe
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
     '_rels/.rels':
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
-    'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
-    'xl/_rels/workbook.xml.rels':
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+    'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/>${lists.length ? '<sheet name="Listas" sheetId="2" state="hidden" r:id="rId3"/>' : ''}</sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${lists.length ? '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' : ''}</Relationships>`,
     'xl/styles.xml':
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>',
-    'xl/worksheets/sheet1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols}<sheetData>${body}</sheetData></worksheet>`,
+    'xl/worksheets/sheet1.xml': sheetXml(rows, { cols, frozen: true, validations }),
   };
+  if (lists.length) {
+    files['xl/worksheets/sheet2.xml'] = sheetXml(listRows.map((r) => r.map((v) => v)), {}).replace(/ s="1"/g, '');
+    files['[Content_Types].xml'] = files['[Content_Types].xml']!.replace(
+      '<Override PartName="/xl/styles.xml"',
+      '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml"',
+    );
+  }
   return zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, strToU8(v)])), { level: 6 });
 }
 
