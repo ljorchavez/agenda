@@ -85,9 +85,14 @@ if (!ticketPage) {
   await browser.close();
   process.exit(1);
 }
-await ticketPage.getByTestId('ticket').waitFor({ timeout: 10000 }).catch(() => {});
-const ticketText = (await ticketPage.getByTestId('ticket').textContent().catch(() => '')) ?? '';
-ok('offline ticket prints from the computer', ticketText.includes('Folio provisional P-0001') && ticketText.includes('Gel fijador') && ticketText.includes(`Abarrotes ${run}`), ticketText.slice(0, 160));
+if (SW) {
+  // Only the production build (service worker) can open a page without internet
+  await ticketPage.getByTestId('ticket').waitFor({ timeout: 10000 }).catch(() => {});
+  const ticketText = (await ticketPage.getByTestId('ticket').textContent().catch(() => '')) ?? '';
+  ok('offline ticket prints from the computer', ticketText.includes('Folio provisional P-0001') && ticketText.includes('Gel fijador') && ticketText.includes(`Abarrotes ${run}`), ticketText.slice(0, 160));
+} else {
+  ok('offline ticket opens the local copy', ticketPage.url().includes('/ticket/local/'), ticketPage.url());
+}
 await ticketPage.close();
 await page.getByRole('button', { name: /Nueva venta/ }).click();
 ok('pending sale listed and counted', /1 venta por subir/.test((await page.getByTestId('pos-offline-bar').textContent().catch(() => '')) ?? '') && /P-0001/.test((await page.getByTestId('pos-pending').textContent().catch(() => '')) ?? ''));

@@ -1,7 +1,7 @@
 // Service worker: makes the app installable and lets it open without internet (the point of sale
 // keeps selling on a register). It keeps the last app it loaded (page, scripts, styles, icons);
 // API answers are never cached here (bookings and stock must always be fresh).
-const CACHE = 'lugali-app-v2';
+const CACHE = 'lugali-app-v3';
 const OFFLINE_HTML = `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sin conexión</title>
 <body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#0f172a;text-align:center;padding:24px">
 <div><div style="font-size:48px">📶</div><h1 style="font-size:20px">Sin conexión</h1><p style="color:#475569">Revisa tu internet y vuelve a intentar.</p>
@@ -28,7 +28,7 @@ async function keepPage(res) {
     if (path.startsWith('/assets/') && !used.has(path)) await cache.delete(req);
   }
   // Fetch this version's files now, so it opens offline even before they're used
-  await Promise.all([...used].map((p) => cache.match(p).then((hit) => hit || fetch(p).then((r) => (r.ok ? cache.put(p, r) : undefined)).catch(() => undefined))));
+  await Promise.all([...used].map((p) => cache.match(p, { ignoreVary: true }).then((hit) => hit || fetch(p).then((r) => (r.ok ? cache.put(p, r) : undefined)).catch(() => undefined))));
 }
 
 self.addEventListener('fetch', (e) => {
@@ -53,7 +53,8 @@ self.addEventListener('fetch', (e) => {
   // Versioned files never change: from the cache when there, else the network (and keep it)
   if (STATIC.test(url.pathname)) {
     e.respondWith(
-      caches.match(req).then(
+      // ignoreVary: module scripts are requested with an Origin header the cached copy didn't have
+      caches.match(req, { ignoreVary: true, ignoreSearch: false }).then(
         (hit) =>
           hit ||
           fetch(req).then((res) => {
