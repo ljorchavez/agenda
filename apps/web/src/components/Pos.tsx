@@ -710,7 +710,7 @@ export function ProductsTab() {
     { key: 'number', label: 'ID', className: 'text-slate-500 tabular-nums', td: (p) => (p.number != null ? `#${p.number}` : '') },
     {
       key: 'name', label: t('pos.product'), required: true,
-      td: (p) => <EditableCell value={p.name} display={<span className="font-medium">{p.name}</span>} parse={(s) => (s.trim() ? s.trim().slice(0, 120) : null)} onSave={(name) => saveField(p, { name })} canEdit={businessManager} testId="product-name" />,
+      td: (p) => <EditableCell value={p.name} display={<span className="font-medium">{p.name}</span>} parse={(s) => (s.trim() ? s.trim().slice(0, 120) : null)} onSave={async (name) => { if (name != null) await saveField(p, { name }); }} canEdit={businessManager} testId="product-name" />,
     },
     {
       key: 'category', label: t('pos.category'),
@@ -722,7 +722,7 @@ export function ProductsTab() {
     },
     {
       key: 'price', label: t('pos.price'), className: R,
-      td: (p) => <EditableCell value={String(p.priceCents / 100)} display={money(p.priceCents)} parse={pesos} onSave={(priceCents) => saveField(p, { priceCents })} canEdit={businessManager} inputMode="decimal" className="!w-24 text-right" testId="product-price" />,
+      td: (p) => <EditableCell value={String(p.priceCents / 100)} display={money(p.priceCents)} parse={pesos} onSave={async (priceCents) => { if (priceCents != null) await saveField(p, { priceCents }); }} canEdit={businessManager} inputMode="decimal" className="!w-24 text-right" testId="product-price" />,
     },
     {
       key: 'cost', label: t('pos.cost'), className: R,
@@ -733,7 +733,7 @@ export function ProductsTab() {
       td: (p) =>
         p.trackStock ? (
           <span className={`font-semibold ${p.low ? 'text-amber-700' : ''}`}>
-            <EditableCell value={String(p.stock)} display={p.stock} parse={whole} onSave={(qty) => saveStock(p, qty)} canEdit={manager} inputMode="numeric" className="!w-20 text-right" testId="product-stock" />
+            <EditableCell value={String(p.stock)} display={p.stock} parse={whole} onSave={async (qty) => { if (qty != null) await saveStock(p, qty); }} canEdit={manager} inputMode="numeric" className="!w-20 text-right" testId="product-stock" />
           </span>
         ) : NONE,
     },
@@ -749,7 +749,7 @@ export function ProductsTab() {
           value={p.iva}
           display={p.iva === 'exento' ? t('pos.ivaExempt') : `${p.iva}%`}
           parse={(s) => { const v = s.trim().toLowerCase().replace('%', ''); return v === '16' || v === '0' ? v : v.startsWith('exent') ? 'exento' : null; }}
-          onSave={(iva) => saveField(p, { iva: iva as ProductInput['iva'] })}
+          onSave={async (iva) => { if (iva != null) await saveField(p, { iva: iva as ProductInput['iva'] }); }}
           canEdit={businessManager}
           className="!w-20"
           testId="product-iva"

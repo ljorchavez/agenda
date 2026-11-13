@@ -4,7 +4,8 @@ UPDATE "products" p SET "number" = x.n FROM (SELECT id, row_number() OVER (PARTI
 UPDATE "customers" c SET "number" = x.n FROM (SELECT id, row_number() OVER (PARTITION BY tenant_id ORDER BY created_at, id) AS n FROM "customers" WHERE notes IS DISTINCT FROM '__venta_mostrador__') x WHERE x.id = c.id AND c."number" IS NULL;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION "assign_tenant_number"() RETURNS trigger AS $$
 BEGIN
-  IF NEW."number" IS NULL AND NOT (TG_TABLE_NAME = 'customers' AND NEW.notes IS NOT DISTINCT FROM '__venta_mostrador__') THEN
+  -- (to_jsonb: products have no "notes" column; the hidden counter customer gets no number)
+  IF NEW."number" IS NULL AND (TG_TABLE_NAME <> 'customers' OR (to_jsonb(NEW) ->> 'notes') IS DISTINCT FROM '__venta_mostrador__') THEN
     PERFORM pg_advisory_xact_lock(hashtext(TG_TABLE_NAME), hashtext(NEW.tenant_id::text));
     EXECUTE format('SELECT coalesce(max("number"), 0) + 1 FROM %I WHERE tenant_id = $1', TG_TABLE_NAME) INTO NEW."number" USING NEW.tenant_id;
   END IF;
