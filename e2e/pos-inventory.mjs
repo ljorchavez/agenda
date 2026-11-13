@@ -114,12 +114,11 @@ const xlsxPath = '/tmp/inventario-e2e.xlsx';
 await dl.saveAs(xlsxPath);
 const bytes = readFileSync(xlsxPath);
 ok('downloaded an .xlsx (zip)', /\.xlsx$/.test(dl.suggestedFilename()) && bytes[0] === 0x50 && bytes[1] === 0x4b, dl.suggestedFilename());
-ok('only the filtered products', bytes.includes(Buffer.from('Gel fijador')) && !bytes.includes(Buffer.from('Agua natural')));
 
 await page.getByTestId('products-import').click();
 await page.setInputFiles('[data-testid=import-file]', xlsxPath);
 await page.getByTestId('import-summary').waitFor({ timeout: 10000 });
-ok('same file back: nothing to change', /0 y se actualizarán 0/.test((await page.getByTestId('import-summary').textContent()) ?? '') && (await page.getByTestId('import-apply').count()) === 0, (await page.getByTestId('import-summary').textContent()) ?? '');
+ok('same file back (only the filtered product): nothing to change', /0 y se actualizarán 0 productos \(1 sin cambios\)/.test((await page.getByTestId('import-summary').textContent()) ?? '') && (await page.getByTestId('import-apply').count()) === 0, (await page.getByTestId('import-summary').textContent()) ?? '');
 
 const csv = `ID,Producto,Precio,Existencia,Categoría\n${gel.id},Gel fijador,99,12,Cabello\n,Cera mate,"$120.00",4,Cabello\n,Sin precio,,1,\n`;
 writeFileSync('/tmp/inventario-e2e.csv', csv);
@@ -133,7 +132,7 @@ ok('applied', /Listo/.test((await page.getByTestId('import-summary').textContent
 const after = await api('/products', undefined, tok);
 ok('update by ID: price and stock', after.find((p) => p.id === gel.id)?.priceCents === 9900 && after.find((p) => p.id === gel.id)?.stock === 12);
 ok('new product created with stock', after.find((p) => p.name === 'Cera mate')?.stock === 4);
-await page.getByRole('button', { name: 'Cerrar' }).click();
+await page.getByTestId('import-modal').getByRole('button', { name: 'Cerrar', exact: true }).click();
 await page.waitForTimeout(500);
 ok('list refreshed', (await page.getByTestId('product-row').filter({ hasText: 'Cera mate' }).count()) === 1);
 
