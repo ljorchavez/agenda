@@ -146,7 +146,7 @@ export function appointmentEmail(r: Row, kind: AppointmentEmail) {
     title: subject,
     intro: [t.hello(first), t.lead[kind]],
     details: [
-      { label: t.service, value: r.service_name ?? '', strong: true },
+      ...(r.service_name ? [{ label: t.service, value: r.service_name, strong: true }] : []),
       { label: t.when, value: whenCap, strong: true },
       ...(r.resource_name ? [{ label: t.with, value: r.resource_name }] : []),
       ...(r.party_size && r.party_size > 1 ? [{ label: t.guests, value: String(r.party_size) }] : []),
