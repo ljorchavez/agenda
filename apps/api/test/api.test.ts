@@ -1916,7 +1916,7 @@ d('API (integration)', () => {
     };
     const send = async (path: string, fd: FormData) => {
       const res = await app.request(`/api${path}`, { method: 'POST', body: fd, headers: { authorization: `Bearer ${tok}` } });
-      return { status: res.status, body: await res.json() };
+      return { status: res.status, body: (await res.json()) as any };
     };
     const read = await send('/customers/csf/read', csf(minimalPdf(lines)));
     expect(read.status).toBe(200);
