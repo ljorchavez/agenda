@@ -20,6 +20,7 @@ import { api, ApiError } from '../lib/api';
 import {
   addPending,
   dropPending,
+  releasePending,
   flushPending,
   isNetworkError,
   isRegister,
@@ -287,7 +288,7 @@ export function PosTab() {
       try {
         const sale = await api<SaleDto>('/sales', { method: 'POST', body });
         recordSent(tenantId, clientId, sale.id);
-        dropPending(tenantId, clientId);
+        releasePending(tenantId, clientId);
         markOnline(tenantId);
         return { ...done, sale };
       } catch (e) {

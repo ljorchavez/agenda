@@ -153,6 +153,13 @@ export function addPending(tenantId: string, s: Omit<PendingSale, 'localNo' | 'e
   return full;
 }
 export const dropPending = (tenantId: string, clientId: string) => setPending(tenantId, pendingSales(tenantId).filter((p) => p.clientId !== clientId));
+/** The sale went through right away: drop it and give back its provisional number if it was the last one. */
+export function releasePending(tenantId: string, clientId: string) {
+  const p = findPending(tenantId, clientId);
+  const n = get<number>(k.seq(tenantId), 0);
+  if (p && p.localNo === `P-${String(n).padStart(4, '0')}`) put(k.seq(tenantId), n - 1 || null);
+  dropPending(tenantId, clientId);
+}
 export const findPending = (tenantId: string, clientId: string) => pendingSales(tenantId).find((p) => p.clientId === clientId) ?? null;
 
 /** Where an uploaded sale went: its local ticket then opens the real one. */

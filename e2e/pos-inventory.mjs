@@ -138,7 +138,7 @@ await page.waitForTimeout(500);
 ok('list refreshed', (await page.getByTestId('product-row').filter({ hasText: 'Cera mate' }).count()) === 1);
 
 // ---- Columns: hide and reorder (kept in this browser) ----
-ok('products show the ID number', /#1\b/.test((await page.getByTestId('product-row').filter({ hasText: 'Gel fijador' }).textContent()) ?? '') && /#3\b/.test((await page.getByTestId('product-row').filter({ hasText: 'Cera mate' }).textContent()) ?? ''));
+ok('products show the ID number', /#1(?!\d)/.test((await page.getByTestId('product-row').filter({ hasText: 'Gel fijador' }).textContent()) ?? '') && /#3(?!\d)/.test((await page.getByTestId('product-row').filter({ hasText: 'Cera mate' }).textContent()) ?? ''));
 await page.getByTestId('cols-products').click();
 await page.getByTestId('col-toggle-sku').uncheck();
 await page.getByTestId('col-up-price').click();
