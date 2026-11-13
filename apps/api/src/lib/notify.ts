@@ -140,13 +140,13 @@ export function appointmentEmail(r: Row, kind: AppointmentEmail) {
   const whenCap = whenText.charAt(0).toUpperCase() + whenText.slice(1);
   const html = renderEmail({
     lang: r.locale === 'en' ? 'en' : 'es',
-    preheader: `${r.service_name} · ${whenCap}`,
+    preheader: [r.service_name, whenCap].filter(Boolean).join(' · '),
     brand: { name: r.business_name },
     badge: { text: t.badge[kind], tone: kind === 'cancelled' ? 'danger' : kind === 'reminder' ? 'info' : 'success' },
     title: subject,
     intro: [t.hello(first), t.lead[kind]],
     details: [
-      { label: t.service, value: r.service_name, strong: true },
+      { label: t.service, value: r.service_name ?? '', strong: true },
       { label: t.when, value: whenCap, strong: true },
       ...(r.resource_name ? [{ label: t.with, value: r.resource_name }] : []),
       ...(r.party_size && r.party_size > 1 ? [{ label: t.guests, value: String(r.party_size) }] : []),
