@@ -1987,6 +1987,15 @@ d('API (integration)', () => {
     await call('PUT', `/products/${cera.id}`, { name: 'Cera mate', priceCents: 12000, satKey: '53131600' }, tok);
     const keys = (await call('GET', '/invoicing/sat-keys?q=cera', undefined, tok)).body;
     expect(keys.items.map((k: { key: string }) => k.key)).toEqual(['53131600', '01010101']);
+    // A barcode looked up online (free food/beauty databases), with the name made readable
+    const { setLookupFetch } = await import('../src/routes/pos.js');
+    setLookupFetch((async (url: string) => {
+      if (String(url).includes('openfoodfacts')) return new Response(JSON.stringify({ status: 0 }), { status: 404 });
+      return new Response(JSON.stringify({ status: 1, product: { product_name: 'Shampoo anticaspa', brands: 'Marca X,Otra', quantity: '375 ml' } }));
+    }) as unknown as typeof fetch);
+    expect((await call('GET', '/products/lookup?code=7501234567890', undefined, tok)).body).toEqual({ found: true, name: 'Shampoo anticaspa Marca X 375 ml', brand: 'Marca X', quantity: '375 ml', source: 'Open Beauty Facts' });
+    expect((await call('GET', '/products/lookup?code=12', undefined, tok)).body).toEqual({ found: false });
+    setLookupFetch(null);
   });
 
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {

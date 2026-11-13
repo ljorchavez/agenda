@@ -1954,9 +1954,16 @@
       "aim": "Point the camera at the barcode.",
       "unsupported": "This browser can’t read barcodes with the camera. Use a USB or Bluetooth scanner, or type the code.",
       "denied": "We couldn’t use the camera. Check the browser permission.",
-      "notFound": "No product has the code “{{code}}”. Add it as the SKU in Products.",
-      "noStock": "{{name}} is out of stock."
-    }
+      "notFound": "No product has the code “{{code}}”.",
+      "noStock": "{{name}} is out of stock.",
+      "create": "Create a product with this code",
+      "lookup": "Look up the name online",
+      "looking": "Looking…",
+      "foundAt": "Name taken from {{source}}. Check it and set the price.",
+      "notOnline": "Not found online: type the name."
+    },
+    "multHelp": "Quantity to add with the next click or scan (or type 10*code)",
+    "cartHint": "Double click the quantity or the amount to change them."
   },
   "ticket": {
     "ticket": "Ticket",

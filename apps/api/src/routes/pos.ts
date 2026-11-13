@@ -235,6 +235,43 @@ posRoutes.post('/products/import', requireBusinessManager, async (c) => {
   return c.json({ ...result, applied: true });
 });
 
+/**
+ * What a barcode is, from the free Open Food Facts / Open Beauty Facts databases (food, drinks,
+ * cosmetics, hair products). Many local products aren't there: then nothing is found.
+ */
+let lookupFetch: typeof fetch = (...a) => fetch(...a);
+export const setLookupFetch = (fn: typeof fetch | null) => {
+  lookupFetch = fn ?? ((...a) => fetch(...a));
+};
+posRoutes.get('/products/lookup', requireBusinessManager, async (c) => {
+  const code = (c.req.query('code') ?? '').replace(/\D/g, '');
+  if (code.length < 8 || code.length > 14) return c.json({ found: false });
+  for (const [host, source] of [['world.openfoodfacts.org', 'Open Food Facts'], ['world.openbeautyfacts.org', 'Open Beauty Facts']] as const) {
+    try {
+      const r = await lookupFetch(`https://${host}/api/v2/product/${code}.json?fields=product_name,product_name_es,brands,quantity`, {
+        headers: { 'user-agent': 'Lugali/1.0 (https://www.lugali.com)' },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!r.ok) continue;
+      const j = (await r.json()) as { status?: number; product?: { product_name?: string; product_name_es?: string; brands?: string; quantity?: string } };
+      const p = j.product;
+      const name = (p?.product_name_es || p?.product_name || '').trim();
+      if (j.status !== 1 || !name) continue;
+      const brand = (p?.brands ?? '').split(',')[0]?.trim() || null;
+      const quantity = p?.quantity?.trim() || null;
+      // "Shampoo anticaspa" + "Head & Shoulders" + "375 ml"
+      const full = [name, brand && !name.toLowerCase().includes(brand.toLowerCase()) ? brand : null, quantity && !name.toLowerCase().includes(quantity.toLowerCase()) ? quantity : null]
+        .filter(Boolean)
+        .join(' ')
+        .slice(0, 120);
+      return c.json({ found: true, name: full, brand, quantity, source });
+    } catch {
+      /* try the next one */
+    }
+  }
+  return c.json({ found: false });
+});
+
 /** Point-of-sale settings: what happens without stock, and the category list. */
 posRoutes.get('/pos/settings', async (c) => {
   const t = await getDb().query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')), columns: { settings: true } });

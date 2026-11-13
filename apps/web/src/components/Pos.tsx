@@ -206,7 +206,7 @@ function useOpenTickets(tenantId: string | undefined, locationId: string) {
 export function PosTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { manager } = useAccess();
+  const { manager, businessManager } = useAccess();
   const { user } = useAuth();
   const health = useHealth();
   const enabled = useFeature('cash');
@@ -281,27 +281,49 @@ export function PosTab() {
     return (products.data ?? []).filter((p) => !term || [p.name, p.sku, p.category].some((x) => x?.toLowerCase().includes(term)));
   }, [products.data, q]);
 
-  const add = (p: ProductDto) =>
+  // "×10" before clicking or scanning adds 10 at once (then back to 1)
+  const [mult, setMult] = useState('');
+  const take = (n?: number) => {
+    const m = n ?? Math.max(1, Math.min(9999, Math.floor(Number(mult) || 1)));
+    setMult('');
+    return m;
+  };
+  const add = (p: ProductDto, n?: number) => {
+    const by = take(n);
     setLines((ls) => {
       const i = ls.findIndex((l) => l.productId === p.id);
-      if (i >= 0) return ls.map((l, k) => (k === i ? { ...l, qty: l.qty + 1 } : l));
-      return [...ls, { key: p.id, productId: p.id, name: p.name, qty: 1, unitCents: p.priceCents, rx: health && p.requiresPrescription, max: p.trackStock ? p.stock : null }];
+      if (i >= 0) return ls.map((l, k) => (k === i ? { ...l, qty: l.qty + by } : l));
+      return [...ls, { key: p.id, productId: p.id, name: p.name, qty: by, unitCents: p.priceCents, rx: health && p.requiresPrescription, max: p.trackStock ? p.stock : null }];
     });
+  };
   const setQty = (key: string, qty: number) => setLines((ls) => (qty <= 0 ? ls.filter((l) => l.key !== key) : ls.map((l) => (l.key === key ? { ...l, qty } : l))));
   const { stockPolicy } = usePosSettings();
+  const categoryList = useCategoryList(products.data);
+  // Newly added products show at the bottom of the ticket: keep it in view
+  const cartList = useRef<HTMLUListElement>(null);
+  const lineCount = lines.length;
+  useEffect(() => {
+    const el = cartList.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lineCount]);
   const offlineNow = !online || (reg.on && products.isError);
   // Barcode: a scanner (or typing the code + Enter) adds the product with that SKU
-  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [scanMsg, setScanMsg] = useState<{ text: string; code?: string } | null>(null);
   const [scanning, setScanning] = useState(false);
-  const addByCode = (code: string) => {
-    const c = code.trim().toLowerCase();
+  const [creating, setCreating] = useState<string | null>(null);
+  const addByCode = (raw: string) => {
+    // "10*7501234567890": ten of that product
+    const m = /^(\d{1,4})\s*[x*]\s*(.+)$/i.exec(raw.trim());
+    const code = (m ? m[2]! : raw).trim();
+    const c = code.toLowerCase();
     const p = (products.data ?? []).find((x) => x.sku?.trim().toLowerCase() === c);
     if (!p) {
-      setScanMsg(t('pos.scan.notFound', { code: code.trim() }));
+      setScanMsg({ text: t('pos.scan.notFound', { code }), code });
       return false;
     }
+    if (m) setMult(m[1]!);
     if (p.trackStock && p.stock <= 0 && stockPolicy === 'block' && !(offlineNow && reg.on)) {
-      setScanMsg(t('pos.scan.noStock', { name: p.name }));
+      setScanMsg({ text: t('pos.scan.noStock', { name: p.name }) });
       return true;
     }
     setScanMsg(null);
@@ -392,6 +414,18 @@ export function PosTab() {
       <OfflineBar online={online} register={reg.on} pending={reg.pending} tenantId={tenantId} />
       <section className="card space-y-3 lg:col-span-3">
         <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center rounded-lg border border-slate-300 bg-white pl-2 text-sm text-slate-500" title={t('pos.multHelp')}>
+            ×
+            <input
+              className="w-12 border-0 bg-transparent px-1 py-2 text-sm text-slate-900 focus:outline-none focus:ring-0"
+              inputMode="numeric"
+              placeholder="1"
+              aria-label={t('pos.multHelp')}
+              value={mult}
+              onChange={(e) => setMult(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              data-testid="pos-mult"
+            />
+          </label>
           <input
             className="input flex-1"
             placeholder={t('pos.searchOrScan')}
@@ -419,7 +453,28 @@ export function PosTab() {
           )}
           <button type="button" className="btn-secondary" onClick={() => setFree({ name: '', price: '' })}>{t('pos.freeLine')}</button>
         </div>
-        {scanMsg && <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900" data-testid="pos-scan-msg">{scanMsg}</p>}
+        {scanMsg && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-900" data-testid="pos-scan-msg">
+            <span className="flex-1">{scanMsg.text}</span>
+            {scanMsg.code && businessManager && online && (
+              <button type="button" className="btn-secondary !py-1 text-xs" onClick={() => { setCreating(scanMsg.code!); setScanMsg(null); }} data-testid="pos-create-from-code">
+                + {t('pos.scan.create')}
+              </button>
+            )}
+          </div>
+        )}
+        {creating !== null && (
+          <ProductModal
+            value={{ ...emptyProduct(), sku: creating }}
+            id={null}
+            locationId={locationId}
+            categories={categoryList}
+            skus={(products.data ?? []).filter((p) => p.sku).map((p) => p.sku!)}
+            lookup={creating}
+            onClose={() => setCreating(null)}
+            onDone={() => void qc.invalidateQueries({ queryKey: ['products'] })}
+          />
+        )}
         {scanning && <CameraScanModal onCode={(code) => { setScanning(false); addByCode(code); }} onClose={() => setScanning(false)} />}
         {products.isLoading ? (
           <Loading />
@@ -489,31 +544,39 @@ export function PosTab() {
         {lines.length === 0 ? (
           <p className="text-sm text-slate-500">{open.tickets.length > 1 ? t('pos.tickets.empty') : t('pos.emptyTicket')}</p>
         ) : (
-          <ul className="divide-y divide-slate-100 text-sm">
+          <ul ref={cartList} className="-mr-2 max-h-[40vh] divide-y divide-slate-100 overflow-y-auto pr-2 text-sm" data-testid="pos-cart">
             {lines.map((l) => (
-              <li key={l.key} className="flex items-center gap-2 py-2">
+              <li key={l.key} className="flex items-center gap-2 py-1.5">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{l.name}</div>
-                  {manager ? (
-                    <input
-                      aria-label={t('pos.unitPrice')}
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      className="input !w-28 !py-1 text-xs"
-                      value={l.unitCents / 100}
-                      onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, unitCents: toCents(e.target.value || '0') } : x)))}
-                    />
-                  ) : (
-                    <div className="text-xs text-slate-500">{money(l.unitCents)}</div>
-                  )}
+                  <div className="truncate font-medium" title={l.name}>{l.name}</div>
+                  {l.qty > 1 && <div className="text-xs text-slate-500">{money(l.unitCents)} c/u</div>}
                 </div>
                 <div className="flex items-center gap-1">
                   <button type="button" className="btn-secondary !px-2 !py-0.5" onClick={() => setQty(l.key, l.qty - 1)} aria-label="-">−</button>
-                  <span className="w-6 text-center" data-testid="pos-qty">{l.qty}</span>
+                  <EditableCell
+                    value={String(l.qty)}
+                    display={<span className="inline-block min-w-[1.5rem] text-center">{l.qty}</span>}
+                    parse={(v) => { const n = Number(v.trim()); return Number.isInteger(n) && n >= 0 && n <= 9999 ? n : null; }}
+                    onSave={async (n) => { if (n != null) setQty(l.key, n); }}
+                    canEdit
+                    inputMode="numeric"
+                    className="!w-14 text-center"
+                    testId="pos-qty"
+                  />
                   <button type="button" className="btn-secondary !px-2 !py-0.5" onClick={() => setQty(l.key, l.qty + 1)} aria-label="+">+</button>
                 </div>
-                <span className="w-20 text-right font-medium">{money(l.qty * l.unitCents)}</span>
+                <span className="w-20 text-right font-semibold">
+                  <EditableCell
+                    value={String(l.unitCents / 100)}
+                    display={money(l.qty * l.unitCents)}
+                    parse={(v) => { const n = Number(v.replace(/[$,\s]/g, '')); return v.trim() !== '' && Number.isFinite(n) && n >= 0 ? toCents(String(n)) : null; }}
+                    onSave={async (unitCents) => { if (unitCents != null) setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, unitCents } : x))); }}
+                    canEdit={manager}
+                    inputMode="decimal"
+                    className="!w-20 text-right"
+                    testId="pos-line-price"
+                  />
+                </span>
                 <button
                   type="button"
                   className="rounded px-1.5 py-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
@@ -527,6 +590,7 @@ export function PosTab() {
               </li>
             ))}
           </ul>
+          {manager && lines.length > 0 && <p className="-mt-1 text-[11px] text-slate-400">{t('pos.cartHint')}</p>}
         )}
         {lines.some((l) => l.rx) && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-rx">⚕️ {t('pos.rxNotice')}</p>}
         {shortStock && <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{t('pos.notEnough', { name: shortStock.name, n: shortStock.max })}</p>}
@@ -994,11 +1058,24 @@ function ProductModal({
   categories: string[];
   /** SKUs already used (suggestions avoid them) */
   skus: string[];
+  /** Barcode just scanned: look it up on the internet to fill the name */
+  lookup?: string;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { t } = useTranslation();
   const [scanning, setScanning] = useState(false);
+  const [found, setFound] = useState<{ found: boolean; source?: string } | null>(null);
+  const findOnline = useMutation({
+    mutationFn: (code: string) => api<{ found: boolean; name?: string; source?: string }>(`/products/lookup?code=${encodeURIComponent(code)}`),
+    onSuccess: (r) => {
+      setFound(r);
+      if (r.found && r.name) setV((x) => ({ ...x, name: x.name.trim() ? x.name : r.name! }));
+    },
+  });
+  useEffect(() => {
+    if (lookup && /^\d{8,14}$/.test(lookup)) findOnline.mutate(lookup);
+  }, [lookup]); // eslint-disable-line react-hooks/exhaustive-deps
   const health = useHealth();
   const [v, setV] = useState<ProductInput>(value);
   const [price, setPrice] = useState(value.priceCents ? String(value.priceCents / 100) : '');
@@ -1043,6 +1120,16 @@ function ProductModal({
               <button type="button" className="btn-secondary !px-2" title={t('pos.scan.button')} aria-label={t('pos.scan.button')} onClick={() => setScanning(true)}>📷</button>
             )}
           </div>
+          {!id && v.sku && /^\d{8,14}$/.test(v.sku) && (
+            <button type="button" className="mt-1 mr-3 text-xs text-brand-700 hover:underline disabled:opacity-50" disabled={findOnline.isPending} onClick={() => findOnline.mutate(v.sku!)} data-testid="pf-lookup">
+              {findOnline.isPending ? t('pos.scan.looking') : `🔎 ${t('pos.scan.lookup')}`}
+            </button>
+          )}
+          {found && (
+            <p className={`mt-1 text-xs ${found.found ? 'text-emerald-700' : 'text-slate-500'}`} data-testid="pf-lookup-result">
+              {found.found ? t('pos.scan.foundAt', { source: found.source }) : t('pos.scan.notOnline')}
+            </p>
+          )}
           {!v.sku && v.name.trim() && (
             <button type="button" className="mt-1 text-xs text-brand-700 hover:underline" onClick={() => set({ sku: suggestSku(v.name, skus) })} data-testid="pf-sku-suggest">
               {t('pos.fields.suggestSku', { sku: suggestSku(v.name, skus) })}

@@ -37,3 +37,11 @@ input.input:not([type='checkbox']):not([type='radio']):not([class*='!py-']),
 select.input:not([class*='!py-']) {
   height: 2.5rem;
 }
+
+/* Tab bars that scroll sideways on phones: no scrollbar showing on computers */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

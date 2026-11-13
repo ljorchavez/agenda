@@ -280,7 +280,7 @@ function BusinessSettings() {
     <>
       <PageHeader title={t('settings.title')} />
       <SaveStatus state={saveState} floating />
-      <div role="tablist" aria-label={t('settings.title')} className="-mx-1 mb-6 flex gap-1 overflow-x-auto border-b border-slate-200 px-1">
+      <div role="tablist" aria-label={t('settings.title')} className="-mx-1 mb-6 flex gap-1 no-scrollbar overflow-x-auto overflow-y-hidden px-1 shadow-[inset_0_-1px_0_0_#e2e8f0] md:flex-wrap md:overflow-visible">
         {tabs.map((x) => (
           <button
             key={x.id}
@@ -288,7 +288,7 @@ function BusinessSettings() {
             type="button"
             aria-selected={tab === x.id}
             onClick={() => setParams(x.id === 'business' ? {} : { tab: x.id }, { replace: true })}
-            className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === x.id ? 'border-brand-600 text-brand-800' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+            className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === x.id ? 'border-brand-600 text-brand-800' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
           >
             {x.label}
           </button>

@@ -1954,9 +1954,16 @@
       "aim": "Apunta la cámara al código de barras.",
       "unsupported": "Este navegador no puede leer códigos con la cámara. Usa un lector USB o Bluetooth, o escribe el código.",
       "denied": "No pudimos usar la cámara. Revisa el permiso del navegador.",
-      "notFound": "Ningún producto tiene el código «{{code}}». Agrégalo como SKU en Productos.",
-      "noStock": "{{name}} está agotado."
-    }
+      "notFound": "Ningún producto tiene el código «{{code}}».",
+      "noStock": "{{name}} está agotado.",
+      "create": "Crear producto con este código",
+      "lookup": "Buscar el nombre en internet",
+      "looking": "Buscando…",
+      "foundAt": "Nombre tomado de {{source}}. Revísalo y pon el precio.",
+      "notOnline": "No lo encontramos en internet: escribe el nombre."
+    },
+    "multHelp": "Cantidad a agregar con el siguiente clic o escaneo (o escribe 10*código)",
+    "cartHint": "Doble clic en la cantidad o en el importe para cambiarlos."
   },
   "ticket": {
     "ticket": "Ticket",
