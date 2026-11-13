@@ -514,6 +514,11 @@ authRoutes.patch('/tenant', requireAuth, requireBusinessManager, async (c) => {
     const current = await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')) });
     input.settings = { ...input.settings, payments: current?.settings.payments };
   }
+  if (input.settings) {
+    // Point-of-sale settings have their own screen (Punto de venta): an older copy never overwrites them
+    const current = await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')), columns: { settings: true } });
+    input.settings = { ...input.settings, pos: current?.settings.pos };
+  }
   const pay = input.settings?.payments;
   if (pay && (pay.methods.mercadopago || pay.methods.spei)) {
     const current = await db.query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')) });

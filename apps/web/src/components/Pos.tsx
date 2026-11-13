@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -36,6 +36,7 @@ import {
   saveLocation,
   saveSession,
   saveTickets,
+  subscribe,
   takeFromCatalog,
   uuid,
   type OpenTicket,
@@ -49,9 +50,11 @@ import { CustomerPicker } from './CustomerPicker';
 import { InvoiceModal, useInvoicing } from './Invoicing';
 import { UpgradeNote, useFeature } from './Sales';
 import { openTicket } from '../pages/Ticket';
-import { ErrorText, Loading, Modal } from './ui';
+import { ErrorText, Loading, Modal, Switch } from './ui';
 import { EditableCell, ImportModal, downloadInventory } from './Inventory';
 import { headCells, rowCells, useColumns } from './Columns';
+import { CameraScanModal, CategoryField, SatKeyField, cameraScanAvailable, suggestSku, useScannerInput } from './ProductFields';
+import { PosSettingsModal, useCategoryList, usePosSettings } from './PosSettings';
 
 /** Prescriptions only matter in health businesses (doctors, dentists…). */
 const useHealth = () => {
@@ -62,24 +65,69 @@ const useHealth = () => {
 type Line = OpenTicket['lines'][number];
 type Done = { sale: SaleDto | null; pending: PendingSale | null; changeCents: number; invoice?: boolean };
 
-/** Location picker shared by the two tabs: owners with several locations choose; others use theirs. */
+/**
+ * The location this counter sells at: chosen once per sign-in (in the Punto de venta header) and
+ * kept on this computer; people tied to one location always use theirs.
+ */
 export function useLocationChoice() {
   const { locationId: own } = useAccess();
   const { tenant } = useAuth();
   const locs = useMyLocations(own);
-  const [loc, setLoc] = useState(own ?? '');
+  const saved = useSyncExternalStore(subscribe, () => (tenant ? loadLocation(tenant.id) : ''));
+  const savedOk = locs.list.some((l) => l.id === saved);
   // Without internet the list doesn't load: the register's last location
-  const locationId = loc || locs.list[0]?.id || (tenant ? loadLocation(tenant.id) : '');
+  const locationId = own ?? (savedOk ? saved : locs.list.length ? (locs.multi ? saved || locs.list[0]!.id : locs.list[0]!.id) : saved);
+  const choose = (id: string) => tenant && saveLocation(tenant.id, id);
   useEffect(() => {
-    if (tenant && locationId) saveLocation(tenant.id, locationId);
-  }, [tenant, locationId]);
-  const picker =
-    locs.multi && !own ? (
-      <select aria-label="location" className="input !w-auto" value={locationId} onChange={(e) => setLoc(e.target.value)} data-testid="pos-location">
-        {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-      </select>
-    ) : null;
-  return { locationId, picker, locationName: locs.multi ? locs.list.find((l) => l.id === locationId)?.name ?? null : null };
+    // One location: nothing to choose
+    if (tenant && !locs.multi && locs.list[0] && saved !== locs.list[0].id) saveLocation(tenant.id, locs.list[0].id);
+  }, [tenant, locs.multi, locs.list, saved]);
+  return {
+    locationId,
+    locationName: locs.multi ? locs.list.find((l) => l.id === locationId)?.name ?? null : null,
+    /** Several locations and none chosen yet on this computer */
+    needsChoice: locs.multi && !own && !savedOk && !locs.isLoading,
+    canChoose: locs.multi && !own,
+    locations: locs.list,
+    choose,
+  };
+}
+
+/** The counter's location in the Punto de venta header: asked once, changed rarely. */
+export function PosLocation() {
+  const { t } = useTranslation();
+  const { locationName, needsChoice, canChoose, locations, choose, locationId } = useLocationChoice();
+  const [open, setOpen] = useState(false);
+  if (!canChoose) return null;
+  return (
+    <>
+      <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:border-brand-400" onClick={() => setOpen(true)} data-testid="pos-location">
+        📍 <span className="font-medium">{locationName}</span>
+        <span className="text-xs text-brand-700">{t('pos.location.change')}</span>
+      </button>
+      {(open || needsChoice) && (
+        <Modal open title={t('pos.location.title')} onClose={() => (needsChoice ? undefined : setOpen(false))}>
+          <p className="mb-3 text-sm text-slate-600">{t('pos.location.help')}</p>
+          <ul className="space-y-2" data-testid="pos-location-choices">
+            {locations.map((l) => (
+              <li key={l.id}>
+                <button
+                  type="button"
+                  className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${l.id === locationId && !needsChoice ? 'border-brand-600 bg-brand-50 font-medium' : 'border-slate-200 hover:border-brand-400'}`}
+                  onClick={() => {
+                    choose(l.id);
+                    setOpen(false);
+                  }}
+                >
+                  {l.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+    </>
+  );
 }
 
 const useProducts = (locationId: string, all = false, enabled = true) => {
@@ -162,7 +210,7 @@ export function PosTab() {
   const { user } = useAuth();
   const health = useHealth();
   const enabled = useFeature('cash');
-  const { locationId, picker } = useLocationChoice();
+  const { locationId } = useLocationChoice();
   const reg = useRegister();
   const tenantId = reg.tenantId;
   const online = useOnline();
@@ -240,6 +288,27 @@ export function PosTab() {
       return [...ls, { key: p.id, productId: p.id, name: p.name, qty: 1, unitCents: p.priceCents, rx: health && p.requiresPrescription, max: p.trackStock ? p.stock : null }];
     });
   const setQty = (key: string, qty: number) => setLines((ls) => (qty <= 0 ? ls.filter((l) => l.key !== key) : ls.map((l) => (l.key === key ? { ...l, qty } : l))));
+  const { stockPolicy } = usePosSettings();
+  const offlineNow = !online || (reg.on && products.isError);
+  // Barcode: a scanner (or typing the code + Enter) adds the product with that SKU
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const addByCode = (code: string) => {
+    const c = code.trim().toLowerCase();
+    const p = (products.data ?? []).find((x) => x.sku?.trim().toLowerCase() === c);
+    if (!p) {
+      setScanMsg(t('pos.scan.notFound', { code: code.trim() }));
+      return false;
+    }
+    if (p.trackStock && p.stock <= 0 && stockPolicy === 'block' && !(offlineNow && reg.on)) {
+      setScanMsg(t('pos.scan.noStock', { name: p.name }));
+      return true;
+    }
+    setScanMsg(null);
+    add(p);
+    return true;
+  };
+  useScannerInput(addByCode, enabled);
   const resetPayment = () => {
     setSplit(null);
     setReceived('');
@@ -314,17 +383,44 @@ export function PosTab() {
   });
 
   if (!enabled) return <UpgradeNote feature="cash" />;
-  const shortStock = !online && reg.on ? null : lines.find((l) => l.max != null && l.qty > l.max);
-  const offlineNow = !online || (reg.on && products.isError);
+  // Without stock: stop the sale, warn, or let it go (business setting); offline it's checked on upload
+  const over = !online && reg.on ? undefined : lines.find((l) => l.max != null && l.qty > l.max);
+  const shortStock = stockPolicy === 'block' ? over : undefined;
+  const lowWarn = stockPolicy === 'warn' ? over : undefined;
   return (
     <div className="grid items-start gap-6 lg:grid-cols-5" data-testid="pos-tab">
       <OfflineBar online={online} register={reg.on} pending={reg.pending} tenantId={tenantId} />
       <section className="card space-y-3 lg:col-span-3">
         <div className="flex flex-wrap items-center gap-2">
-          <input className="input flex-1" placeholder={t('pos.search')} value={q} onChange={(e) => setQ(e.target.value)} data-testid="pos-search" />
-          {picker}
+          <input
+            className="input flex-1"
+            placeholder={t('pos.searchOrScan')}
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setScanMsg(null);
+            }}
+            onKeyDown={(e) => {
+              // Scanners type the code and press Enter: add it right away
+              if (e.key === 'Enter' && q.trim()) {
+                e.preventDefault();
+                if (addByCode(q)) setQ('');
+                else if (filtered.length === 1) {
+                  add(filtered[0]!);
+                  setQ('');
+                  setScanMsg(null);
+                }
+              }
+            }}
+            data-testid="pos-search"
+          />
+          {cameraScanAvailable() && (
+            <button type="button" className="btn-secondary" title={t('pos.scan.button')} aria-label={t('pos.scan.button')} onClick={() => setScanning(true)} data-testid="pos-scan">📷</button>
+          )}
           <button type="button" className="btn-secondary" onClick={() => setFree({ name: '', price: '' })}>{t('pos.freeLine')}</button>
         </div>
+        {scanMsg && <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900" data-testid="pos-scan-msg">{scanMsg}</p>}
+        {scanning && <CameraScanModal onCode={(code) => { setScanning(false); addByCode(code); }} onClose={() => setScanning(false)} />}
         {products.isLoading ? (
           <Loading />
         ) : products.isError && !products.data ? (
@@ -335,7 +431,7 @@ export function PosTab() {
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="pos-products">
             {filtered.map((p) => {
               // Offline the copy of stock may be behind: let the register sell (it's checked on upload)
-              const out = p.trackStock && p.stock <= 0 && !(offlineNow && reg.on);
+              const out = p.trackStock && p.stock <= 0 && stockPolicy === 'block' && !(offlineNow && reg.on);
               return (
                 <li key={p.id}>
                   <button
@@ -418,12 +514,23 @@ export function PosTab() {
                   <button type="button" className="btn-secondary !px-2 !py-0.5" onClick={() => setQty(l.key, l.qty + 1)} aria-label="+">+</button>
                 </div>
                 <span className="w-20 text-right font-medium">{money(l.qty * l.unitCents)}</span>
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-700"
+                  aria-label={t('pos.removeLine', { name: l.name })}
+                  title={t('pos.removeLine', { name: l.name })}
+                  onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                  data-testid="pos-remove-line"
+                >
+                  ✕
+                </button>
               </li>
             ))}
           </ul>
         )}
         {lines.some((l) => l.rx) && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-rx">⚕️ {t('pos.rxNotice')}</p>}
         {shortStock && <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{t('pos.notEnough', { name: shortStock.name, n: shortStock.max })}</p>}
+        {lowWarn && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-stock-warn">{t('pos.stockWarn', { name: lowWarn.name, n: lowWarn.max })}</p>}
         <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-lg font-semibold">
           <span>{t('pos.total')}</span>
           <span data-testid="pos-total">{money(total)}</span>
@@ -666,7 +773,7 @@ export function ProductsTab() {
   const { businessManager, manager } = useAccess();
   const health = useHealth();
   const enabled = useFeature('cash');
-  const { locationId, picker, locationName } = useLocationChoice();
+  const { locationId, locationName } = useLocationChoice();
   const products = useProducts(locationId, true, enabled);
   const [edit, setEdit] = useState<{ id: string | null; v: ProductInput } | null>(null);
   const [stock, setStock] = useState<{ p: ProductDto; mode: 'in' | 'set' } | null>(null);
@@ -677,7 +784,8 @@ export function ProductsTab() {
   const refresh = () => void qc.invalidateQueries({ queryKey: ['products'] });
   const remove = useMutation({ mutationFn: (id: string) => api(`/products/${id}`, { method: 'DELETE' }), onSuccess: refresh });
   const all = products.data ?? [];
-  const categories = useMemo(() => [...new Set(all.map((p) => p.category).filter((c): c is string => Boolean(c)))].sort((a, b) => a.localeCompare(b, 'es')), [all]);
+  const categories = useCategoryList(products.data);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const saveField = async (p: ProductDto, patch: Partial<ProductInput>) => {
     await api(`/products/${p.id}`, { method: 'PUT', body: { ...productInputOf(p), ...patch } });
     refresh();
@@ -697,14 +805,7 @@ export function ProductsTab() {
   };
   const NONE = <span className="text-slate-300">—</span>;
   const yesNo = (p: ProductDto, k: 'trackStock' | 'active' | 'requiresPrescription', label: string) => (
-    <span
-      className={`whitespace-nowrap ${businessManager ? 'cursor-pointer rounded px-1 -mx-1 hover:bg-brand-50' : ''}`}
-      title={businessManager ? t('pos.inventory.dblClick') : undefined}
-      onDoubleClick={() => businessManager && void saveField(p, { [k]: !p[k] })}
-      data-testid={`product-${k}`}
-    >
-      {p[k] ? `✓ ${label}` : <span className="text-slate-400">{t('common.no')}</span>}
-    </span>
+    <Switch checked={p[k]} disabled={!businessManager} onChange={(on) => void saveField(p, { [k]: on })} label={`${label}: ${p.name}`} hideLabel testId={`product-${k}`} />
   );
   const R = 'text-right';
   const { cols, menu } = useColumns<ProductDto>('products', [
@@ -742,7 +843,7 @@ export function ProductsTab() {
       key: 'minStock', label: t('pos.minStock'), className: R,
       td: (p) => <EditableCell value={p.minStock == null ? '' : String(p.minStock)} display={p.minStock ?? NONE} parse={whole} allowEmpty onSave={(minStock) => saveField(p, { minStock })} canEdit={businessManager} inputMode="numeric" className="!w-20 text-right" testId="product-min" />,
     },
-    { key: 'trackStock', label: t('pos.trackStock'), td: (p) => yesNo(p, 'trackStock', t('common.yes')) },
+    { key: 'trackStock', label: t('pos.trackStock'), td: (p) => yesNo(p, 'trackStock', t('pos.trackStock')) },
     {
       key: 'iva', label: 'IVA',
       td: (p) => (
@@ -761,8 +862,8 @@ export function ProductsTab() {
       key: 'satKey', label: t('pos.satKey'), className: 'font-mono text-xs',
       td: (p) => <EditableCell value={p.satKey ?? ''} display={p.satKey ?? NONE} parse={(s) => (/^\d{8}$/.test(s.trim()) ? s.trim() : null)} allowEmpty onSave={(satKey) => saveField(p, { satKey })} canEdit={businessManager} inputMode="numeric" className="!w-28" testId="product-sat" />,
     },
-    ...(health ? [{ key: 'rx', label: t('pos.rx'), td: (p: ProductDto) => yesNo(p, 'requiresPrescription', t('common.yes')) }] : []),
-    { key: 'active', label: t('pos.active'), td: (p) => yesNo(p, 'active', t('common.yes')) },
+    ...(health ? [{ key: 'rx', label: t('pos.rx'), td: (p: ProductDto) => yesNo(p, 'requiresPrescription', t('pos.rx')) }] : []),
+    { key: 'active', label: t('pos.active'), td: (p) => yesNo(p, 'active', t('pos.active')) },
     {
       key: 'actions', label: t('columns.actions'), required: true, className: 'text-right',
       td: (p) => (
@@ -792,9 +893,11 @@ export function ProductsTab() {
     <section className="card space-y-3" data-testid="products-tab">
       <div className="flex flex-wrap items-center gap-2">
         <input className="input min-w-0 flex-1" placeholder={t('pos.search')} value={f.q} onChange={(e) => set({ q: e.target.value })} data-testid="products-search" />
-        {picker}
         {businessManager && (
-          <button type="button" className="btn-primary" onClick={() => setEdit({ id: null, v: emptyProduct() })} data-testid="new-product">{t('pos.newProduct')}</button>
+          <>
+            <button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)} data-testid="pos-settings-open">⚙ {t('pos.settings.button')}</button>
+            <button type="button" className="btn-primary" onClick={() => setEdit({ id: null, v: emptyProduct() })} data-testid="new-product">{t('pos.newProduct')}</button>
+          </>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -851,7 +954,18 @@ export function ProductsTab() {
         </div>
       )}
       <ErrorText error={remove.error} />
-      {edit && <ProductModal value={edit.v} id={edit.id} locationId={locationId} onClose={() => setEdit(null)} onDone={refresh} />}
+      {edit && (
+        <ProductModal
+          value={edit.v}
+          id={edit.id}
+          locationId={locationId}
+          categories={categories}
+          skus={all.filter((p) => p.id !== edit.id && p.sku).map((p) => p.sku!)}
+          onClose={() => setEdit(null)}
+          onDone={refresh}
+        />
+      )}
+      {settingsOpen && <PosSettingsModal products={all} onClose={() => setSettingsOpen(false)} />}
       {stock && <StockModal product={stock.p} mode={stock.mode} locationId={locationId} onClose={() => setStock(null)} onDone={refresh} />}
       {moves && <MovesModal product={moves} locationId={locationId} onClose={() => setMoves(null)} />}
       {importing && <ImportModal locationId={locationId} locationName={locationName} onClose={() => setImporting(false)} onDone={refresh} />}
@@ -865,8 +979,26 @@ const productInputOf = (p: ProductDto): ProductInput => ({
   minStock: p.minStock, iva: p.iva, satKey: p.satKey, requiresPrescription: p.requiresPrescription, active: p.active,
 });
 
-function ProductModal({ value, id, locationId, onClose, onDone }: { value: ProductInput; id: string | null; locationId: string; onClose: () => void; onDone: () => void }) {
+function ProductModal({
+  value,
+  id,
+  locationId,
+  categories,
+  skus,
+  onClose,
+  onDone,
+}: {
+  value: ProductInput;
+  id: string | null;
+  locationId: string;
+  categories: string[];
+  /** SKUs already used (suggestions avoid them) */
+  skus: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const { t } = useTranslation();
+  const [scanning, setScanning] = useState(false);
   const health = useHealth();
   const [v, setV] = useState<ProductInput>(value);
   const [price, setPrice] = useState(value.priceCents ? String(value.priceCents / 100) : '');
@@ -902,9 +1034,22 @@ function ProductModal({ value, id, locationId, onClose, onDone }: { value: Produ
         <label className="block text-sm sm:col-span-2"><span className="label">{t('pos.product')}</span><input required className="input" value={v.name} onChange={(e) => set({ name: e.target.value })} /></label>
         <label className="block text-sm"><span className="label">{t('pos.price')}</span><input required type="number" min={0} step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
         <label className="block text-sm"><span className="label">{t('pos.cost')}</span><input type="number" min={0} step="0.01" className="input" value={cost} onChange={(e) => setCost(e.target.value)} /></label>
-        <label className="block text-sm"><span className="label">{t('pos.category')}</span><input className="input" value={v.category ?? ''} onChange={(e) => set({ category: e.target.value })} /></label>
-        <label className="block text-sm"><span className="label">{t('pos.sku')}</span><input className="input" value={v.sku ?? ''} onChange={(e) => set({ sku: e.target.value })} /></label>
-        <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={v.trackStock !== false} onChange={(e) => set({ trackStock: e.target.checked })} /> {t('pos.trackStock')}</label>
+        <div className="block text-sm"><span className="label">{t('pos.category')}</span><CategoryField value={v.category ?? null} options={categories} onChange={(category) => set({ category })} /></div>
+        <div className="block text-sm">
+          <span className="label">{t('pos.fields.skuLabel')}</span>
+          <div className="flex gap-1">
+            <input className="input font-mono" maxLength={60} value={v.sku ?? ''} onChange={(e) => set({ sku: e.target.value })} data-testid="product-sku" />
+            {cameraScanAvailable() && (
+              <button type="button" className="btn-secondary !px-2" title={t('pos.scan.button')} aria-label={t('pos.scan.button')} onClick={() => setScanning(true)}>📷</button>
+            )}
+          </div>
+          {!v.sku && v.name.trim() && (
+            <button type="button" className="mt-1 text-xs text-brand-700 hover:underline" onClick={() => set({ sku: suggestSku(v.name, skus) })} data-testid="product-sku-suggest">
+              {t('pos.fields.suggestSku', { sku: suggestSku(v.name, skus) })}
+            </button>
+          )}
+        </div>
+        <div className="sm:col-span-2"><Switch checked={v.trackStock !== false} onChange={(trackStock) => set({ trackStock })} label={t('pos.trackStock')} testId="product-track" /></div>
         {v.trackStock !== false && (
           <>
             {!id && <label className="block text-sm"><span className="label">{t('pos.initialStock')}</span><input type="number" min={0} className="input" value={initial} onChange={(e) => setInitial(e.target.value)} /></label>}
@@ -917,11 +1062,12 @@ function ProductModal({ value, id, locationId, onClose, onDone }: { value: Produ
             {IVA_OPTIONS.map((x) => <option key={x} value={x}>{t(`invoicing.iva.${x}`)}</option>)}
           </select>
         </label>
-        <label className="block text-sm"><span className="label">{t('pos.satKey')}</span><input className="input font-mono" inputMode="numeric" maxLength={8} placeholder="01010101" value={v.satKey ?? ''} onChange={(e) => set({ satKey: e.target.value.replace(/\D/g, '') })} /></label>
+        <div className="block text-sm"><span className="label">{t('pos.satKey')}</span><SatKeyField value={v.satKey ?? null} onChange={(satKey) => set({ satKey })} productName={v.name} /></div>
         {health && (
-          <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={Boolean(v.requiresPrescription)} onChange={(e) => set({ requiresPrescription: e.target.checked })} /> {t('pos.requiresRx')}</label>
+          <div className="sm:col-span-2"><Switch checked={Boolean(v.requiresPrescription)} onChange={(requiresPrescription) => set({ requiresPrescription })} label={t('pos.requiresRx')} /></div>
         )}
-        {id && <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={v.active !== false} onChange={(e) => set({ active: e.target.checked })} /> {t('pos.active')}</label>}
+        {id && <div className="sm:col-span-2"><Switch checked={v.active !== false} onChange={(active) => set({ active })} label={t('pos.active')} /></div>}
+        {scanning && <CameraScanModal onCode={(sku) => { set({ sku }); setScanning(false); }} onClose={() => setScanning(false)} />}
         <div className="sm:col-span-2"><ErrorText error={save.error} ns="pos" /></div>
         <div className="flex justify-end gap-2 sm:col-span-2">
           <button type="button" className="btn-secondary" onClick={onClose}>{t('common.cancel')}</button>

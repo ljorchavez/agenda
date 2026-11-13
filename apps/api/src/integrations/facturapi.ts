@@ -86,6 +86,9 @@ export interface InvoiceInput {
   use: string;
   series?: string;
 }
+/** SAT product/service keys (c_ClaveProdServ) matching a text, best first. */
+export const searchSatProducts = (key: string, q: string) =>
+  call<{ data?: { key?: string; description?: string; score?: number }[] }>(key, 'GET', `/catalogs/products?q=${encodeURIComponent(q)}&limit=20`);
 export const createInvoice = (key: string, input: InvoiceInput) => call<FacturapiInvoice>(key, 'POST', '/invoices', input);
 export const invoiceFile = (key: string, id: string, kind: 'pdf' | 'xml') => call<Response>(key, 'GET', `/invoices/${encodeURIComponent(id)}/${kind}`, undefined, true);
 export const emailInvoice = (key: string, id: string, email?: string) => call(key, 'POST', `/invoices/${encodeURIComponent(id)}/email`, email ? { email } : {});

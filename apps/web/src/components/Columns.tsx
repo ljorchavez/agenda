@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type Modifier } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Switch } from './ui';
 
 /**
  * Columns any table can show, hide and reorder; each table's choice is kept in this browser.
@@ -64,19 +68,12 @@ export function useColumns<T>(id: string, defs: Col<T>[]) {
     else h.add(k);
     store({ order, hidden: [...h] });
   };
-  const move = (k: string, by: -1 | 1) => {
-    const i = order.indexOf(k);
-    const j = i + by;
-    if (j < 0 || j >= order.length) return;
-    const next = [...order];
-    [next[i], next[j]] = [next[j]!, next[i]!];
-    store({ order: next, hidden: [...hidden] });
-  };
+  const reorder = (next: string[]) => store({ order: next, hidden: [...hidden] });
   const menu = (
     <ColumnsMenu
       items={order.map((k) => ({ key: k, label: byKey.get(k)!.label, on: byKey.get(k)!.required || !hidden.has(k), required: Boolean(byKey.get(k)!.required) }))}
       onToggle={toggle}
-      onMove={move}
+      onReorder={reorder}
       onReset={() => store(null)}
       testId={`cols-${id}`}
     />
@@ -96,19 +93,24 @@ const ThKey = ({ children }: { children: ReactNode }) => <>{children}</>;
 function ColumnsMenu({
   items,
   onToggle,
-  onMove,
+  onReorder,
   onReset,
   testId,
 }: {
   items: { key: string; label: string; on: boolean; required: boolean }[];
   onToggle: (k: string) => void;
-  onMove: (k: string, by: -1 | 1) => void;
+  onReorder: (order: string[]) => void;
   onReset: () => void;
   testId: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
@@ -120,29 +122,59 @@ function ColumnsMenu({
       document.removeEventListener('keydown', esc);
     };
   }, [open]);
+  const keys = items.map((i) => i.key);
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    onReorder(arrayMove(keys, keys.indexOf(String(active.id)), keys.indexOf(String(over.id))));
+  };
   return (
     <div className="relative" ref={box}>
       <button type="button" className="input !w-auto !py-1 !px-2 !text-sm" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid={testId}>
         ☰ {t('columns.button')}
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg" data-testid={`${testId}-menu`}>
+        <div className="absolute right-0 z-30 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-2 shadow-lg" data-testid={`${testId}-menu`}>
           <p className="px-1 pb-1 text-xs text-slate-500">{t('columns.help')}</p>
-          <ul className="max-h-80 overflow-y-auto">
-            {items.map((it, i) => (
-              <li key={it.key} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-slate-50">
-                <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                  <input type="checkbox" checked={it.on} disabled={it.required} onChange={() => onToggle(it.key)} data-testid={`col-toggle-${it.key}`} />
-                  <span className="truncate">{it.label}</span>
-                </label>
-                <button type="button" className="px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30" disabled={i === 0} aria-label={t('columns.up')} onClick={() => onMove(it.key, -1)} data-testid={`col-up-${it.key}`}>↑</button>
-                <button type="button" className="px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30" disabled={i === items.length - 1} aria-label={t('columns.down')} onClick={() => onMove(it.key, 1)} data-testid={`col-down-${it.key}`}>↓</button>
-              </li>
-            ))}
-          </ul>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} modifiers={[restrictToVertical]}>
+            <SortableContext items={keys} strategy={verticalListSortingStrategy}>
+              <ul className="max-h-80 overflow-y-auto">
+                {items.map((it) => <ColumnRow key={it.key} item={it} onToggle={onToggle} />)}
+              </ul>
+            </SortableContext>
+          </DndContext>
           <button type="button" className="mt-1 px-1 text-xs text-brand-700 hover:underline" onClick={onReset}>{t('columns.reset')}</button>
         </div>
       )}
     </div>
+  );
+}
+
+/** Keeps the dragged row in its column. */
+const restrictToVertical: Modifier = ({ transform }) => ({ ...transform, x: 0 });
+
+function ColumnRow({ item, onToggle }: { item: { key: string; label: string; on: boolean; required: boolean }; onToggle: (k: string) => void }) {
+  const { t } = useTranslation();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.key });
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={`flex items-center gap-2 rounded px-1 py-1 ${isDragging ? 'relative z-10 bg-white shadow-md' : 'hover:bg-slate-50'}`}
+      data-testid={`col-row-${item.key}`}
+    >
+      <button
+        type="button"
+        className="cursor-grab touch-none rounded px-1 text-lg leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+        aria-label={t('columns.drag', { name: item.label })}
+        title={t('columns.drag', { name: item.label })}
+        {...attributes}
+        {...listeners}
+        data-testid={`col-drag-${item.key}`}
+      >
+        ⠿
+      </button>
+      <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+      <Switch checked={item.on} disabled={item.required} onChange={() => onToggle(item.key)} label={item.label} hideLabel testId={`col-toggle-${item.key}`} />
+    </li>
   );
 }

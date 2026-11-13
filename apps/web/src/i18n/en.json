@@ -1903,7 +1903,60 @@
         "bad_category": "Category too long"
       }
     },
-    "import_headers": "The first row must have the column names (Producto, Precio…). Use the template."
+    "import_headers": "The first row must have the column names (Producto, Precio…). Use the template.",
+    "location": {
+      "change": "Change",
+      "title": "Which location are you selling at?",
+      "help": "It stays on this computer until you sign out."
+    },
+    "removeLine": "Remove {{name}}",
+    "searchOrScan": "Search or scan a barcode",
+    "stockWarn": "{{name}}: only {{n}} in stock. It sells and stock goes below zero.",
+    "settings": {
+      "button": "Settings",
+      "title": "Point of sale settings",
+      "stockTitle": "Products out of stock",
+      "stockHelp": "What happens when selling something the system shows at 0. If you don’t keep inventory, choose “Sell without notice”.",
+      "policy": {
+        "block": "Don’t allow the sale",
+        "warn": "Sell with a notice",
+        "allow": "Sell without notice"
+      },
+      "policyHelp": {
+        "block": "The product shows as out of stock and you can’t charge more than there is.",
+        "warn": "It can be sold; the ticket shows a notice and stock goes below zero to fix later.",
+        "allow": "Always sells, no notices (stock may go below zero)."
+      },
+      "categoriesTitle": "Product categories",
+      "categoriesHelp": "They show as a list when creating or editing a product and in Excel. Renaming or deleting a category changes it on all its products.",
+      "newCategory": "New category",
+      "add": "Add",
+      "noCategories": "No categories yet.",
+      "productCount_one": "{{count}} product",
+      "productCount_other": "{{count}} products",
+      "rename": "Rename",
+      "deleteConfirm": "Delete “{{name}}”? Its {{count}} products will have no category."
+    },
+    "fields": {
+      "pickCategory": "Pick from the list",
+      "newCategory": "New category…",
+      "searchSat": "Search",
+      "satPlaceholder": "e.g. shampoo, water, consultation",
+      "yours": "in use",
+      "satNoCatalog": "To search the whole SAT catalog, set up invoicing. Meanwhile, look it up on the SAT site.",
+      "satSite": "SAT catalog",
+      "skuLabel": "SKU / barcode",
+      "suggestSku": "Suggest: {{sku}}"
+    },
+    "scan": {
+      "title": "Scan barcode",
+      "button": "Scan with the camera",
+      "aim": "Point the camera at the barcode.",
+      "unsupported": "This browser can’t read barcodes with the camera. Use a USB or Bluetooth scanner, or type the code.",
+      "denied": "We couldn’t use the camera. Check the browser permission.",
+      "notFound": "No product has the code “{{code}}”. Add it as the SKU in Products.",
+      "noStock": "{{name}} is out of stock."
+    }
   },
   "ticket": {
     "ticket": "Ticket",
@@ -2005,10 +2058,11 @@
   },
   "columns": {
     "button": "Columns",
-    "help": "Show, hide and reorder columns.",
+    "help": "Drag ⠿ to reorder; use the switch to show or hide.",
     "up": "Move up",
     "down": "Move down",
     "reset": "Reset",
-    "actions": "Actions"
+    "actions": "Actions",
+    "drag": "Drag to move “{{name}}”"
   }
 }

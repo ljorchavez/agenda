@@ -1967,6 +1967,26 @@ d('API (integration)', () => {
     // The same file again: nothing to do
     expect((await call('POST', '/products/import', { table: table.slice(0, 2) }, tok)).body).toMatchObject({ created: 0, updated: 0, unchanged: 1 });
     expect((await call('POST', '/products/import', { table: [['Precio'], [1]] }, tok)).body.error).toBe('import_headers');
+
+    // Without stock: blocked by default; "warn"/"allow" sell and stock goes below zero
+    const cera = list.find((p) => p.name === 'Cera mate')!;
+    const sell = (qty: number) => call('POST', '/sales', { items: [{ productId: cera.id, qty }], payments: [{ method: 'cash', amountCents: 12000 * qty }] }, tok);
+    expect((await call('GET', '/pos/settings', undefined, tok)).body).toEqual({ stockPolicy: 'block', categories: [] });
+    expect((await sell(10)).body.error).toBe('insufficient_stock');
+    expect((await call('PUT', '/pos/settings', { stockPolicy: 'warn', categories: ['Cabello', 'barba', 'Barba'] }, tok)).body).toEqual({ stockPolicy: 'warn', categories: ['barba', 'Cabello'] });
+    expect((await sell(10)).status).toBe(201);
+    expect((await call('GET', '/products', undefined, tok)).body.find((p: { id: string }) => p.id === cera.id).stock).toBe(-7);
+    // Saving the general settings with an older copy keeps the POS ones
+    const me = (await call('GET', '/auth/me', undefined, tok)).body;
+    await call('PATCH', '/tenant', { settings: { ...me.tenant.settings, pos: undefined } }, tok);
+    expect((await call('GET', '/pos/settings', undefined, tok)).body.stockPolicy).toBe('warn');
+    // Renaming a category changes its products and the list
+    expect((await call('POST', '/products/categories/rename', { from: 'cabello', to: 'Pelo' }, tok)).body).toEqual({ products: 2, categories: ['barba', 'Pelo'] });
+    expect((await call('GET', '/products', undefined, tok)).body.filter((p: { category: string }) => p.category === 'Pelo')).toHaveLength(2);
+    // SAT keys: without Facturapi, the ones already used and "no existe en el catálogo"
+    await call('PUT', `/products/${cera.id}`, { name: 'Cera mate', priceCents: 12000, satKey: '53131600' }, tok);
+    const keys = (await call('GET', '/invoicing/sat-keys?q=cera', undefined, tok)).body;
+    expect(keys.items.map((k: { key: string }) => k.key)).toEqual(['53131600', '01010101']);
   });
 
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {

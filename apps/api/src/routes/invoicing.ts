@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   DEFAULT_PRODUCT_SAT_KEY,
   PAYMENT_FORMS,
@@ -25,6 +25,7 @@ import {
   invoiceFile,
   renewLiveKey,
   testKey,
+  searchSatProducts,
   updateLegal,
   uploadCertificate,
   type InvoiceInput,
@@ -77,6 +78,32 @@ const toDto = (i: Invoice): InvoiceDto => ({
   status: i.status,
   test: i.test,
   createdAt: i.createdAt.toISOString(),
+});
+
+/**
+ * SAT keys for a product (searching Facturapi's copy of the catalog). Without Facturapi set up,
+ * the keys this business already uses and "no existe en el catálogo".
+ */
+invoicingRoutes.get('/invoicing/sat-keys', requireManager, async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 80);
+  const db = getDb();
+  const t = await tenantOf(c.get('tenantId'));
+  const own = await db.execute<{ key: string; name: string }>(sql`
+    select sat_key as key, min(name) as name from products
+    where tenant_id = ${t.id} and sat_key is not null
+      and (${q} = '' or sat_key like ${q + '%'} or name ilike ${'%' + q + '%'})
+    group by sat_key order by count(*) desc limit 8`);
+  const local = [...own.rows.map((r) => ({ key: r.key, description: r.name, own: true })), { key: '01010101', description: 'No existe en el catálogo', own: false }];
+  const key = keysOf(t)?.testKey ?? process.env.FACTURAPI_USER_KEY?.trim();
+  if (!key || q.length < 3) return c.json({ catalog: Boolean(key), items: local });
+  try {
+    const r = await searchSatProducts(key, q);
+    const found = (r.data ?? []).filter((x) => x.key && x.description).map((x) => ({ key: x.key!, description: x.description!, own: false }));
+    const seen = new Set<string>();
+    return c.json({ catalog: true, items: [...local.filter((x) => x.own), ...found].filter((x) => !seen.has(x.key) && seen.add(x.key)) });
+  } catch {
+    return c.json({ catalog: false, items: local });
+  }
 });
 
 invoicingRoutes.get('/invoicing', requireManager, async (c) => c.json(status(await tenantOf(c.get('tenantId')))));

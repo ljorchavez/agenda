@@ -13,7 +13,7 @@ import { FILTER_CTRL, FilterBar, MultiPick } from './FilterBar';
 import { headCells, rowCells, useColumns } from './Columns';
 import { ReportsView } from '../pages/Reports';
 import { useMyLocations } from '../lib/queries';
-import { PosTab, ProductsTab, SaleActions } from './Pos';
+import { PosLocation, PosTab, ProductsTab, SaleActions } from './Pos';
 import { UpgradeNote, useFeature } from './Sales';
 import { Loading } from './ui';
 
@@ -31,7 +31,10 @@ export function PosPage() {
   return (
     <>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-slate-900">{t('nav.pos')}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold text-slate-900">{t('nav.pos')}</h1>
+          {(tab === 'sell' || tab === 'products') && <PosLocation />}
+        </div>
         <div className="inline-flex flex-wrap rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
           {tabs.map((k) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} className={btn(k)} onClick={() => setParams(k === 'sell' ? {} : { tab: k })} data-testid={`pos-tab-${k}`}>

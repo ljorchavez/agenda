@@ -406,6 +406,21 @@ export interface DiscountPreviewDto {
   reward: { enabled: boolean; everyVisits: number; visitsSince: number; eligible: boolean } | null;
 }
 
+/**
+ * Selling without stock: 'block' stops the sale, 'warn' lets it go with a notice, 'allow' sells
+ * quietly (for businesses that don't keep count). Stock may go below zero with 'warn' and 'allow'.
+ */
+export const STOCK_POLICIES = ['block', 'warn', 'allow'] as const;
+export type StockPolicy = (typeof STOCK_POLICIES)[number];
+export const posSettingsSchema = z.object({
+  stockPolicy: z.enum(STOCK_POLICIES).default('block'),
+  categories: z.array(z.string().trim().min(1).max(60)).max(200).default([]),
+});
+export type PosSettings = z.infer<typeof posSettingsSchema>;
+export function posSettingsOf(settings: { pos?: Partial<PosSettings> } | null | undefined): PosSettings {
+  return { stockPolicy: settings?.pos?.stockPolicy ?? 'block', categories: settings?.pos?.categories ?? [] };
+}
+
 export const tenantSettingsSchema = z.object({
   page: pageSettingsSchema.optional(),
   rewards: rewardSettingsSchema.optional(),
@@ -466,6 +481,8 @@ export const tenantSettingsSchema = z.object({
     .optional(),
   /** Verified reviews on the booking page and the directory (default: shown) */
   reviews: z.object({ public: z.boolean() }).optional(),
+  /** Point of sale: what happens without stock, and the product categories to choose from */
+  pos: posSettingsSchema.optional(),
   /** Who gets a booking made with "Cualquiera disponible" */
   assignment: z
     .object({

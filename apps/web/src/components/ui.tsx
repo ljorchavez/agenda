@@ -235,3 +235,35 @@ export function usePaged<T>(rows: T[], size = 50) {
     pager: <Pager page={p} pageSize={size} total={rows.length} onPage={setPage} />,
   };
 }
+
+/** On/off switch (a real checkbox underneath, so forms, keyboards and screen readers work). */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  label,
+  testId,
+  className = '',
+  hideLabel,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  /** Text next to the switch; without it, used as the accessible name only */
+  label?: ReactNode;
+  testId?: string;
+  className?: string;
+  /** Keep the label for screen readers only */
+  hideLabel?: boolean;
+}) {
+  return (
+    <label className={`inline-flex items-center gap-2 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${className}`} data-testid={testId}>
+      <span className="relative inline-flex shrink-0">
+        <input type="checkbox" role="switch" className="peer sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={typeof label === 'string' ? label : undefined} />
+        <span className="h-5 w-9 rounded-full bg-slate-300 transition-colors peer-checked:bg-brand-600 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-400 peer-focus-visible:ring-offset-1" />
+        <span className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+      </span>
+      {label != null && !hideLabel && (typeof label === 'string' ? <span className="text-sm">{label}</span> : label)}
+    </label>
+  );
+}

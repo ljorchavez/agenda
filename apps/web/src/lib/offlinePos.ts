@@ -95,6 +95,9 @@ export function forgetCopies(tenantId: string) {
   }
   const me = get<{ tenant: { id: string } } | null>(k.me, null);
   if (me?.tenant.id === tenantId) put(k.me, null);
+  // The counter's location is chosen again on the next sign-in
+  put(k.location(tenantId), null);
+  notify();
 }
 
 export const markOnline = (tenantId: string) => put(k.online(tenantId), Date.now());
@@ -115,7 +118,10 @@ export const saveCatalog = (tenantId: string, locationId: string, products: Prod
 export const loadCatalog = (tenantId: string, locationId: string) => get<ProductDto[] | null>(k.catalog(tenantId, locationId), null);
 export const saveHeader = (tenantId: string, locationId: string, h: PosHeaderDto) => put(k.header(tenantId, locationId), h);
 export const loadHeader = (tenantId: string, locationId: string) => get<PosHeaderDto | null>(k.header(tenantId, locationId), null);
-export const saveLocation = (tenantId: string, locationId: string) => put(k.location(tenantId), locationId);
+export const saveLocation = (tenantId: string, locationId: string) => {
+  put(k.location(tenantId), locationId);
+  notify();
+};
 export const loadLocation = (tenantId: string) => get<string>(k.location(tenantId), '');
 
 /** Keeps the register's copy of stock roughly right after an offline sale. */

@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import {
   isHealthType,
+  posSettingsOf,
+  posSettingsSchema,
   productImportSchema,
   productInputSchema,
   saleCreateSchema,
@@ -9,6 +12,7 @@ import {
   stockAdjustSchema,
   type PosHeaderDto,
   type ProductImportResult,
+  type TenantSettings,
   type ProductDto,
   type SaleDto,
   type SaleTicketDto,
@@ -231,6 +235,41 @@ posRoutes.post('/products/import', requireBusinessManager, async (c) => {
   return c.json({ ...result, applied: true });
 });
 
+/** Point-of-sale settings: what happens without stock, and the category list. */
+posRoutes.get('/pos/settings', async (c) => {
+  const t = await getDb().query.tenants.findFirst({ where: eq(tenants.id, c.get('tenantId')), columns: { settings: true } });
+  return c.json(posSettingsOf(t?.settings as TenantSettings | null));
+});
+
+posRoutes.put('/pos/settings', requireBusinessManager, async (c) => {
+  const input = posSettingsSchema.parse(await c.req.json());
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const categories = [...new Map(input.categories.map((x) => [x.toLocaleLowerCase('es'), x])).values()].sort((a, b) => a.localeCompare(b, 'es'));
+  const value = { stockPolicy: input.stockPolicy, categories };
+  await db.execute(sql`update tenants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{pos}', ${JSON.stringify(value)}::jsonb), updated_at = now() where id = ${tenantId}`);
+  return c.json(value);
+});
+
+/** Renames a category on every product (and in the list); `to: null` takes it off them. */
+posRoutes.post('/products/categories/rename', requireBusinessManager, async (c) => {
+  const input = z.object({ from: z.string().trim().min(1).max(60), to: z.string().trim().min(1).max(60).nullable() }).parse(await c.req.json());
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const changed = await db
+    .update(products)
+    .set({ category: input.to, updatedAt: new Date() })
+    .where(and(eq(products.tenantId, tenantId), sql`lower(${products.category}) = lower(${input.from})`))
+    .returning({ id: products.id });
+  const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { settings: true } });
+  const cur = posSettingsOf(t?.settings as TenantSettings | null);
+  const list = cur.categories.filter((x) => x.toLocaleLowerCase('es') !== input.from.toLocaleLowerCase('es'));
+  if (input.to && !list.some((x) => x.toLocaleLowerCase('es') === input.to!.toLocaleLowerCase('es'))) list.push(input.to);
+  list.sort((a, b) => a.localeCompare(b, 'es'));
+  await db.execute(sql`update tenants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{pos}', ${JSON.stringify({ ...cur, categories: list })}::jsonb), updated_at = now() where id = ${tenantId}`);
+  return c.json({ products: changed.length, categories: list });
+});
+
 /** Sold products stay in the history; the catalog item is just hidden. */
 posRoutes.delete('/products/:id', requireBusinessManager, async (c) => {
   const db = getDb();
@@ -381,6 +420,9 @@ posRoutes.post('/sales', async (c) => {
   await assertFeature(db, tenantId, 'cash');
   const locationId = (await locationForWrite(db, c, input.locationId, { create: true }))!;
   const offline = Boolean(input.offline);
+  const owner = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { settings: true } });
+  // The business decides: stop the sale, or sell and let stock go below zero
+  const blockNoStock = posSettingsOf(owner?.settings as TenantSettings | null).stockPolicy === 'block';
   const customer = input.customerId
     ? await db.query.customers.findFirst({ where: and(eq(customers.id, input.customerId), eq(customers.tenantId, tenantId)) })
     : null;
@@ -429,7 +471,7 @@ posRoutes.post('/sales', async (c) => {
         if (!p?.trackStock) continue;
         const left = await moveStock(t, { tenantId, productId: p.id, locationId, change: -it.qty, reason: 'sale', saleId: s!.id, userId: uid, userName: name });
         // Offline the money was already taken: stock may go below zero (shown to fix later)
-        if (left < 0 && !offline) throw new AppError(409, 'insufficient_stock', `Not enough ${p.name}`, { productId: p.id, name: p.name, available: left + it.qty });
+        if (left < 0 && !offline && blockNoStock) throw new AppError(409, 'insufficient_stock', `Not enough ${p.name}`, { productId: p.id, name: p.name, available: left + it.qty });
       }
       const payer = customer?.id ?? (await walkInCustomer(t, tenantId));
       for (const p of input.payments.filter((x) => x.amountCents > 0)) {

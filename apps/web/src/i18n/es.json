@@ -1903,7 +1903,60 @@
         "bad_category": "Categoría muy larga"
       }
     },
-    "import_headers": "La primera fila debe tener los nombres de columna (Producto, Precio…). Usa la plantilla."
+    "import_headers": "La primera fila debe tener los nombres de columna (Producto, Precio…). Usa la plantilla.",
+    "location": {
+      "change": "Cambiar",
+      "title": "¿En qué sucursal estás vendiendo?",
+      "help": "Se queda guardada en esta computadora hasta que cierres sesión."
+    },
+    "removeLine": "Quitar {{name}}",
+    "searchOrScan": "Busca o escanea el código de barras",
+    "stockWarn": "{{name}}: solo hay {{n}} en existencia. Se vende y la existencia queda en negativo.",
+    "settings": {
+      "button": "Ajustes",
+      "title": "Ajustes del punto de venta",
+      "stockTitle": "Productos sin existencia",
+      "stockHelp": "Qué pasa al vender algo que el sistema marca en 0. Si no cargas tu inventario, elige «Vender sin avisar».",
+      "policy": {
+        "block": "No dejar vender",
+        "warn": "Vender con aviso",
+        "allow": "Vender sin avisar"
+      },
+      "policyHelp": {
+        "block": "El producto aparece agotado y no se puede cobrar más de lo que hay.",
+        "warn": "Se puede vender; el ticket muestra un aviso y la existencia queda en negativo para corregirla después.",
+        "allow": "Se vende siempre, sin avisos (la existencia puede quedar en negativo)."
+      },
+      "categoriesTitle": "Categorías de productos",
+      "categoriesHelp": "Aparecen como lista al crear o editar un producto y en el Excel. Renombrar o borrar una categoría la cambia en todos sus productos.",
+      "newCategory": "Nueva categoría",
+      "add": "Agregar",
+      "noCategories": "Aún no hay categorías.",
+      "productCount_one": "{{count}} producto",
+      "productCount_other": "{{count}} productos",
+      "rename": "Renombrar",
+      "deleteConfirm": "¿Borrar «{{name}}»? Sus {{count}} productos quedan sin categoría."
+    },
+    "fields": {
+      "pickCategory": "Elegir de la lista",
+      "newCategory": "Nueva categoría…",
+      "searchSat": "Buscar",
+      "satPlaceholder": "Ej. shampoo, agua, consulta",
+      "yours": "ya la usas",
+      "satNoCatalog": "Para buscar en todo el catálogo del SAT activa la facturación. Mientras, búscala en la página del SAT.",
+      "satSite": "Catálogo del SAT",
+      "skuLabel": "SKU / código de barras",
+      "suggestSku": "Sugerir: {{sku}}"
+    },
+    "scan": {
+      "title": "Escanear código de barras",
+      "button": "Escanear con la cámara",
+      "aim": "Apunta la cámara al código de barras.",
+      "unsupported": "Este navegador no puede leer códigos con la cámara. Usa un lector USB o Bluetooth, o escribe el código.",
+      "denied": "No pudimos usar la cámara. Revisa el permiso del navegador.",
+      "notFound": "Ningún producto tiene el código «{{code}}». Agrégalo como SKU en Productos.",
+      "noStock": "{{name}} está agotado."
+    }
   },
   "ticket": {
     "ticket": "Ticket",
@@ -2005,10 +2058,11 @@
   },
   "columns": {
     "button": "Columnas",
-    "help": "Muestra, oculta y ordena las columnas.",
+    "help": "Arrastra ⠿ para ordenar y usa el interruptor para mostrar u ocultar.",
     "up": "Subir",
     "down": "Bajar",
     "reset": "Restablecer",
-    "actions": "Acciones"
+    "actions": "Acciones",
+    "drag": "Arrastra para mover «{{name}}»"
   }
 }
