@@ -321,13 +321,12 @@ export function PosTab() {
       setScanMsg({ text: t('pos.scan.notFound', { code }), code });
       return false;
     }
-    if (m) setMult(m[1]!);
     if (p.trackStock && p.stock <= 0 && stockPolicy === 'block' && !(offlineNow && reg.on)) {
       setScanMsg({ text: t('pos.scan.noStock', { name: p.name }) });
       return true;
     }
     setScanMsg(null);
-    add(p);
+    add(p, m ? Math.max(1, Number(m[1])) : undefined);
     return true;
   };
   useScannerInput(addByCode, enabled);
