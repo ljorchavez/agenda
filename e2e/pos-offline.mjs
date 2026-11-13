@@ -45,7 +45,7 @@ await products.getByRole('button', { name: /Gel fijador/ }).click();
 await products.getByRole('button', { name: /Gel fijador/ }).click();
 ok('first customer: two gels on the ticket', /180/.test(await total()), await total());
 await page.getByTestId('pos-new-ticket').click();
-ok('next customer opens a second, empty ticket', (await tabs.count()) === 2 && /0\.00/.test(await total()), `${await tabs.count()} ${await total()}`);
+ok('next customer opens a second, empty ticket', (await tabs.count()) === 2 && /^\$0(\.00)?$/.test(await total()), `${await tabs.count()} ${await total()}`);
 ok('the first ticket waits with its amount', /Cliente 1 · \$180/.test((await tabs.nth(0).textContent()) ?? ''), (await tabs.nth(0).textContent()) ?? '');
 await products.getByRole('button', { name: /Agua natural/ }).click();
 await page.getByTestId('pos-received').fill('20');
@@ -62,7 +62,7 @@ await page.getByTestId('pos-new-ticket').click();
 await page.getByTestId('pos-ticket-discard').first().click();
 ok('discarding a full ticket asks to confirm', (await page.getByTestId('pos-ticket-discard-yes').count()) === 1);
 await page.getByTestId('pos-ticket-discard-yes').click();
-ok('confirmed: only the empty ticket stays', (await tabs.count()) === 1 && /0\.00/.test(await total()), await total());
+ok('confirmed: only the empty ticket stays', (await tabs.count()) === 1 && /^\$0(\.00)?$/.test(await total()), await total());
 
 // ---- Without internet ----
 await page.getByTestId('pos-register').check();
@@ -76,10 +76,15 @@ await products.getByRole('button', { name: /Gel fijador/ }).click();
 await page.getByTestId('pos-method-card').click();
 await page.getByTestId('pos-charge').click();
 await page.getByTestId('pos-done-offline').waitFor({ timeout: 10000 }).catch(() => {});
-ok('offline sale saved on the computer', await page.getByTestId('pos-done-offline').isVisible().catch(() => false));
+ok('offline sale saved on the computer', await page.getByTestId('pos-done-offline').isVisible().catch(() => false), (await page.getByTestId('pos-ticket').textContent().catch(() => ''))?.slice(-300));
 const doneTitle = (await page.locator('[role=dialog] h2, [role=dialog] h3').first().textContent().catch(() => '')) ?? '';
 ok('with a provisional number', /P-0001/.test(doneTitle), doneTitle);
-const [ticketPage] = await Promise.all([ctx.waitForEvent('page'), page.getByTestId('pos-print').click()]);
+const [ticketPage] = await Promise.all([ctx.waitForEvent('page', { timeout: 10000 }), page.getByTestId('pos-print').click({ timeout: 5000 })]).catch(() => [null]);
+if (!ticketPage) {
+  console.log('no ticket window; stopping');
+  await browser.close();
+  process.exit(1);
+}
 await ticketPage.getByTestId('ticket').waitFor({ timeout: 10000 }).catch(() => {});
 const ticketText = (await ticketPage.getByTestId('ticket').textContent().catch(() => '')) ?? '';
 ok('offline ticket prints from the computer', ticketText.includes('Folio provisional P-0001') && ticketText.includes('Gel fijador') && ticketText.includes(`Abarrotes ${run}`), ticketText.slice(0, 160));
