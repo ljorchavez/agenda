@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import type { SaleTicketDto } from '@agenda/shared';
 import { api } from '../lib/api';
+import { findPendingAnywhere, loadHeader } from '../lib/offlinePos';
 import { money } from '../lib/format';
 import { ErrorText, Loading } from '../components/ui';
 
@@ -18,24 +19,61 @@ export const ticketWidth = (): 58 | 80 => {
 };
 
 /** Opens a sale's ticket in a new window (optionally printing it right away). */
-export function openTicket(saleId: string, opts: { print?: boolean; changeCents?: number; win?: Window | null } = {}) {
+export function openTicket(saleId: string, opts: { print?: boolean; changeCents?: number; win?: Window | null; local?: boolean } = {}) {
   const qs = new URLSearchParams();
   if (opts.print) qs.set('print', '1');
   if (opts.changeCents) qs.set('change', String(opts.changeCents));
   const query = qs.toString();
-  const url = `/ticket/${saleId}${query ? `?${query}` : ''}`;
+  const url = `/ticket/${opts.local ? 'local/' : ''}${saleId}${query ? `?${query}` : ''}`;
   if (opts.win) opts.win.location.href = url;
   else window.open(url, '_blank');
 }
 
 /** Ticket for a thermal printer (58/80 mm), printed with the browser's print dialog. */
 export function TicketPage() {
-  const { t, i18n } = useTranslation();
   const { id } = useParams();
+  const q = useQuery({ queryKey: ['ticket', id], queryFn: () => api<SaleTicketDto>(`/sales/${id}/ticket`) });
+  if (q.isLoading) return <Loading />;
+  if (!q.data) return <div className="p-4"><ErrorText error={q.error} /></div>;
+  return <TicketView data={q.data} />;
+}
+
+/** Ticket of a sale charged without internet: printed from this device's copy. */
+export function LocalTicketPage() {
+  const { t } = useTranslation();
+  const { id = '' } = useParams();
+  const [params] = useSearchParams();
+  const found = findPendingAnywhere(id);
+  // Already uploaded: the real ticket, with its number
+  if (found?.saleId && !found.sale) {
+    window.location.replace(`/ticket/${found.saleId}?${params.toString()}`);
+    return <Loading />;
+  }
+  const p = found?.sale;
+  const header = p && found ? loadHeader(found.tenantId, p.locationId) : null;
+  if (!p || !found) return <div className="p-4 text-sm text-slate-600">{t('pos.offline.ticketMissing')}</div>;
+  const data: SaleTicketDto = {
+    business: header?.business ?? { name: '', legalName: null, rfc: null, address: null, phone: null },
+    locationName: header?.locationName ?? null,
+    multiLocation: header?.multiLocation ?? false,
+    timezone: header?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    invoicing: header?.invoicing ?? false,
+    sale: {
+      id: p.clientId, number: 0, locationId: p.locationId, locationName: header?.locationName ?? null, customerId: null, customerName: p.customerName,
+      payerCustomerId: null, items: p.items.map((i) => ({ ...i, productId: null, iva: '16', satKey: null })), totalCents: p.totalCents,
+      payments: p.payments.map((x, i) => ({ id: String(i), ...x })), status: 'paid', notes: null, createdByName: p.createdByName, createdAt: p.soldAt,
+      offline: true, invoice: null,
+    },
+  };
+  return <TicketView data={data} provisional={p.localNo} />;
+}
+
+function TicketView({ data, provisional }: { data: SaleTicketDto; provisional?: string }) {
+  const { t, i18n } = useTranslation();
   const [params] = useSearchParams();
   const [width, setWidth] = useState<58 | 80>(ticketWidth);
   const printed = useRef(false);
-  const q = useQuery({ queryKey: ['ticket', id], queryFn: () => api<SaleTicketDto>(`/sales/${id}/ticket`) });
+  const q = { data };
   const change = Number(params.get('change') ?? 0);
 
   useEffect(() => {
@@ -55,8 +93,6 @@ export function TicketPage() {
     }
   };
 
-  if (q.isLoading) return <Loading />;
-  if (!q.data) return <div className="p-4"><ErrorText error={q.error} /></div>;
   const { business: b, sale: s } = q.data;
   const when = new Intl.DateTimeFormat(i18n.language.startsWith('en') ? 'en-US' : 'es-MX', {
     timeZone: q.data.timezone,
@@ -96,7 +132,8 @@ export function TicketPage() {
           {q.data.multiLocation && q.data.locationName && <div>{t('ticket.location')}: {q.data.locationName}</div>}
         </div>
         {hr}
-        <Row left={`${t('ticket.sale')} #${s.number}`} right={when} />
+        <Row left={provisional ? `${t('ticket.provisional')} ${provisional}` : `${t('ticket.sale')} #${s.number}`} right={when} />
+        {provisional && <div>{t('ticket.offlineNote')}</div>}
         {s.createdByName && <div>{t('ticket.servedBy')}: {s.createdByName}</div>}
         {s.customerName && <div>{t('ticket.customer')}: {s.customerName}</div>}
         {s.status === 'canceled' && <div className="my-1 text-center text-[13px] font-bold">*** {t('ticket.canceled')} ***</div>}

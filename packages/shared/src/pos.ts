@@ -109,6 +109,11 @@ export const saleCreateSchema = z.object({
     .min(1)
     .max(3),
   notes: optText(300),
+  /** Made by the device: the same sale sent twice (a retry after a cut) is saved once */
+  clientId: z.string().uuid().optional(),
+  /** Charged without internet and sent later: stock may go below zero, date is soldAt */
+  offline: z.boolean().optional(),
+  soldAt: z.string().datetime().optional(),
 });
 export type SaleCreateInput = z.input<typeof saleCreateSchema>;
 
@@ -138,6 +143,8 @@ export interface SaleDto {
   notes: string | null;
   createdByName: string | null;
   createdAt: string;
+  /** Charged without internet and uploaded later */
+  offline: boolean;
   /** Its valid invoice, if any */
   invoice: { id: string; series: string | null; folio: number | null; test: boolean } | null;
 }
@@ -156,3 +163,6 @@ export interface SaleTicketDto {
   invoicing: boolean;
   sale: SaleDto;
 }
+
+/** The ticket's header for a location, kept on the device to print without internet. */
+export type PosHeaderDto = Omit<SaleTicketDto, 'sale'>;

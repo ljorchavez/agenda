@@ -1852,6 +1852,42 @@ d('API (integration)', () => {
     expect((await call('POST', '/sales', { items: [{ productId: med.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 12000 }] }, other)).status).toBe(404);
   });
 
+  it('point of sale without internet: retries saved once, stock may go negative, sale keeps its time', async () => {
+    const reg = (await call('POST', '/auth/register', { businessName: 'Tienda Offline', businessType: 'barbershop', name: 'Dueña Offline', email: 'offline@test.mx', password: 'password123' })).body;
+    const tok = reg.token;
+    await call('PUT', '/tenant/plan', { plan: 'standard' }, tok);
+    const gel = (await call('POST', '/products', { name: 'Gel', priceCents: 9000, initialStock: 1 }, tok)).body;
+    const header = (await call('GET', '/pos/header', undefined, tok)).body;
+    expect(header).toMatchObject({ business: { name: 'Tienda Offline' }, multiLocation: false });
+
+    const clientId = '7f3a2c1e-9b4d-4e6f-8a1b-2c3d4e5f6a7b';
+    const soldAt = new Date(Date.now() - 3 * 3600_000).toISOString();
+    const body = { clientId, offline: true, soldAt, items: [{ productId: gel.id, name: 'Gel', qty: 3, unitCents: 8500 }], payments: [{ method: 'cash', amountCents: 25500 }] };
+    const first = await call('POST', '/sales', body, tok);
+    expect(first.status).toBe(201);
+    // The price charged at the counter, the time it was charged, marked offline
+    expect(first.body).toMatchObject({ number: 1, totalCents: 25500, offline: true, createdAt: soldAt });
+    // The register lost the answer and sends it again: same sale, stock moved once
+    const again = await call('POST', '/sales', body, tok);
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ id: first.body.id, number: 1 });
+    const stock = (await call('GET', '/products', undefined, tok)).body.find((x: { id: string }) => x.id === gel.id).stock;
+    expect(stock).toBe(-2);
+    expect((await call('GET', '/sales', undefined, tok)).body).toHaveLength(1);
+    // Online sales still can't sell what isn't there
+    expect((await call('POST', '/sales', { items: [{ productId: gel.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 9000 }] }, tok)).body.error).toBe('insufficient_stock');
+    // A product deleted while offline: the sale is kept with the ticket's name and price
+    const pomada = (await call('POST', '/products', { name: 'Pomada', priceCents: 15000, trackStock: false }, tok)).body;
+    await call('DELETE', `/products/${pomada.id}`, undefined, tok);
+    const kept = await call('POST', '/sales', { clientId: '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d', offline: true, soldAt: '2020-01-01T10:00:00.000Z', items: [{ productId: pomada.id, name: 'Pomada', qty: 1, unitCents: 15000 }], payments: [{ method: 'card', amountCents: 15000 }] }, tok);
+    expect(kept.status).toBe(201);
+    expect(kept.body.items[0]).toMatchObject({ productId: null, name: 'Pomada', totalCents: 15000 });
+    // An unbelievable device clock falls back to the upload time
+    expect(Date.now() - Date.parse(kept.body.createdAt)).toBeLessThan(60_000);
+    // Online, a deleted product is still refused
+    expect((await call('POST', '/sales', { items: [{ productId: pomada.id, qty: 1 }], payments: [{ method: 'cash', amountCents: 15000 }] }, tok)).status).toBe(404);
+  });
+
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Consultorio Prueba', businessType: 'medical', name: 'Dra. Ana Ruiz', email: 'nom004@test.mx', password: 'password123',

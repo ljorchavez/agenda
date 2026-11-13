@@ -5,6 +5,7 @@ import {
   saleCreateSchema,
   saleTotal,
   stockAdjustSchema,
+  type PosHeaderDto,
   type ProductDto,
   type SaleDto,
   type SaleTicketDto,
@@ -257,6 +258,7 @@ async function saleDtos(db: Db, tenantId: string, rows: (Sale & { locationName: 
       notes: s.notes,
       createdByName: s.createdByName,
       createdAt: s.createdAt.toISOString(),
+      offline: s.offline,
       invoice: inv ? { id: inv.id, series: inv.series, folio: inv.folio, test: inv.test } : null,
     };
   });
@@ -292,16 +294,38 @@ posRoutes.get('/sales', async (c) => {
   return c.json(await saleDtos(db, tenantId, rows.map((r) => ({ ...r.s, locationName: r.locationName, customerName: r.customerName }))));
 });
 
+/** The sale this device already sent (a retry after a cut): answered as if just made. */
+async function existingSale(db: Db, tenantId: string, clientId: string) {
+  const [row] = await saleSelect(db).where(and(eq(sales.tenantId, tenantId), eq(sales.clientId, clientId))).limit(1);
+  if (!row) return null;
+  const [dto] = await saleDtos(db, tenantId, [{ ...row.s, locationName: row.locationName, customerName: row.customerName }]);
+  return dto!;
+}
+
+/** When an offline sale really happened: its device time, if believable (last 7 days, not ahead). */
+function saleDate(input: { offline?: boolean; soldAt?: string }): Date {
+  const now = Date.now();
+  if (!input.offline || !input.soldAt) return new Date(now);
+  const t = Date.parse(input.soldAt);
+  return t > now - 7 * 86_400_000 && t < now + 5 * 60_000 ? new Date(t) : new Date(now);
+}
+
 posRoutes.post('/sales', async (c) => {
   const input = saleCreateSchema.parse(await c.req.json());
   const db = getDb();
   const tenantId = c.get('tenantId');
+  if (input.clientId) {
+    const prev = await existingSale(db, tenantId, input.clientId);
+    if (prev) return c.json(prev, 200);
+  }
   await assertFeature(db, tenantId, 'cash');
   const locationId = (await locationForWrite(db, c, input.locationId, { create: true }))!;
+  const offline = Boolean(input.offline);
   const customer = input.customerId
     ? await db.query.customers.findFirst({ where: and(eq(customers.id, input.customerId), eq(customers.tenantId, tenantId)) })
     : null;
-  if (input.customerId && !customer) throw notFound('customer');
+  // A customer deleted while the register was offline doesn't block the sale
+  if (input.customerId && !customer && !offline) throw notFound('customer');
 
   const productIds = [...new Set(input.items.map((i) => i.productId).filter((x): x is string => Boolean(x)))];
   const prods = productIds.length ? await db.select().from(products).where(and(eq(products.tenantId, tenantId), inArray(products.id, productIds))) : [];
@@ -309,9 +333,13 @@ posRoutes.post('/sales', async (c) => {
   const items: SaleItem[] = input.items.map((i) => {
     if (i.productId) {
       const p = byId.get(i.productId);
-      if (!p || !p.active) throw notFound('product');
-      const unit = i.unitCents ?? p.priceCents;
-      return { productId: p.id, name: p.name, qty: i.qty, unitCents: unit, totalCents: unit * i.qty, iva: p.iva, satKey: p.satKey };
+      if (p && (p.active || offline)) {
+        // The price on the ticket is the one charged, even if it changed in the meantime
+        const unit = i.unitCents ?? p.priceCents;
+        return { productId: p.id, name: p.name, qty: i.qty, unitCents: unit, totalCents: unit * i.qty, iva: p.iva, satKey: p.satKey };
+      }
+      // Sold offline but deleted since: keep the sale as a free line with what the ticket said
+      if (!offline || !i.name || i.unitCents == null) throw notFound('product');
     }
     return { productId: null, name: i.name!, qty: i.qty, unitCents: i.unitCents!, totalCents: i.unitCents! * i.qty, iva: '16', satKey: null };
   });
@@ -321,33 +349,73 @@ posRoutes.post('/sales', async (c) => {
 
   const uid = c.get('userId');
   const name = await userName(db, uid);
-  const sale = await db.transaction(async (tx) => {
-    const t = tx as unknown as Tx;
-    // One number per business, in order
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'sales:' + tenantId}))`);
-    const next = await tx.execute<{ n: number }>(sql`select coalesce(max(number), 0) + 1 as n from sales where tenant_id = ${tenantId}`);
-    const [s] = await tx
-      .insert(sales)
-      .values({ tenantId, locationId, number: Number(next.rows[0]!.n), customerId: customer?.id ?? null, items, totalCents: total, notes: input.notes, createdBy: uid, createdByName: name })
-      .returning();
-    for (const it of items) {
-      const p = it.productId ? byId.get(it.productId) : null;
-      if (!p?.trackStock) continue;
-      const left = await moveStock(t, { tenantId, productId: p.id, locationId, change: -it.qty, reason: 'sale', saleId: s!.id, userId: uid, userName: name });
-      if (left < 0) throw new AppError(409, 'insufficient_stock', `Not enough ${p.name}`, { productId: p.id, name: p.name, available: left + it.qty });
+  const when = saleDate(input);
+  let sale: Sale;
+  try {
+    sale = await db.transaction(async (tx) => {
+      const t = tx as unknown as Tx;
+      // One number per business, in order
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'sales:' + tenantId}))`);
+      const next = await tx.execute<{ n: number }>(sql`select coalesce(max(number), 0) + 1 as n from sales where tenant_id = ${tenantId}`);
+      const [s] = await tx
+        .insert(sales)
+        .values({
+          tenantId, locationId, number: Number(next.rows[0]!.n), customerId: customer?.id ?? null, items, totalCents: total, notes: input.notes,
+          createdBy: uid, createdByName: name, createdAt: when, clientId: input.clientId ?? null, offline,
+        })
+        .returning();
+      for (const it of items) {
+        const p = it.productId ? byId.get(it.productId) : null;
+        if (!p?.trackStock) continue;
+        const left = await moveStock(t, { tenantId, productId: p.id, locationId, change: -it.qty, reason: 'sale', saleId: s!.id, userId: uid, userName: name });
+        // Offline the money was already taken: stock may go below zero (shown to fix later)
+        if (left < 0 && !offline) throw new AppError(409, 'insufficient_stock', `Not enough ${p.name}`, { productId: p.id, name: p.name, available: left + it.qty });
+      }
+      const payer = customer?.id ?? (await walkInCustomer(t, tenantId));
+      for (const p of input.payments.filter((x) => x.amountCents > 0)) {
+        await tx.insert(payments).values({
+          tenantId, customerId: payer, amountCents: p.amountCents, method: p.method, status: 'paid', paidAt: when,
+          locationId, saleId: s!.id, notes: `Venta #${s!.number}`,
+        });
+      }
+      return s!;
+    });
+  } catch (e) {
+    // Two copies of the same sale arrived at once: the other one won
+    if (input.clientId && /sales_tenant_client_idx|duplicate key/.test(String((e as { message?: string }).message ?? e))) {
+      const prev = await existingSale(db, tenantId, input.clientId);
+      if (prev) return c.json(prev, 200);
     }
-    const payer = customer?.id ?? (await walkInCustomer(t, tenantId));
-    for (const p of input.payments.filter((x) => x.amountCents > 0)) {
-      await tx.insert(payments).values({
-        tenantId, customerId: payer, amountCents: p.amountCents, method: p.method, status: 'paid', paidAt: new Date(),
-        locationId, saleId: s!.id, notes: `Venta #${s!.number}`,
-      });
-    }
-    return s!;
-  });
+    throw e;
+  }
   const loc = await db.query.locations.findFirst({ where: eq(locations.id, locationId), columns: { name: true } });
   const [dto] = await saleDtos(db, tenantId, [{ ...sale, locationName: loc?.name ?? null, customerName: customer?.name ?? null }]);
   return c.json(dto, 201);
+});
+
+/** Business data for the location's tickets: the register keeps it to print without internet. */
+async function ticketHeader(db: Db, tenantId: string, locationId: string): Promise<PosHeaderDto> {
+  const t = (await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
+  const loc = await db.query.locations.findFirst({ where: and(eq(locations.id, locationId), eq(locations.tenantId, tenantId)) });
+  const active = await db.select({ id: locations.id }).from(locations).where(and(eq(locations.tenantId, tenantId), eq(locations.active, true)));
+  // The location's own address, else the business profile's
+  const src = loc && (loc.address || !loc.isPrimary) ? loc : t;
+  const address = [src.address, src.neighborhood, src.city, src.state].filter(Boolean).join(', ') || null;
+  const inv = t.settings.invoicing;
+  return {
+    business: { name: t.name, legalName: inv?.legalName || null, rfc: inv?.rfc || null, address, phone: loc?.phone ?? t.phone },
+    locationName: loc?.name ?? null,
+    multiLocation: active.length > 1,
+    timezone: t.timezone,
+    invoicing: Boolean(t.invoicingEnc),
+  };
+}
+
+posRoutes.get('/pos/header', async (c) => {
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  const locationId = (await locationForWrite(db, c, c.req.query('locationId') || undefined, { create: true }))!;
+  return c.json(await ticketHeader(db, tenantId, locationId));
 });
 
 /** Data for the printed ticket of a sale. */
@@ -358,20 +426,9 @@ posRoutes.get('/sales/:id/ticket', async (c) => {
   const [row] = await saleSelect(db).where(and(eq(sales.id, c.req.param('id')), eq(sales.tenantId, tenantId))).limit(1);
   if (!row) throw notFound('sale');
   if (scope.personal && row.s.createdBy !== scope.userId) throw notFound('sale');
-  const t = (await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }))!;
-  const loc = await db.query.locations.findFirst({ where: eq(locations.id, row.s.locationId) });
-  const active = await db.select({ id: locations.id }).from(locations).where(and(eq(locations.tenantId, tenantId), eq(locations.active, true)));
-  // The location's own address, else the business profile's
-  const src = loc && (loc.address || !loc.isPrimary) ? loc : t;
-  const address = [src.address, src.neighborhood, src.city, src.state].filter(Boolean).join(', ') || null;
-  const inv = t.settings.invoicing;
   const [sale] = await saleDtos(db, tenantId, [{ ...row.s, locationName: row.locationName, customerName: row.customerName }]);
   const out: SaleTicketDto = {
-    business: { name: t.name, legalName: inv?.legalName || null, rfc: inv?.rfc || null, address, phone: loc?.phone ?? t.phone },
-    locationName: loc?.name ?? null,
-    multiLocation: active.length > 1,
-    timezone: t.timezone,
-    invoicing: Boolean(t.invoicingEnc),
+    ...(await ticketHeader(db, tenantId, row.s.locationId)),
     sale: sale!,
   };
   return c.json(out);

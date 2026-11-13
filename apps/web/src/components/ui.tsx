@@ -64,6 +64,8 @@ export function ErrorText({ error, ns }: { error: unknown; ns?: string }) {
   const { t, i18n } = useTranslation();
   if (!error) return null;
   let msg = t('common.error');
+  // fetch() failed: no internet
+  if (error instanceof TypeError) msg = t('errors.network');
   if (error instanceof ApiError) {
     const key = ns ? `${ns}.${error.code}` : '';
     if (key && i18n.exists(key)) msg = t(key);

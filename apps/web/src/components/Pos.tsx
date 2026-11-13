@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -8,12 +8,42 @@ import {
   POS_METHODS,
   saleTotal,
   type PosMethod,
+  type BusinessSummary,
+  type PosHeaderDto,
   type ProductDto,
   type ProductInput,
   type SaleDto,
+  type SessionUser,
   type StockMoveDto,
+  type TenantDto,
 } from '@agenda/shared';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import {
+  addPending,
+  dropPending,
+  flushPending,
+  isNetworkError,
+  isRegister,
+  loadCatalog,
+  loadLocation,
+  loadTickets,
+  markOnline,
+  OFFLINE_MAX_MS,
+  offlineExpired,
+  recordSent,
+  retryPending,
+  saveCatalog,
+  saveHeader,
+  saveLocation,
+  saveSession,
+  saveTickets,
+  setRegister,
+  takeFromCatalog,
+  uuid,
+  type OpenTicket,
+  type PendingSale,
+} from '../lib/offlinePos';
+import { useOnline, useRegister } from '../lib/usePosOffline';
 import { useAccess, useAuth } from '../lib/auth';
 import { dateTime, money, toCents } from '../lib/format';
 import { useMyLocations } from '../lib/queries';
@@ -29,14 +59,20 @@ const useHealth = () => {
   return Boolean(tenant && isHealthType(tenant.businessType));
 };
 
-type Line = { key: string; productId: string | null; name: string; qty: number; unitCents: number; rx?: boolean; max?: number | null };
+type Line = OpenTicket['lines'][number];
+type Done = { sale: SaleDto | null; pending: PendingSale | null; changeCents: number };
 
 /** Location picker shared by the two tabs: owners with several locations choose; others use theirs. */
 function useLocationChoice() {
   const { locationId: own } = useAccess();
+  const { tenant } = useAuth();
   const locs = useMyLocations(own);
   const [loc, setLoc] = useState(own ?? '');
-  const locationId = loc || locs.list[0]?.id || '';
+  // Without internet the list doesn't load: the register's last location
+  const locationId = loc || locs.list[0]?.id || (tenant ? loadLocation(tenant.id) : '');
+  useEffect(() => {
+    if (tenant && locationId) saveLocation(tenant.id, locationId);
+  }, [tenant, locationId]);
   const picker =
     locs.multi && !own ? (
       <select aria-label="location" className="input !w-auto" value={locationId} onChange={(e) => setLoc(e.target.value)} data-testid="pos-location">
@@ -46,12 +82,73 @@ function useLocationChoice() {
   return { locationId, picker };
 }
 
-const useProducts = (locationId: string, all = false, enabled = true) =>
-  useQuery({
+const useProducts = (locationId: string, all = false, enabled = true) => {
+  const { tenant } = useAuth();
+  const register = isRegister(tenant?.id);
+  return useQuery({
     queryKey: ['products', locationId, all],
-    queryFn: () => api<ProductDto[]>(`/products?locationId=${locationId}${all ? '&all=1' : ''}`),
+    queryFn: async () => {
+      try {
+        const list = await api<ProductDto[]>(`/products?locationId=${locationId}${all ? '&all=1' : ''}`);
+        if (register && !all && tenant) {
+          saveCatalog(tenant.id, locationId, list);
+          markOnline(tenant.id);
+        }
+        return list;
+      } catch (e) {
+        // A register sells from its copy of the catalog while there's no internet
+        const copy = register && !all && tenant && isNetworkError(e) ? loadCatalog(tenant.id, locationId) : null;
+        if (copy) return copy;
+        throw e;
+      }
+    },
     enabled: enabled && Boolean(locationId),
   });
+};
+
+const newTicket = (): OpenTicket => ({ id: uuid(), lines: [], customerId: '', customerName: null, createdAt: new Date().toISOString() });
+
+/**
+ * Open tickets of a location: serve the next customer while another one decides. Kept on the
+ * device so a reload (or a cut) doesn't lose them.
+ */
+function useOpenTickets(tenantId: string | undefined, locationId: string) {
+  const load = () => {
+    const list = tenantId && locationId ? loadTickets(tenantId, locationId) : [];
+    return list.length ? list : [newTicket()];
+  };
+  const [tickets, setTickets] = useState<OpenTicket[]>(load);
+  const [activeId, setActiveId] = useState(() => tickets[0]!.id);
+  useEffect(() => {
+    const list = load();
+    setTickets(list);
+    setActiveId(list[0]!.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, locationId]);
+  const save = (list: OpenTicket[]) => {
+    setTickets(list);
+    if (tenantId && locationId) saveTickets(tenantId, locationId, list.filter((t) => t.lines.length || t.customerId));
+  };
+  const active = tickets.find((t) => t.id === activeId) ?? tickets[0]!;
+  return {
+    tickets,
+    active,
+    select: (id: string) => setActiveId(id),
+    update: (fn: (t: OpenTicket) => OpenTicket) => save(tickets.map((t) => (t.id === active.id ? fn(t) : t))),
+    add: () => {
+      const t = newTicket();
+      save([...tickets, t]);
+      setActiveId(t.id);
+    },
+    /** Takes a ticket away (charged or discarded) and moves to another one */
+    remove: (id: string) => {
+      const rest = tickets.filter((t) => t.id !== id);
+      const list = rest.length ? rest : [newTicket()];
+      save(list);
+      if (id === activeId || !rest.length) setActiveId(list[list.length - 1]!.id);
+    },
+  };
+}
 
 // ---------- Selling ----------
 
@@ -60,18 +157,26 @@ export function PosTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { manager } = useAccess();
+  const { user } = useAuth();
   const health = useHealth();
   const enabled = useFeature('cash');
   const { locationId, picker } = useLocationChoice();
+  const reg = useRegister();
+  const tenantId = reg.tenantId;
+  const online = useOnline();
   const products = useProducts(locationId, false, enabled);
+  const open = useOpenTickets(tenantId, locationId);
+  const lines = open.active.lines;
+  const customerId = open.active.customerId;
+  const setLines = (fn: (ls: Line[]) => Line[]) => open.update((tk) => ({ ...tk, lines: fn(tk.lines) }));
+  const setCustomerId = (id: string) => open.update((tk) => ({ ...tk, customerId: id }));
   const [q, setQ] = useState('');
-  const [lines, setLines] = useState<Line[]>([]);
-  const [customerId, setCustomerId] = useState('');
   const [method, setMethod] = useState<PosMethod>('cash');
   const [split, setSplit] = useState<{ method: PosMethod; amount: string } | null>(null);
   const [received, setReceived] = useState('');
   const [free, setFree] = useState<{ name: string; price: string } | null>(null);
-  const [done, setDone] = useState<{ sale: SaleDto; changeCents: number } | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
+  const [discard, setDiscard] = useState<string | null>(null);
   const [autoPrint, setAutoPrint] = useState(() => {
     try {
       return localStorage.getItem('agenda.pos.autoPrint') === '1';
@@ -93,6 +198,17 @@ export function PosTab() {
     queryFn: () => api<SaleDto[]>(`/sales?locationId=${locationId}&from=${new Date(`${today}T00:00:00`).toISOString()}`),
     enabled: enabled && Boolean(locationId),
   });
+  // The register keeps the ticket header (business name, address…) to print offline
+  useQuery({
+    queryKey: ['pos-header', locationId],
+    queryFn: async () => {
+      const h = await api<PosHeaderDto>(`/pos/header?locationId=${locationId}`);
+      if (tenantId) saveHeader(tenantId, locationId, h);
+      return h;
+    },
+    enabled: enabled && reg.on && online && Boolean(locationId),
+    staleTime: 10 * 60_000,
+  });
 
   const total = saleTotal(lines);
   const splitCents = split ? Math.min(toCents(split.amount || '0'), total) : 0;
@@ -112,30 +228,68 @@ export function PosTab() {
       return [...ls, { key: p.id, productId: p.id, name: p.name, qty: 1, unitCents: p.priceCents, rx: health && p.requiresPrescription, max: p.trackStock ? p.stock : null }];
     });
   const setQty = (key: string, qty: number) => setLines((ls) => (qty <= 0 ? ls.filter((l) => l.key !== key) : ls.map((l) => (l.key === key ? { ...l, qty } : l))));
-  const reset = () => {
-    setLines([]);
-    setCustomerId('');
+  const resetPayment = () => {
     setSplit(null);
     setReceived('');
     setMethod('cash');
   };
+  const switchTo = (id: string) => {
+    open.select(id);
+    resetPayment();
+    setDiscard(null);
+  };
 
   const charge = useMutation({
     // `win`: a window opened on the click (browsers block opening one later) for the ticket
-    mutationFn: (_win: Window | null) =>
-      api<SaleDto>('/sales', {
-        method: 'POST',
-        body: {
-          locationId,
-          customerId: customerId || null,
-          items: lines.map((l) => (l.productId ? { productId: l.productId, qty: l.qty, unitCents: l.unitCents } : { name: l.name, qty: l.qty, unitCents: l.unitCents })),
-          payments: pays.filter((p) => p.amountCents > 0 || pays.length === 1),
-        },
-      }),
-    onSuccess: (sale, win) => {
-      if (win) openTicket(sale.id, { print: true, changeCents: Math.max(changeCents, 0), win });
-      setDone({ sale, changeCents: Math.max(changeCents, 0) });
-      reset();
+    mutationFn: async (_win: Window | null): Promise<Done> => {
+      const clientId = uuid();
+      const soldAt = new Date().toISOString();
+      const payments = pays.filter((p) => p.amountCents > 0 || pays.length === 1);
+      const body = {
+        locationId,
+        customerId: customerId || null,
+        items: lines.map((l) => (l.productId ? { productId: l.productId, name: l.name, qty: l.qty, unitCents: l.unitCents } : { name: l.name, qty: l.qty, unitCents: l.unitCents })),
+        payments,
+        clientId,
+      };
+      const done = { sale: null, pending: null, changeCents: Math.max(changeCents, 0) };
+      if (!reg.on || !tenantId) return { ...done, sale: await api<SaleDto>('/sales', { method: 'POST', body }) };
+      // A register writes the sale down first: if the answer is lost, it's uploaded later
+      const pending = addPending(tenantId, {
+        clientId, locationId, soldAt, body,
+        items: lines.map((l) => ({ name: l.name, qty: l.qty, unitCents: l.unitCents, totalCents: l.qty * l.unitCents })),
+        payments, totalCents: total, customerName: null, createdByName: user?.name ?? null,
+      });
+      const keepOffline = (): Done => {
+        if (offlineExpired(tenantId)) {
+          dropPending(tenantId, clientId);
+          throw new ApiError(0, 'offline_expired');
+        }
+        takeFromCatalog(tenantId, locationId, lines);
+        void qc.invalidateQueries({ queryKey: ['products'] });
+        return { ...done, pending };
+      };
+      if (!navigator.onLine) return keepOffline();
+      try {
+        const sale = await api<SaleDto>('/sales', { method: 'POST', body });
+        recordSent(tenantId, clientId, sale.id);
+        dropPending(tenantId, clientId);
+        markOnline(tenantId);
+        return { ...done, sale };
+      } catch (e) {
+        if (isNetworkError(e)) return keepOffline();
+        dropPending(tenantId, clientId);
+        throw e;
+      }
+    },
+    onSuccess: (d, win) => {
+      if (win) {
+        if (d.sale) openTicket(d.sale.id, { print: true, changeCents: d.changeCents, win });
+        else if (d.pending) openTicket(d.pending.clientId, { print: true, changeCents: d.changeCents, win, local: true });
+      }
+      setDone(d);
+      open.remove(open.active.id);
+      resetPayment();
       void qc.invalidateQueries({ queryKey: ['products'] });
       void qc.invalidateQueries({ queryKey: ['sales'] });
       void qc.invalidateQueries({ queryKey: ['payments'] });
@@ -144,9 +298,11 @@ export function PosTab() {
   });
 
   if (!enabled) return <UpgradeNote feature="cash" />;
-  const shortStock = lines.find((l) => l.max != null && l.qty > l.max);
+  const shortStock = !online && reg.on ? null : lines.find((l) => l.max != null && l.qty > l.max);
+  const offlineNow = !online || (reg.on && products.isError);
   return (
     <div className="grid items-start gap-6 lg:grid-cols-5" data-testid="pos-tab">
+      <OfflineBar online={online} register={reg.on} pending={reg.pending} tenantId={tenantId} />
       <section className="card space-y-3 lg:col-span-3">
         <div className="flex flex-wrap items-center gap-2">
           <input className="input flex-1" placeholder={t('pos.search')} value={q} onChange={(e) => setQ(e.target.value)} data-testid="pos-search" />
@@ -155,12 +311,15 @@ export function PosTab() {
         </div>
         {products.isLoading ? (
           <Loading />
+        ) : products.isError && !products.data ? (
+          <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">{reg.on ? t('pos.offline.noCatalog') : t('pos.offline.needRegister')}</p>
         ) : filtered.length === 0 ? (
           <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">{(products.data ?? []).length ? t('pos.noMatch') : t('pos.noProducts')}</p>
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="pos-products">
             {filtered.map((p) => {
-              const out = p.trackStock && p.stock <= 0;
+              // Offline the copy of stock may be behind: let the register sell (it's checked on upload)
+              const out = p.trackStock && p.stock <= 0 && !(offlineNow && reg.on);
               return (
                 <li key={p.id}>
                   <button
@@ -171,8 +330,8 @@ export function PosTab() {
                   >
                     <span className="font-medium text-slate-900">{p.name}</span>
                     <span className="text-sm font-semibold text-brand-700">{money(p.priceCents)}</span>
-                    <span className={`text-xs ${out ? 'text-rose-700' : p.low ? 'text-amber-700' : 'text-slate-500'}`}>
-                      {p.trackStock ? (out ? t('pos.outOfStock') : t('pos.inStock', { n: p.stock })) : t('pos.noTracking')}
+                    <span className={`text-xs ${p.trackStock && p.stock <= 0 ? 'text-rose-700' : p.low ? 'text-amber-700' : 'text-slate-500'}`}>
+                      {p.trackStock ? (p.stock <= 0 ? t('pos.outOfStock') : t('pos.inStock', { n: p.stock })) : t('pos.noTracking')}
                       {health && p.requiresPrescription ? ` · ${t('pos.rx')}` : ''}
                     </span>
                   </button>
@@ -184,9 +343,35 @@ export function PosTab() {
       </section>
 
       <section className="card space-y-3 lg:col-span-2" data-testid="pos-ticket">
-        <h2 className="font-semibold">🧾 {t('pos.ticket')}</h2>
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="pos-tickets">
+          {open.tickets.map((tk, i) => {
+            const isActive = tk.id === open.active.id;
+            const sum = saleTotal(tk.lines);
+            return (
+              <span key={tk.id} className={`inline-flex items-center rounded-lg border text-sm ${isActive ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-700'}`}>
+                <button type="button" className="px-2.5 py-1 font-medium" onClick={() => switchTo(tk.id)} aria-pressed={isActive} data-testid="pos-ticket-tab">
+                  {t('pos.tickets.label', { n: i + 1 })}
+                  {tk.lines.length ? ` · ${money(sum)}` : ''}
+                </button>
+                {open.tickets.length > 1 &&
+                  (discard === tk.id ? (
+                    <button type="button" className="px-2 py-1 text-xs font-semibold text-rose-700" onClick={() => { open.remove(tk.id); setDiscard(null); resetPayment(); }} data-testid="pos-ticket-discard-yes">
+                      {t('pos.tickets.discardSure')}
+                    </button>
+                  ) : (
+                    <button type="button" className="px-1.5 py-1 text-slate-400 hover:text-rose-700" aria-label={t('pos.tickets.discard')} onClick={() => (tk.lines.length ? setDiscard(tk.id) : open.remove(tk.id))} data-testid="pos-ticket-discard">
+                      ✕
+                    </button>
+                  ))}
+              </span>
+            );
+          })}
+          <button type="button" className="rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-sm text-brand-700 hover:border-brand-400" onClick={() => { open.add(); resetPayment(); }} data-testid="pos-new-ticket">
+            + {t('pos.tickets.new')}
+          </button>
+        </div>
         {lines.length === 0 ? (
-          <p className="text-sm text-slate-500">{t('pos.emptyTicket')}</p>
+          <p className="text-sm text-slate-500">{open.tickets.length > 1 ? t('pos.tickets.empty') : t('pos.emptyTicket')}</p>
         ) : (
           <ul className="divide-y divide-slate-100 text-sm">
             {lines.map((l) => (
@@ -225,7 +410,11 @@ export function PosTab() {
         </div>
         <div>
           <span className="label">{t('pos.customer')}</span>
-          <CustomerPicker value={customerId} onChange={setCustomerId} forBooking={false} optional />
+          {offlineNow ? (
+            <p className="text-xs text-slate-500">{t('pos.offline.noCustomer')}</p>
+          ) : (
+            <CustomerPicker key={open.active.id} value={customerId} onChange={setCustomerId} forBooking={false} optional />
+          )}
         </div>
         <div>
           <span className="label">{t('payments.method')}</span>
@@ -282,9 +471,12 @@ export function PosTab() {
 
       <section className="card lg:col-span-5">
         <h2 className="mb-2 font-semibold">{t('pos.todaySales')}</h2>
+        <PendingList pending={reg.pending.filter((p) => p.locationId === locationId)} />
         <SalesList sales={sales.data ?? []} />
-        {sales.data?.length === 0 && <p className="text-sm text-slate-500">{t('pos.noSales')}</p>}
+        {sales.data?.length === 0 && !reg.pending.length && <p className="text-sm text-slate-500">{t('pos.noSales')}</p>}
       </section>
+
+      {manager && tenantId && <RegisterSwitch tenantId={tenantId} on={reg.on} locationId={locationId} />}
 
       {free && (
         <Modal open title={t('pos.freeLine')} onClose={() => setFree(null)}>
@@ -306,19 +498,120 @@ export function PosTab() {
         </Modal>
       )}
       {done && (
-        <Modal open title={t('pos.doneTitle', { n: done.sale.number })} onClose={() => setDone(null)}>
+        <Modal open title={done.sale ? t('pos.doneTitle', { n: done.sale.number }) : t('pos.offline.doneTitle', { n: done.pending?.localNo })} onClose={() => setDone(null)}>
           <div className="space-y-3 text-sm" data-testid="pos-done">
-            <p className="text-2xl font-semibold">{money(done.sale.totalCents)}</p>
+            <p className="text-2xl font-semibold">{money(done.sale?.totalCents ?? done.pending?.totalCents ?? 0)}</p>
             {done.changeCents > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-lg font-semibold text-emerald-800">{t('pos.change', { amount: money(done.changeCents) })}</p>}
-            <SaleActions sale={done.sale} />
+            {done.pending && <p className="rounded-lg bg-amber-50 p-3 text-amber-900" data-testid="pos-done-offline">📶 {t('pos.offline.savedHere')}</p>}
+            {done.sale && <SaleActions sale={done.sale} />}
             <div className="flex justify-end gap-2">
-              <button type="button" className="btn-secondary" onClick={() => openTicket(done.sale.id, { print: true, changeCents: done.changeCents })} data-testid="pos-print">🖨️ {t('ticket.print')}</button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  done.sale
+                    ? openTicket(done.sale.id, { print: true, changeCents: done.changeCents })
+                    : done.pending && openTicket(done.pending.clientId, { print: true, changeCents: done.changeCents, local: true })
+                }
+                data-testid="pos-print"
+              >
+                🖨️ {t('ticket.print')}
+              </button>
               <button type="button" className="btn-primary" onClick={() => setDone(null)}>{t('pos.newSale')}</button>
             </div>
           </div>
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Connection state of the counter: offline selling, sales waiting, ones the server refused. */
+function OfflineBar({ online, register, pending, tenantId }: { online: boolean; register: boolean; pending: PendingSale[]; tenantId: string | undefined }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const waiting = pending.filter((p) => !p.error);
+  const failed = pending.filter((p) => p.error);
+  if (online && !pending.length) return null;
+  const upload = async () => {
+    if (!tenantId) return;
+    setBusy(true);
+    try {
+      await flushPending(tenantId);
+      void qc.invalidateQueries({ queryKey: ['sales'] });
+      void qc.invalidateQueries({ queryKey: ['products'] });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-2 lg:col-span-5" data-testid="pos-offline-bar">
+      {(!online || waiting.length > 0) && (
+        <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 text-sm ${online ? 'border-sky-200 bg-sky-50 text-sky-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+          <span className="font-semibold">{online ? `☁️ ${t('pos.offline.uploading')}` : `📶 ${register ? t('pos.offline.selling') : t('pos.offline.noInternet')}`}</span>
+          {waiting.length > 0 && <span data-testid="pos-pending-count">{t('pos.offline.waiting', { count: waiting.length })}</span>}
+          {online && waiting.length > 0 && (
+            <button type="button" className="btn-secondary !py-1" disabled={busy} onClick={() => void upload()} data-testid="pos-upload-now">
+              {t('pos.offline.uploadNow')}
+            </button>
+          )}
+        </div>
+      )}
+      {failed.map((p) => (
+        <div key={p.clientId} className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+          <span>{t('pos.offline.refused', { n: p.localNo, amount: money(p.totalCents), reason: t(`pos.${p.error}`, { defaultValue: p.error ?? '' }) })}</span>
+          <button type="button" className="btn-secondary !py-1" onClick={() => tenantId && retryPending(tenantId, p.clientId)}>{t('pos.offline.retry')}</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Sales charged without internet, still on this device. */
+function PendingList({ pending }: { pending: PendingSale[] }) {
+  const { t } = useTranslation();
+  if (!pending.length) return null;
+  return (
+    <ul className="mb-2 divide-y divide-slate-100 rounded-lg border border-amber-200 bg-amber-50/50 px-3 text-sm" data-testid="pos-pending">
+      {pending.map((p) => (
+        <li key={p.clientId} className="flex flex-wrap items-center justify-between gap-2 py-2">
+          <div className="min-w-0">
+            <div className="font-medium">
+              {p.localNo} · {money(p.totalCents)} <span className="rounded bg-amber-100 px-1.5 text-xs text-amber-800">{p.error ? t('pos.offline.badgeRefused') : t('pos.offline.badge')}</span>
+            </div>
+            <div className="truncate text-xs text-slate-500">
+              {dateTime(p.soldAt)} · {p.items.map((i) => `${i.qty}× ${i.name}`).join(', ')} · {p.payments.map((x) => t(`methods.${x.method}`)).join(' + ')}
+            </div>
+          </div>
+          <button type="button" className="text-brand-700 hover:underline" onClick={() => openTicket(p.clientId, { local: true })}>{t('ticket.ticket')}</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The owner marks this computer as a register: it keeps what it needs to sell without internet. */
+function RegisterSwitch({ tenantId, on, locationId }: { tenantId: string; on: boolean; locationId: string }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const toggle = (v: boolean) => {
+    setRegister(tenantId, v);
+    if (v) {
+      markOnline(tenantId);
+      // Copies now: catalog, ticket header and the session
+      void qc.invalidateQueries({ queryKey: ['products', locationId] });
+      void qc.invalidateQueries({ queryKey: ['pos-header', locationId] });
+      void api<{ user: SessionUser; tenant: TenantDto; businesses: BusinessSummary[] }>('/auth/me').then(saveSession).catch(() => undefined);
+    }
+  };
+  return (
+    <section className="card space-y-1 text-sm lg:col-span-5">
+      <label className="flex items-center gap-2 font-medium">
+        <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} data-testid="pos-register" /> {t('pos.offline.registerSwitch')}
+      </label>
+      <p className="text-xs text-slate-500">{t('pos.offline.registerHelp', { hours: OFFLINE_MAX_MS / 3600_000 })}</p>
+    </section>
   );
 }
 

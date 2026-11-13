@@ -760,8 +760,14 @@ export const sales = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     canceledAt: timestamp('canceled_at', { withTimezone: true }),
     canceledBy: uuid('canceled_by'),
+    clientId: text('client_id'),
+    offline: boolean('offline').notNull().default(false),
   },
-  (t) => [uniqueIndex('sales_tenant_number_idx').on(t.tenantId, t.number), index('sales_tenant_created_idx').on(t.tenantId, t.createdAt)],
+  (t) => [
+    uniqueIndex('sales_tenant_number_idx').on(t.tenantId, t.number),
+    index('sales_tenant_created_idx').on(t.tenantId, t.createdAt),
+    uniqueIndex('sales_tenant_client_idx').on(t.tenantId, t.clientId).where(sql`client_id is not null`),
+  ],
 );
 export type Sale = typeof sales.$inferSelect;
 

@@ -4,6 +4,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isManager, kindConfig, PLAN_LIMITS, type BusinessKind } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
+import { useOfflineSync } from '../lib/usePosOffline';
 
 type NavItem = { to: string; key: string; icon: string; end?: boolean; desktopOnly?: boolean };
 
@@ -85,6 +86,8 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
 export function Layout() {
   const { t } = useTranslation();
   const { tenant, user, logout } = useAuth();
+  // A register uploads the sales it charged without internet, from any page
+  useOfflineSync();
   const nav = navFor(tenant?.kind ?? 'appointments', isManager(user?.role), PLAN_LIMITS[tenant?.plan ?? 'free'].cash);
   const mobileNav = nav.filter((n) => !n.desktopOnly);
   const navigate = useNavigate();

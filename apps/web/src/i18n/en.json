@@ -807,7 +807,8 @@
     "billing_read_only": "Your business is read-only because the subscription payment failed. Update your card in Settings → Plan.",
     "billing_provider_error": "The payment system didn't answer. Try again in a moment.",
     "delete_not_confirmed": "The password or business name don't match.",
-    "no_subscription": "There is no active subscription."
+    "no_subscription": "There is no active subscription.",
+    "network": "No internet connection. Check your network and try again."
   },
   "roles": {
     "onlyYours": "You're seeing only your bookings.",
@@ -1766,7 +1767,35 @@
     "payments_mismatch": "Payments don't add up to the total.",
     "cancel_invoice_first": "Cancel this sale's invoice first.",
     "already_canceled": "This sale was already canceled.",
-    "sat_key_format": "The SAT key has 8 digits."
+    "sat_key_format": "The SAT key has 8 digits.",
+    "offline_expired": "This register hasn't been online for over 3 days. Connect it to keep selling.",
+    "tickets": {
+      "label": "Customer {{n}}",
+      "new": "Next customer",
+      "empty": "Empty ticket. Add products or switch customers above.",
+      "discard": "Remove ticket",
+      "discardSure": "Remove?"
+    },
+    "offline": {
+      "selling": "No internet: you can keep selling",
+      "noInternet": "No internet",
+      "uploading": "Uploading sales made offline",
+      "waiting_one": "{{count}} sale to upload",
+      "waiting_other": "{{count}} sales to upload",
+      "uploadNow": "Upload now",
+      "refused": "Sale {{n}} ({{amount}}) couldn't be uploaded: {{reason}}",
+      "retry": "Retry",
+      "badge": "Not uploaded",
+      "badgeRefused": "Check",
+      "noCatalog": "No internet and no catalog copy on this computer. Go online once to save it.",
+      "needRegister": "No internet. To sell offline, the owner must turn on \"Sell without internet\" on this computer.",
+      "noCustomer": "No internet: the sale has no customer.",
+      "doneTitle": "Sale saved · {{n}}",
+      "savedHere": "Saved on this computer; it uploads itself when the internet is back. The final number is given on upload.",
+      "registerSwitch": "Sell without internet on this computer",
+      "registerHelp": "Keeps a copy of the catalog and your session to keep charging if the internet drops; sales upload themselves when it's back. Use it only on the register's computer. After {{hours}} hours without connecting it stops selling offline.",
+      "ticketMissing": "This sale wasn't found on this computer."
+    }
   },
   "ticket": {
     "ticket": "Ticket",
@@ -1784,7 +1813,9 @@
     "notFiscal": "This ticket is not a tax receipt.",
     "askInvoice": "Need an invoice? Ask at the counter.",
     "thanks": "Thank you for your purchase!",
-    "autoPrint": "Print ticket when charging"
+    "autoPrint": "Print ticket when charging",
+    "provisional": "Provisional",
+    "offlineNote": "Sold offline"
   },
   "mfa": {
     "title": "Two-step verification",

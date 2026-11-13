@@ -807,7 +807,8 @@
     "billing_read_only": "Tu negocio está en modo solo lectura porque no se pudo cobrar la suscripción. Actualiza tu tarjeta en Configuración → Plan.",
     "billing_provider_error": "El sistema de pagos no respondió. Intenta de nuevo en un momento.",
     "delete_not_confirmed": "La contraseña o el nombre del negocio no coinciden.",
-    "no_subscription": "No hay una suscripción activa."
+    "no_subscription": "No hay una suscripción activa.",
+    "network": "Sin conexión a internet. Revisa tu red e intenta de nuevo."
   },
   "roles": {
     "onlyYours": "Estás viendo solo tus citas.",
@@ -1766,7 +1767,35 @@
     "payments_mismatch": "Los pagos no suman el total.",
     "cancel_invoice_first": "Primero cancela la factura de esta venta.",
     "already_canceled": "Esta venta ya estaba cancelada.",
-    "sat_key_format": "La clave SAT tiene 8 dígitos."
+    "sat_key_format": "La clave SAT tiene 8 dígitos.",
+    "offline_expired": "Esta caja lleva más de 3 días sin conectarse. Conéctala a internet para seguir vendiendo.",
+    "tickets": {
+      "label": "Cliente {{n}}",
+      "new": "Otro cliente",
+      "empty": "Ticket vacío. Agrega productos o cambia de cliente arriba.",
+      "discard": "Quitar ticket",
+      "discardSure": "¿Quitar?"
+    },
+    "offline": {
+      "selling": "Sin internet: sigues vendiendo",
+      "noInternet": "Sin internet",
+      "uploading": "Subiendo ventas guardadas sin internet",
+      "waiting_one": "{{count}} venta por subir",
+      "waiting_other": "{{count}} ventas por subir",
+      "uploadNow": "Subir ahora",
+      "refused": "La venta {{n}} ({{amount}}) no se pudo subir: {{reason}}",
+      "retry": "Reintentar",
+      "badge": "Sin subir",
+      "badgeRefused": "Revisar",
+      "noCatalog": "Sin internet y sin copia del catálogo en esta computadora. Conéctate una vez para guardarla.",
+      "needRegister": "Sin internet. Para vender sin conexión, el dueño debe activar \"Vender sin internet\" en esta computadora.",
+      "noCustomer": "Sin internet: la venta queda sin cliente.",
+      "doneTitle": "Venta guardada · {{n}}",
+      "savedHere": "Se guardó en esta computadora y se subirá sola cuando vuelva el internet. El folio definitivo se asigna al subirla.",
+      "registerSwitch": "Vender sin internet en esta computadora",
+      "registerHelp": "Guarda una copia del catálogo y de tu sesión para seguir cobrando si se va el internet; las ventas se suben solas al volver. Úsalo solo en la computadora de la caja. Si pasa más de {{hours}} horas sin conectarse, deja de vender sin internet.",
+      "ticketMissing": "No se encontró esta venta en esta computadora."
+    }
   },
   "ticket": {
     "ticket": "Ticket",
@@ -1784,7 +1813,9 @@
     "notFiscal": "Este ticket no es un comprobante fiscal.",
     "askInvoice": "Si necesitas factura, pídela en caja.",
     "thanks": "¡Gracias por su compra!",
-    "autoPrint": "Imprimir ticket al cobrar"
+    "autoPrint": "Imprimir ticket al cobrar",
+    "provisional": "Folio provisional",
+    "offlineNote": "Venta sin internet"
   },
   "mfa": {
     "title": "Verificación en dos pasos",

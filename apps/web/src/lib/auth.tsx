@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useQueryClient } from '@tanstack/react-query';
 import { isHealthType, type AuthResponse, type BusinessSummary, type SessionUser, type TenantDto } from '@agenda/shared';
 import { api, sessionHint } from './api';
+import { forgetCopies, isNetworkError, loadSession, markOnline, saveSession } from './offlinePos';
 
 interface AuthState {
   user: SessionUser | null;
@@ -42,8 +43,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(r.user);
         setTenant(r.tenant);
         setBusinesses(r.businesses ?? []);
+        // A register keeps the session to open without internet
+        saveSession({ user: r.user, tenant: r.tenant, businesses: r.businesses ?? [] });
+        markOnline(r.tenant.id);
       })
-      .catch(() => sessionHint.clear())
+      .catch((e) => {
+        // No internet on a register: open with the saved session (the point of sale keeps working)
+        const saved = isNetworkError(e) ? loadSession() : null;
+        if (saved) {
+          setUser(saved.user);
+          setTenant(saved.tenant);
+          setBusinesses(saved.businesses);
+          return;
+        }
+        if (!isNetworkError(e)) sessionHint.clear();
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -61,13 +75,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [setSession]);
 
   const logout = useCallback(() => {
+    // Business data copied on a register goes; sales waiting to upload stay (money already taken)
+    if (tenant) forgetCopies(tenant.id);
     sessionHint.clear();
     void api('/auth/logout', { method: 'POST' }).catch(() => undefined);
     setUser(null);
     setTenant(null);
     setBusinesses([]);
     qc.clear();
-  }, [qc]);
+  }, [qc, tenant]);
 
   return (
     <AuthContext.Provider value={{ user, tenant, loading, setSession, setTenant, setUser, businesses, switchBusiness, logout }}>
