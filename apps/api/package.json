@@ -33,6 +33,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "fflate": "^0.8.2",
     "@types/aws-lambda": "^8.10.145",
     "@types/bcryptjs": "^2.4.6",
     "@types/luxon": "^3.4.2",

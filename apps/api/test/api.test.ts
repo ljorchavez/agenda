@@ -1931,6 +1931,33 @@ d('API (integration)', () => {
     expect((await call('GET', `/customers/${cu.id}/fiscal-doc`, undefined, tok)).status).toBe(404);
   });
 
+  it('inventory from a spreadsheet: preview, create, update by ID, stock count', async () => {
+    const reg = (await call('POST', '/auth/register', { businessName: 'Inventario Excel', businessType: 'barbershop', name: 'Dueño Inv', email: 'inv-xlsx@test.mx', password: 'password123' })).body;
+    const tok = reg.token;
+    const gel = (await call('POST', '/products', { name: 'Gel', priceCents: 9000, initialStock: 5 }, tok)).body;
+    const table = [
+      ['ID', 'Producto', 'Precio', 'Existencia', 'Categoría'],
+      [gel.id, 'Gel fijador', '$95.00', 8, 'Cabello'],
+      [null, 'Cera mate', 120, 3, 'Cabello'],
+      [null, 'Sin precio', null, 1, null],
+    ];
+    const preview = await call('POST', '/products/import', { table }, tok);
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ created: 1, updated: 1, errors: 1, applied: false });
+    // Nothing changed yet
+    expect((await call('GET', '/products', undefined, tok)).body).toHaveLength(1);
+    const done = (await call('POST', '/products/import', { table, dryRun: false }, tok)).body;
+    expect(done).toMatchObject({ created: 1, updated: 1, errors: 1, applied: true });
+    const list = (await call('GET', '/products', undefined, tok)).body as { id: string; name: string; priceCents: number; stock: number; category: string }[];
+    expect(list.find((p) => p.id === gel.id)).toMatchObject({ name: 'Gel fijador', priceCents: 9500, stock: 8, category: 'Cabello' });
+    expect(list.find((p) => p.name === 'Cera mate')).toMatchObject({ priceCents: 12000, stock: 3 });
+    const moves = (await call('GET', `/products/${gel.id}/moves`, undefined, tok)).body;
+    expect(moves[0]).toMatchObject({ qtyChange: 3, reason: 'adjust', note: 'Actualización por Excel' });
+    // The same file again: nothing to do
+    expect((await call('POST', '/products/import', { table: table.slice(0, 2) }, tok)).body).toMatchObject({ created: 0, updated: 0, unchanged: 1 });
+    expect((await call('POST', '/products/import', { table: [['Precio'], [1]] }, tok)).body.error).toBe('import_headers');
+  });
+
   it('clinical record (NOM-004): signed notes never change, addendum, bitácora, 5-year retention', async () => {
     const reg = (await call('POST', '/auth/register', {
       businessName: 'Consultorio Prueba', businessType: 'medical', name: 'Dra. Ana Ruiz', email: 'nom004@test.mx', password: 'password123',

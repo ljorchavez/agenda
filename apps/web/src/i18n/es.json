@@ -327,6 +327,12 @@
       "cash": "Corte de caja",
       "pos": "Vender",
       "products": "Productos"
+    },
+    "originLabel": "Origen",
+    "origin": {
+      "pos": "Punto de venta",
+      "booking": "Reservas",
+      "other": "Otros"
     }
   },
   "settings": {
@@ -1800,7 +1806,98 @@
     },
     "askInvoice": "¿Generar factura de esta venta?",
     "invoiceYes": "Sí, cobrar y facturar",
-    "invoiceNo": "No, solo cobrar"
+    "invoiceNo": "No, solo cobrar",
+    "tabs": {
+      "sell": "Vender",
+      "sales": "Ventas",
+      "products": "Productos",
+      "cash": "Corte de caja"
+    },
+    "salesTab": {
+      "presets": {
+        "today": "Hoy",
+        "yesterday": "Ayer",
+        "last7": "Últimos 7 días",
+        "thisMonth": "Este mes",
+        "custom": "Elegir fechas"
+      },
+      "search": "Ticket #, cliente o producto",
+      "invoiced": "Factura",
+      "withInvoice": "Facturadas",
+      "withoutInvoice": "Sin factura",
+      "paid": "Pagada",
+      "total": "Vendido",
+      "count_one": "{{count}} venta",
+      "count_other": "{{count}} ventas",
+      "units_one": "{{count}} pieza",
+      "units_other": "{{count}} piezas",
+      "avg": "Ticket promedio",
+      "ticket": "Ticket"
+    },
+    "inventory": {
+      "export": "Descargar Excel",
+      "exportFiltered": "Descargar Excel ({{count}})",
+      "import": "Subir Excel",
+      "template": "Plantilla vacía",
+      "noCategory": "Sin categoría",
+      "inStock": "Con existencia",
+      "lowOnly": "Existencia baja",
+      "outOfStock": "Agotados",
+      "untracked": "Sin control de inventario",
+      "activeOnly": "Activos",
+      "inactiveOnly": "Inactivos",
+      "allStatus": "Activos e inactivos",
+      "dblClick": "Doble clic para cambiar",
+      "dblClickHint": "Doble clic en el nombre, precio o existencia para cambiarlo.",
+      "importTitle": "Subir inventario desde Excel",
+      "importHelp": "Descarga tu inventario, cámbialo en Excel y súbelo. Las filas con ID actualizan ese producto; las filas sin ID crean productos nuevos. Si dejas vacía la celda de nombre, precio o existencia, no cambia. Si quitas una columna, tampoco.",
+      "stockAt": "La existencia se aplica en {{place}}.",
+      "pickFile": "Elegir archivo (.xlsx o .csv)",
+      "otherFile": "Elegir otro archivo",
+      "readError": "No pudimos leer el archivo. Guárdalo como .xlsx o .csv e inténtalo otra vez.",
+      "preview": "Se crearán {{created}} y se actualizarán {{updated}} productos ({{unchanged}} sin cambios).",
+      "applied": "Listo: {{created}} creados y {{updated}} actualizados.",
+      "withErrors_one": "{{count}} fila con error se omite.",
+      "withErrors_other": "{{count}} filas con error se omiten.",
+      "ignored": "Columnas no reconocidas (se ignoran): {{list}}",
+      "line": "Fila {{n}}",
+      "new": "Nuevo",
+      "apply_one": "Aplicar {{count}} cambio",
+      "apply_other": "Aplicar {{count}} cambios",
+      "fields": {
+        "name": "nombre",
+        "sku": "SKU",
+        "category": "categoría",
+        "priceCents": "precio",
+        "costCents": "costo",
+        "trackStock": "control de inventario",
+        "minStock": "mínimo",
+        "iva": "IVA",
+        "satKey": "clave SAT",
+        "requiresPrescription": "receta",
+        "active": "activo",
+        "stock": "existencia"
+      },
+      "errors": {
+        "unknown_id": "Ese ID no es de un producto de este negocio",
+        "duplicate_id": "El ID está repetido en el archivo",
+        "missing_name": "Falta el nombre",
+        "missing_price": "Falta el precio",
+        "bad_price": "Precio inválido",
+        "bad_cost": "Costo inválido",
+        "bad_stock": "Existencia inválida (número entero)",
+        "bad_min": "Mínimo inválido",
+        "bad_iva": "IVA inválido (16, 0 o exento)",
+        "bad_sat_key": "La clave SAT tiene 8 dígitos",
+        "bad_trackStock": "Usa Sí o No en «Controla inventario»",
+        "bad_active": "Usa Sí o No en «Activo»",
+        "bad_rx": "Usa Sí o No en «Requiere receta»",
+        "bad_name": "Nombre inválido (máx. 120 letras)",
+        "bad_sku": "SKU muy largo",
+        "bad_category": "Categoría muy larga"
+      }
+    },
+    "import_headers": "La primera fila debe tener los nombres de columna (Producto, Precio…). Usa la plantilla."
   },
   "ticket": {
     "ticket": "Ticket",

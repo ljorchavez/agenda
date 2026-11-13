@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InvoiceCell, useInvoicing } from '../components/Invoicing';
@@ -17,7 +17,6 @@ import {
 } from '@agenda/shared';
 import { Empty, ErrorText, Loading, Modal, PageHeader, usePaged } from '../components/ui';
 import { CashTab, CommissionsTab } from '../components/Cash';
-import { PosTab, ProductsTab } from '../components/Pos';
 import { useAccess } from '../lib/auth';
 import { COLLECTION_PILL, PAYMENT_PILL, PAYMENT_PILL_TEXT } from '../lib/status';
 import { api } from '../lib/api';
@@ -60,7 +59,12 @@ const MAX_ROWS = 5000;
 const MOVEMENT_PRESETS: Preset[] = ['thisMonth', 'lastMonth', 'last7', 'last30', 'thisYear', 'custom'];
 const COLLECTION_PRESETS: Preset[] = ['thisMonth', 'next7', 'next30', 'last7', 'last30', 'lastMonth', 'thisYear', 'custom'];
 
-const EMPTY_FILTERS = { business: 'current', location: '', method: '', status: '', min: '', max: '', q: '' };
+const EMPTY_FILTERS = { business: 'current', location: '', method: '', status: '', origin: '', min: '', max: '', q: '' };
+
+/** Where a movement comes from: a counter sale (POS), a booking, or something else (packages, memberships, gift cards, loose payments). */
+type Origin = 'pos' | 'booking' | 'other';
+const originOf = (p: PaymentDto): Origin => (p.saleId ? 'pos' : p.appointmentId ? 'booking' : 'other');
+const ORIGINS: Origin[] = ['pos', 'booking', 'other'];
 
 /**
  * Money movements (payments actually recorded): dates, business, location, method, status, amount
@@ -107,18 +111,20 @@ function MovementsTab() {
         (!f.location || (f.location === 'none' ? !p.locationId : p.locationId === f.location)) &&
         (!f.method || p.method === f.method) &&
         (!f.status || p.status === f.status) &&
+        (!f.origin || originOf(p) === f.origin) &&
         (min == null || p.amountCents >= min) &&
         (max == null || p.amountCents <= max) &&
         (!q || (p.customerName ?? '').toLocaleLowerCase('es').includes(q) || (p.serviceName ?? '').toLocaleLowerCase('es').includes(q)),
     );
   }, [data, f, allBusinesses]);
 
-  type Key = 'date' | 'customer' | 'method' | 'status' | 'amount' | 'location' | 'business';
+  type Key = 'date' | 'customer' | 'origin' | 'method' | 'status' | 'amount' | 'location' | 'business';
   const { sort, toggle } = useSort<Key>({ key: 'date', dir: 'desc' }, { date: 'desc', amount: 'desc' });
   const rows = useMemo(() => {
     const get: Record<Key, (p: PaymentDto) => string | number | null | undefined> = {
       date: (p) => new Date(p.paidAt ?? p.createdAt).getTime(),
       customer: (p) => p.customerName ?? '',
+      origin: (p) => t(`payments.origin.${originOf(p)}`),
       method: (p) => t(`methods.${p.method}`),
       status: (p) => t(`paymentStatus.${p.status}`),
       amount: (p) => p.amountCents,
@@ -139,7 +145,7 @@ function MovementsTab() {
   return (
     <>
       <FilterBar
-        active={[f.location, f.method, f.status, f.min, f.max, multiBusiness && f.business !== 'current' ? 'b' : ''].filter(Boolean).length}
+        active={[f.location, f.method, f.status, f.origin, f.min, f.max, multiBusiness && f.business !== 'current' ? 'b' : ''].filter(Boolean).length}
         onClear={() => setF({ ...EMPTY_FILTERS, q: f.q })}
         primary={
           <>
@@ -180,6 +186,10 @@ function MovementsTab() {
             <option value="none">{t('payments.noLocation')}</option>
           </select>
         )}
+        <select id="pf-origin" className={FILTER_CTRL} aria-label={t('payments.originLabel')} value={f.origin} onChange={(e) => set({ origin: e.target.value })} data-testid="filter-origin">
+          <option value="">{t('payments.originLabel')}: {t('payments.any')}</option>
+          {ORIGINS.map((o) => <option key={o} value={o}>{t(`payments.origin.${o}`)}</option>)}
+        </select>
         <select id="pf-method" className={FILTER_CTRL} aria-label={t('payments.method')} value={f.method} onChange={(e) => set({ method: e.target.value })}>
           <option value="">{t('payments.method')}: {t('payments.any')}</option>
           {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
@@ -219,6 +229,7 @@ function MovementsTab() {
                 <SortTh label={t('payments.customer')} k="customer" sort={sort} onSort={toggle} />
                 {allBusinesses && <SortTh label={t('payments.business')} k="business" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
                 {showLocation && <SortTh label={t('locations.location')} k="location" sort={sort} onSort={toggle} className="hidden md:table-cell" />}
+                <SortTh label={t('payments.originLabel')} k="origin" sort={sort} onSort={toggle} />
                 <SortTh label={t('payments.method')} k="method" sort={sort} onSort={toggle} />
                 <SortTh label={t('payments.status')} k="status" sort={sort} onSort={toggle} />
                 <SortTh label={t('payments.amount')} k="amount" sort={sort} onSort={toggle} align="right" />
@@ -239,6 +250,11 @@ function MovementsTab() {
                   </td>
                   {allBusinesses && <td className="hidden px-4 py-3 md:table-cell">{p.businessName}</td>}
                   {showLocation && <td className="hidden px-4 py-3 md:table-cell">{p.locationName ?? '—'}</td>}
+                  <td className="px-4 py-3" data-testid="movement-origin">
+                    <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${originOf(p) === 'pos' ? 'bg-violet-50 text-violet-700' : originOf(p) === 'booking' ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {t(`payments.origin.${originOf(p)}`)}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">{t(`methods.${p.method}`)}</td>
                   <td className="px-4 py-3">
                     {t(`paymentStatus.${p.status}`)}
@@ -264,16 +280,20 @@ export function PaymentsPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const { manager, scoped } = useAccess();
-  type Tab = 'bookings' | 'pos' | 'movements' | 'products' | 'commissions' | 'cash';
+  type Tab = 'bookings' | 'movements' | 'commissions' | 'cash';
   const tabs: Tab[] = [
     'bookings',
-    'pos',
     'movements',
-    ...(manager ? (['products'] as Tab[]) : []),
     ...(manager || scoped ? (['commissions'] as Tab[]) : []),
     ...(manager ? (['cash'] as Tab[]) : []),
   ];
   const asked = params.get('tab') as Tab | null;
+  // Selling and products moved to Punto de venta: old links land there
+  const navigate = useNavigate();
+  const moved = params.get('tab');
+  useEffect(() => {
+    if (moved === 'pos' || moved === 'products') navigate(moved === 'pos' ? '/pos' : '/pos?tab=products', { replace: true });
+  }, [moved, navigate]);
   const tab: Tab = asked && tabs.includes(asked) ? asked : 'bookings';
   const tabBtn = (k: Tab) =>
     `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
@@ -293,12 +313,8 @@ export function PaymentsPage() {
       />
       {tab === 'bookings' ? (
         <CollectionsTab />
-      ) : tab === 'pos' ? (
-        <PosTab />
       ) : tab === 'movements' ? (
         <MovementsTab />
-      ) : tab === 'products' ? (
-        <ProductsTab />
       ) : tab === 'commissions' ? (
         <CommissionsTab />
       ) : (

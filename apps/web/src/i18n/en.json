@@ -327,6 +327,12 @@
       "cash": "Cash closing",
       "pos": "Sell",
       "products": "Products"
+    },
+    "originLabel": "Source",
+    "origin": {
+      "pos": "Point of sale",
+      "booking": "Bookings",
+      "other": "Other"
     }
   },
   "settings": {
@@ -1800,7 +1806,98 @@
     },
     "askInvoice": "Issue an invoice for this sale?",
     "invoiceYes": "Yes, charge and invoice",
-    "invoiceNo": "No, just charge"
+    "invoiceNo": "No, just charge",
+    "tabs": {
+      "sell": "Sell",
+      "sales": "Sales",
+      "products": "Products",
+      "cash": "Cash closing"
+    },
+    "salesTab": {
+      "presets": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "last7": "Last 7 days",
+        "thisMonth": "This month",
+        "custom": "Pick dates"
+      },
+      "search": "Ticket #, customer or product",
+      "invoiced": "Invoice",
+      "withInvoice": "Invoiced",
+      "withoutInvoice": "Not invoiced",
+      "paid": "Paid",
+      "total": "Sold",
+      "count_one": "{{count}} sale",
+      "count_other": "{{count}} sales",
+      "units_one": "{{count}} item",
+      "units_other": "{{count}} items",
+      "avg": "Average ticket",
+      "ticket": "Ticket"
+    },
+    "inventory": {
+      "export": "Download Excel",
+      "exportFiltered": "Download Excel ({{count}})",
+      "import": "Upload Excel",
+      "template": "Empty template",
+      "noCategory": "No category",
+      "inStock": "In stock",
+      "lowOnly": "Low stock",
+      "outOfStock": "Out of stock",
+      "untracked": "Not tracked",
+      "activeOnly": "Active",
+      "inactiveOnly": "Inactive",
+      "allStatus": "Active and inactive",
+      "dblClick": "Double click to change",
+      "dblClickHint": "Double click a name, price or stock to change it.",
+      "importTitle": "Upload inventory from Excel",
+      "importHelp": "Download your inventory, edit it in Excel and upload it. Rows with an ID update that product; rows without one create new products. An empty name, price or stock cell, or a missing column, keeps what is saved.",
+      "stockAt": "Stock is set at {{place}}.",
+      "pickFile": "Choose file (.xlsx or .csv)",
+      "otherFile": "Choose another file",
+      "readError": "We could not read the file. Save it as .xlsx or .csv and try again.",
+      "preview": "{{created}} to create, {{updated}} to update ({{unchanged}} unchanged).",
+      "applied": "Done: {{created}} created, {{updated}} updated.",
+      "withErrors_one": "{{count}} row with errors is skipped.",
+      "withErrors_other": "{{count}} rows with errors are skipped.",
+      "ignored": "Unrecognized columns (ignored): {{list}}",
+      "line": "Row {{n}}",
+      "new": "New",
+      "apply_one": "Apply {{count}} change",
+      "apply_other": "Apply {{count}} changes",
+      "fields": {
+        "name": "name",
+        "sku": "SKU",
+        "category": "category",
+        "priceCents": "price",
+        "costCents": "cost",
+        "trackStock": "stock tracking",
+        "minStock": "minimum",
+        "iva": "IVA",
+        "satKey": "SAT key",
+        "requiresPrescription": "prescription",
+        "active": "active",
+        "stock": "stock"
+      },
+      "errors": {
+        "unknown_id": "That ID is not one of this business’s products",
+        "duplicate_id": "The ID appears twice in the file",
+        "missing_name": "Missing name",
+        "missing_price": "Missing price",
+        "bad_price": "Invalid price",
+        "bad_cost": "Invalid cost",
+        "bad_stock": "Invalid stock (whole number)",
+        "bad_min": "Invalid minimum",
+        "bad_iva": "Invalid IVA (16, 0 or exento)",
+        "bad_sat_key": "The SAT key has 8 digits",
+        "bad_trackStock": "Use Sí or No in “Controla inventario”",
+        "bad_active": "Use Sí or No in “Activo”",
+        "bad_rx": "Use Sí or No in “Requiere receta”",
+        "bad_name": "Invalid name (max 120 chars)",
+        "bad_sku": "SKU too long",
+        "bad_category": "Category too long"
+      }
+    },
+    "import_headers": "The first row must have the column names (Producto, Precio…). Use the template."
   },
   "ticket": {
     "ticket": "Ticket",

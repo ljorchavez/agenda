@@ -5,7 +5,7 @@ import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-do
 import { ClinicalPrintPage } from './components/ClinicalRecord';
 import { PortalPage, PrescriptionPage } from './pages/Portal';
 import { PrivacyPage, TermsPage } from './pages/Legal';
-import { PosPage } from './components/Pos';
+import { PosPage } from './components/PosPage';
 import { LocalTicketPage, TicketPage } from './pages/Ticket';
 import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';

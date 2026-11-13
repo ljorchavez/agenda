@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import { and, asc, desc, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import {
+  isHealthType,
+  productImportSchema,
   productInputSchema,
   saleCreateSchema,
   saleTotal,
   stockAdjustSchema,
   type PosHeaderDto,
+  type ProductImportResult,
   type ProductDto,
   type SaleDto,
   type SaleTicketDto,
@@ -19,6 +22,7 @@ import { getScope } from '../lib/access.js';
 import { AppError, notFound } from '../lib/errors.js';
 import { guardRow, locationForWrite } from '../lib/locations.js';
 import { assertFeature } from '../lib/plan.js';
+import { planImport, type Existing } from '../lib/product-import.js';
 import { requireBusinessManager, requireManager, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -169,6 +173,58 @@ posRoutes.put('/products/:id', requireBusinessManager, async (c) => {
   if (!row) throw notFound('product');
   const stock = await stockMap(db, tenantId, [row.id]);
   return c.json(toProductDto(row, stock.get(row.id) ?? {}, null));
+});
+
+/**
+ * Inventory from a spreadsheet: rows with an ID update that product, rows without one create it;
+ * "Existencia" sets the count at the location. `dryRun` (default) only says what would change;
+ * otherwise the valid rows are applied together and the ones with errors are skipped.
+ */
+posRoutes.post('/products/import', requireBusinessManager, async (c) => {
+  const input = productImportSchema.parse(await c.req.json());
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  await assertFeature(db, tenantId, 'cash');
+  const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { businessType: true } });
+  const locationId = (await locationForWrite(db, c, input.locationId, { create: true }))!;
+  const all = await db.select().from(products).where(eq(products.tenantId, tenantId));
+  const stock = await stockMap(db, tenantId, all.map((p) => p.id));
+  const existing = new Map<string, Existing>(
+    all.map((p) => [p.id, { id: p.id, input: productValues(p as never) as Existing['input'], stock: stock.get(p.id)?.[locationId] ?? 0 }]),
+  );
+  const plan = planImport(input.table, existing, { health: isHealthType(tenant?.businessType ?? 'other') });
+  if (plan.headerError) throw new AppError(422, plan.headerError, 'The first row must have the column names (Producto, Precio…)');
+  const result: ProductImportResult = {
+    rows: plan.rows.map(({ row, action, name, changes, error }) => ({ row, action, name, changes, ...(error ? { error } : {}) })),
+    created: plan.rows.filter((r) => r.action === 'create').length,
+    updated: plan.rows.filter((r) => r.action === 'update').length,
+    unchanged: plan.rows.filter((r) => r.action === 'unchanged').length,
+    errors: plan.rows.filter((r) => r.action === 'error').length,
+    applied: false,
+    ignored: plan.ignored,
+  };
+  if (input.dryRun || !(result.created + result.updated)) return c.json(result);
+
+  const uid = c.get('userId');
+  const name = await userName(db, uid);
+  await db.transaction(async (tx) => {
+    for (const r of plan.rows) {
+      if (r.action === 'create' && r.values) {
+        const [row] = await tx.insert(products).values({ tenantId, ...productValues(r.values) }).returning({ id: products.id });
+        if (r.stock) await moveStock(tx as unknown as Tx, { tenantId, productId: row!.id, locationId, change: r.stock, reason: 'in', note: 'Carga de Excel', userId: uid, userName: name });
+      } else if (r.action === 'update' && r.values && r.id) {
+        if (r.changes.some((f) => f !== 'stock')) {
+          await tx.update(products).set({ ...productValues(r.values), updatedAt: new Date() }).where(and(eq(products.id, r.id), eq(products.tenantId, tenantId)));
+        }
+        if (r.stock !== undefined) {
+          await tx.execute(sql`select 1 from product_stock where product_id = ${r.id} and location_id = ${locationId} for update`);
+          const cur = (await tx.query.productStock.findFirst({ where: and(eq(productStock.productId, r.id), eq(productStock.locationId, locationId)) }))?.qty ?? 0;
+          if (r.stock !== cur) await moveStock(tx as unknown as Tx, { tenantId, productId: r.id, locationId, change: r.stock - cur, reason: 'adjust', note: 'Actualización por Excel', userId: uid, userName: name });
+        }
+      }
+    }
+  });
+  return c.json({ ...result, applied: true });
 });
 
 /** Sold products stay in the history; the catalog item is just hidden. */

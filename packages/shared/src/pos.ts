@@ -78,6 +78,55 @@ export const stockAdjustSchema = z.object({
   note: optText(200),
 });
 
+/** Inventory from a spreadsheet: first row = headers (Producto, Precio, Existencia…; ID to update). */
+const importCell = z.union([z.string().max(500), z.number(), z.boolean(), z.null()]);
+export const productImportSchema = z.object({
+  locationId: z.string().uuid().optional(),
+  /** Only checks and says what would change */
+  dryRun: z.boolean().default(true),
+  table: z.array(z.array(importCell).max(40)).min(1).max(5001),
+});
+export type ProductImportInput = z.input<typeof productImportSchema>;
+
+export interface ProductImportRow {
+  /** Line in the file (2 = first product, after the headers) */
+  row: number;
+  action: 'create' | 'update' | 'unchanged' | 'error';
+  name: string | null;
+  /** Fields that change (name, priceCents, stock…) */
+  changes: string[];
+  error?: string;
+}
+export interface ProductImportResult {
+  rows: ProductImportRow[];
+  created: number;
+  updated: number;
+  unchanged: number;
+  errors: number;
+  applied: boolean;
+  /** Headers not recognized (ignored) */
+  ignored: string[];
+}
+
+/** Spreadsheet columns, in download order; the import accepts these and a few aliases. */
+export const PRODUCT_SHEET_COLUMNS = ['id', 'name', 'sku', 'category', 'price', 'cost', 'trackStock', 'stock', 'minStock', 'iva', 'satKey', 'rx', 'active'] as const;
+export type ProductSheetColumn = (typeof PRODUCT_SHEET_COLUMNS)[number];
+export const PRODUCT_SHEET_HEADERS: Record<ProductSheetColumn, string> = {
+  id: 'ID',
+  name: 'Producto',
+  sku: 'SKU',
+  category: 'Categoría',
+  price: 'Precio',
+  cost: 'Costo',
+  trackStock: 'Controla inventario',
+  stock: 'Existencia',
+  minStock: 'Mínimo',
+  iva: 'IVA',
+  satKey: 'Clave SAT',
+  rx: 'Requiere receta',
+  active: 'Activo',
+};
+
 export interface StockMoveDto {
   id: string;
   locationId: string;

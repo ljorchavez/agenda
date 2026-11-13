@@ -52,6 +52,7 @@ import { InvoiceModal, useInvoicing } from './Invoicing';
 import { UpgradeNote, useFeature } from './Sales';
 import { openTicket } from '../pages/Ticket';
 import { ErrorText, Loading, Modal } from './ui';
+import { EditableCell, ImportModal, downloadInventory } from './Inventory';
 
 /** Prescriptions only matter in health businesses (doctors, dentists…). */
 const useHealth = () => {
@@ -63,7 +64,7 @@ type Line = OpenTicket['lines'][number];
 type Done = { sale: SaleDto | null; pending: PendingSale | null; changeCents: number; invoice?: boolean };
 
 /** Location picker shared by the two tabs: owners with several locations choose; others use theirs. */
-function useLocationChoice() {
+export function useLocationChoice() {
   const { locationId: own } = useAccess();
   const { tenant } = useAuth();
   const locs = useMyLocations(own);
@@ -79,7 +80,7 @@ function useLocationChoice() {
         {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
       </select>
     ) : null;
-  return { locationId, picker };
+  return { locationId, picker, locationName: locs.multi ? locs.list.find((l) => l.id === locationId)?.name ?? null : null };
 }
 
 const useProducts = (locationId: string, all = false, enabled = true) => {
@@ -646,7 +647,7 @@ function RegisterSwitch({ tenantId, on, locationId }: { tenantId: string; on: bo
 }
 
 /** Invoice and (for managers) cancel buttons of a sale. */
-function SaleActions({ sale, startInvoicing }: { sale: SaleDto; startInvoicing?: boolean }) {
+export function SaleActions({ sale, startInvoicing }: { sale: SaleDto; startInvoicing?: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { manager } = useAccess();
@@ -706,38 +707,90 @@ function SalesList({ sales }: { sales: SaleDto[] }) {
 
 const emptyProduct = (): ProductInput => ({ name: '', sku: null, category: null, priceCents: 0, costCents: null, trackStock: true, minStock: null, iva: '16', satKey: null, requiresPrescription: false, active: true });
 
-/** Products with their stock at the chosen location: create, edit, receive, count, history. */
+/** Products with their stock at the chosen location: create, edit (double click in the table), receive, count, history, Excel. */
 export function ProductsTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const { businessManager } = useAccess();
+  const { businessManager, manager } = useAccess();
   const health = useHealth();
   const enabled = useFeature('cash');
-  const { locationId, picker } = useLocationChoice();
+  const { locationId, picker, locationName } = useLocationChoice();
   const products = useProducts(locationId, true, enabled);
   const [edit, setEdit] = useState<{ id: string | null; v: ProductInput } | null>(null);
   const [stock, setStock] = useState<{ p: ProductDto; mode: 'in' | 'set' } | null>(null);
   const [moves, setMoves] = useState<ProductDto | null>(null);
-  const [q, setQ] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [f, setF] = useState({ q: '', category: '', stock: '', status: 'active' });
+  const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   const refresh = () => void qc.invalidateQueries({ queryKey: ['products'] });
   const remove = useMutation({ mutationFn: (id: string) => api(`/products/${id}`, { method: 'DELETE' }), onSuccess: refresh });
+  const all = products.data ?? [];
+  const categories = useMemo(() => [...new Set(all.map((p) => p.category).filter((c): c is string => Boolean(c)))].sort((a, b) => a.localeCompare(b, 'es')), [all]);
   if (!enabled) return <UpgradeNote feature="cash" />;
-  const list = (products.data ?? []).filter((p) => !q.trim() || [p.name, p.sku, p.category].some((x) => x?.toLowerCase().includes(q.trim().toLowerCase())));
-  const low = (products.data ?? []).filter((p) => p.active && p.low);
+  const q = f.q.trim().toLocaleLowerCase('es');
+  const list = all.filter(
+    (p) =>
+      (!q || [p.name, p.sku, p.category].some((x) => x?.toLocaleLowerCase('es').includes(q))) &&
+      (!f.category || (f.category === '-' ? !p.category : p.category === f.category)) &&
+      (!f.status || (f.status === 'active' ? p.active : !p.active)) &&
+      (!f.stock ||
+        (f.stock === 'low' ? p.low : f.stock === 'out' ? p.trackStock && p.stock <= 0 : f.stock === 'in' ? p.trackStock && p.stock > 0 : !p.trackStock)),
+  );
+  const low = all.filter((p) => p.active && p.low);
+  const filtered = Boolean(q || f.category || f.stock || f.status !== 'active');
+  const saveField = async (p: ProductDto, patch: Partial<ProductInput>) => {
+    await api(`/products/${p.id}`, { method: 'PUT', body: { ...productInputOf(p), ...patch } });
+    refresh();
+  };
+  const saveStock = async (p: ProductDto, qty: number) => {
+    await api(`/products/${p.id}/stock`, { method: 'POST', body: { locationId, mode: 'set', qty, note: null } });
+    refresh();
+  };
   return (
     <section className="card space-y-3" data-testid="products-tab">
       <div className="flex flex-wrap items-center gap-2">
-        <input className="input flex-1" placeholder={t('pos.search')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="input min-w-0 flex-1" placeholder={t('pos.search')} value={f.q} onChange={(e) => set({ q: e.target.value })} data-testid="products-search" />
         {picker}
         {businessManager && (
           <button type="button" className="btn-primary" onClick={() => setEdit({ id: null, v: emptyProduct() })} data-testid="new-product">{t('pos.newProduct')}</button>
         )}
       </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <select className="input !w-auto !py-1 !text-sm" aria-label={t('pos.category')} value={f.category} onChange={(e) => set({ category: e.target.value })} data-testid="products-category">
+          <option value="">{t('pos.category')}: {t('payments.any')}</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="-">{t('pos.inventory.noCategory')}</option>
+        </select>
+        <select className="input !w-auto !py-1 !text-sm" aria-label={t('pos.stock')} value={f.stock} onChange={(e) => set({ stock: e.target.value })} data-testid="products-stock">
+          <option value="">{t('pos.stock')}: {t('payments.any')}</option>
+          <option value="in">{t('pos.inventory.inStock')}</option>
+          <option value="low">{t('pos.inventory.lowOnly')}</option>
+          <option value="out">{t('pos.inventory.outOfStock')}</option>
+          <option value="untracked">{t('pos.inventory.untracked')}</option>
+        </select>
+        <select className="input !w-auto !py-1 !text-sm" aria-label={t('pos.active')} value={f.status} onChange={(e) => set({ status: e.target.value })} data-testid="products-status">
+          <option value="active">{t('pos.inventory.activeOnly')}</option>
+          <option value="inactive">{t('pos.inventory.inactiveOnly')}</option>
+          <option value="">{t('pos.inventory.allStatus')}</option>
+        </select>
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-secondary !py-1 text-sm" disabled={!list.length} onClick={() => void downloadInventory(list, { health, locationName })} data-testid="products-export">
+            ⬇ {filtered ? t('pos.inventory.exportFiltered', { count: list.length }) : t('pos.inventory.export')}
+          </button>
+          {businessManager && (
+            <>
+              <button type="button" className="btn-secondary !py-1 text-sm" onClick={() => setImporting(true)} data-testid="products-import">⬆ {t('pos.inventory.import')}</button>
+              <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => void downloadInventory(null, { health })}>{t('pos.inventory.template')}</button>
+            </>
+          )}
+        </span>
+      </div>
       {low.length > 0 && <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900" data-testid="low-stock">⚠️ {t('pos.lowStock', { names: low.map((p) => p.name).join(', ') })}</p>}
+      {(businessManager || manager) && list.length > 0 && <p className="text-xs text-slate-500">{t('pos.inventory.dblClickHint')}</p>}
       {products.isLoading ? (
         <Loading />
       ) : list.length === 0 ? (
-        <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">{t('pos.noProducts')}</p>
+        <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">{all.length ? t('payments.noMatch') : t('pos.noProducts')}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -753,13 +806,52 @@ export function ProductsTab() {
               {list.map((p) => (
                 <tr key={p.id} className={p.active ? '' : 'opacity-50'} data-testid="product-row">
                   <td className="py-2 pr-3">
-                    <div className="font-medium">{p.name}</div>
+                    <EditableCell
+                      value={p.name}
+                      display={<span className="font-medium">{p.name}</span>}
+                      parse={(s) => (s.trim() ? s.trim().slice(0, 120) : null)}
+                      onSave={(name) => saveField(p, { name })}
+                      canEdit={businessManager}
+                      testId="product-name"
+                    />
                     <div className="text-xs text-slate-500">
                       {[p.category, p.sku, health && p.requiresPrescription ? t('pos.rx') : null, p.iva === 'exento' ? t('pos.ivaExempt') : `IVA ${p.iva}%`].filter(Boolean).join(' · ')}
                     </div>
                   </td>
-                  <td className="py-2 pr-3 text-right">{money(p.priceCents)}</td>
-                  <td className={`py-2 pr-3 text-right font-semibold ${p.low ? 'text-amber-700' : ''}`}>{p.trackStock ? p.stock : '—'}</td>
+                  <td className="py-2 pr-3 text-right">
+                    <EditableCell
+                      value={String(p.priceCents / 100)}
+                      display={money(p.priceCents)}
+                      parse={(s) => {
+                        const n = Number(s.replace(/[$,\s]/g, ''));
+                        return s.trim() !== '' && Number.isFinite(n) && n >= 0 ? toCents(String(n)) : null;
+                      }}
+                      onSave={(priceCents) => saveField(p, { priceCents })}
+                      canEdit={businessManager}
+                      inputMode="decimal"
+                      className="!w-24 text-right"
+                      testId="product-price"
+                    />
+                  </td>
+                  <td className={`py-2 pr-3 text-right font-semibold ${p.low ? 'text-amber-700' : ''}`}>
+                    {p.trackStock ? (
+                      <EditableCell
+                        value={String(p.stock)}
+                        display={p.stock}
+                        parse={(s) => {
+                          const n = Number(s.trim());
+                          return Number.isInteger(n) && n >= 0 && n <= 100_000 ? n : null;
+                        }}
+                        onSave={(qty) => saveStock(p, qty)}
+                        canEdit={manager}
+                        inputMode="numeric"
+                        className="!w-20 text-right"
+                        testId="product-stock"
+                      />
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                   <td className="py-2 text-right">
                     <span className="inline-flex flex-wrap justify-end gap-2 text-xs">
                       {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'in' })} data-testid="stock-in">{t('pos.receive')}</button>}
@@ -779,9 +871,16 @@ export function ProductsTab() {
       {edit && <ProductModal value={edit.v} id={edit.id} locationId={locationId} onClose={() => setEdit(null)} onDone={refresh} />}
       {stock && <StockModal product={stock.p} mode={stock.mode} locationId={locationId} onClose={() => setStock(null)} onDone={refresh} />}
       {moves && <MovesModal product={moves} locationId={locationId} onClose={() => setMoves(null)} />}
+      {importing && <ImportModal locationId={locationId} locationName={locationName} onClose={() => setImporting(false)} onDone={refresh} />}
     </section>
   );
 }
+
+/** What PUT /products/:id takes, from what the list shows. */
+const productInputOf = (p: ProductDto): ProductInput => ({
+  name: p.name, sku: p.sku, category: p.category, priceCents: p.priceCents, costCents: p.costCents, trackStock: p.trackStock,
+  minStock: p.minStock, iva: p.iva, satKey: p.satKey, requiresPrescription: p.requiresPrescription, active: p.active,
+});
 
 function ProductModal({ value, id, locationId, onClose, onDone }: { value: ProductInput; id: string | null; locationId: string; onClose: () => void; onDone: () => void }) {
   const { t } = useTranslation();
@@ -902,27 +1001,5 @@ function MovesModal({ product, locationId, onClose }: { product: ProductDto; loc
         </ul>
       )}
     </Modal>
-  );
-}
-
-/** Punto de venta in the menu: selling, and the catalog for managers. */
-export function PosPage() {
-  const { t } = useTranslation();
-  const { manager } = useAccess();
-  const [tab, setTab] = useState<'sell' | 'products'>(() => (new URLSearchParams(window.location.search).get('tab') === 'products' ? 'products' : 'sell'));
-  const btn = (k: 'sell' | 'products') => `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
-  return (
-    <>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-slate-900">{t('nav.pos')}</h1>
-        {manager && (
-          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
-            <button type="button" role="tab" aria-selected={tab === 'sell'} className={btn('sell')} onClick={() => setTab('sell')}>{t('payments.tabs.pos')}</button>
-            <button type="button" role="tab" aria-selected={tab === 'products'} className={btn('products')} onClick={() => setTab('products')}>{t('payments.tabs.products')}</button>
-          </div>
-        )}
-      </div>
-      {tab === 'products' && manager ? <ProductsTab /> : <PosTab />}
-    </>
   );
 }

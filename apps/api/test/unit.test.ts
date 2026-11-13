@@ -10,6 +10,9 @@ import { signToken, slugify, verifyToken } from '../src/lib/auth.js';
 import { verifyMercadoPagoSignature } from '../src/integrations/mercadopago.js';
 import { whatsappAllowedFor } from '../src/integrations/whatsapp.js';
 import { parseCsfText } from '../src/lib/csf.js';
+import { readCsv, readXlsx, writeXlsx } from '@agenda/shared/xlsx';
+import { strToU8, zipSync } from 'fflate';
+import { planImport, toCentsCell, type Existing } from '../src/lib/product-import.js';
 
 describe('slugify', () => {
   it('removes accents and spaces', () => {
@@ -238,5 +241,75 @@ describe('parseCsfText (Constancia de Situación Fiscal)', () => {
     const other = parseCsfText('Recibo de luz CFE, total a pagar 350 pesos, periodo septiembre');
     expect(other.warnings).toContain('not_csf');
     expect(other.warnings).toContain('missing_rfc');
+  });
+});
+
+describe('xlsx', () => {
+  it('writes and reads back text, numbers and booleans', () => {
+    const rows = [['ID', 'Producto', 'Precio', 'Activo'], ['a1', 'Café & "pan" <ok>', 89.5, true], [null, 'Agua', 15, false]];
+    expect(readXlsx(writeXlsx(rows, { sheet: 'Inventario' }))).toEqual(rows);
+  });
+
+  it('reads files saved by Excel (shared strings, gaps, rich text)', () => {
+    const xml = (s: string) => strToU8(`<?xml version="1.0" encoding="UTF-8"?>${s}`);
+    const file = zipSync({
+      'xl/workbook.xml': xml('<workbook xmlns:r="r"><sheets><sheet name="Datos" sheetId="1" r:id="rId7"/></sheets></workbook>'),
+      'xl/_rels/workbook.xml.rels': xml('<Relationships><Relationship Id="rId7" Type="x" Target="worksheets/hoja.xml"/></Relationships>'),
+      'xl/sharedStrings.xml': xml('<sst><si><t>Producto</t></si><si><r><t>Gel </t></r><r><t>fijador</t></r></si><si><t>Precio</t></si></sst>'),
+      'xl/worksheets/hoja.xml': xml('<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>2</v></c></row><row r="3"><c r="A3" t="s"><v>1</v></c><c r="C3"><v>90</v></c></row></sheetData></worksheet>'),
+    });
+    expect(readXlsx(file)).toEqual([['Producto', null, 'Precio'], [], ['Gel fijador', null, 90]]);
+    expect(() => readXlsx(new Uint8Array([1, 2, 3]))).toThrow('not_xlsx');
+  });
+
+  it('reads CSV with commas or semicolons and quotes', () => {
+    expect(readCsv('Producto,Precio\n"Gel, fijador",90\r\nAgua,15\n')).toEqual([['Producto', 'Precio'], ['Gel, fijador', '90'], ['Agua', '15']]);
+    expect(readCsv('\uFEFFProducto;Precio\nPan;"1.234,50"')).toEqual([['Producto', 'Precio'], ['Pan', '1.234,50']]);
+  });
+});
+
+describe('inventory import plan', () => {
+  const gel: Existing = {
+    id: '11111111-1111-4111-8111-111111111111',
+    input: { name: 'Gel', sku: 'G1', category: 'Cabello', priceCents: 9000, costCents: 4000, trackStock: true, minStock: 2, iva: '16', satKey: null, requiresPrescription: false, active: true },
+    stock: 5,
+  };
+  const existing = new Map([[gel.id, gel]]);
+
+  it('reads money the way people type it', () => {
+    expect([toCentsCell(90), toCentsCell('$1,234.50'), toCentsCell('1.234,50'), toCentsCell('12 MXN'), toCentsCell('abc'), toCentsCell(-1)]).toEqual([9000, 123450, 123450, 1200, null, null]);
+  });
+
+  it('updates by ID, creates without one, and reports errors per row', () => {
+    const plan = planImport(
+      [
+        ['ID', 'Producto', 'Precio', 'Existencia', 'Costo', 'IVA', 'Clave SAT', 'Notas'],
+        [gel.id, 'Gel fijador', '95', 8, null, '16%', null, 'x'],
+        [null, 'Cera', 120, 3, 50, 'exento', 1010101, null],
+        [null, null, null, null, null, null, null, null],
+        [null, 'Sin precio', null, 1, null, null, null, null],
+        ['22222222-2222-4222-8222-222222222222', 'Otro', 10, null, null, null, null, null],
+        [null, 'Mal precio', 'diez', null, null, null, null, null],
+      ],
+      existing,
+      { health: false },
+    );
+    expect(plan.ignored).toEqual(['Notas']);
+    const [upd, cre, noPrice, unknown, bad] = plan.rows;
+    expect(upd).toMatchObject({ row: 2, action: 'update', id: gel.id, stock: 8 });
+    expect(upd!.changes.sort()).toEqual(['costCents', 'name', 'priceCents', 'stock']);
+    expect(upd!.values).toMatchObject({ name: 'Gel fijador', priceCents: 9500, costCents: null, sku: 'G1', category: 'Cabello', minStock: 2 });
+    expect(cre).toMatchObject({ row: 3, action: 'create', stock: 3, values: { name: 'Cera', priceCents: 12000, costCents: 5000, iva: 'exento', satKey: '01010101' } });
+    expect(noPrice).toMatchObject({ row: 5, action: 'error', error: 'missing_price' });
+    expect(unknown).toMatchObject({ row: 6, action: 'error', error: 'unknown_id' });
+    expect(bad).toMatchObject({ row: 7, action: 'error', error: 'bad_price' });
+  });
+
+  it('a downloaded file uploaded as is changes nothing; missing columns keep what is saved', () => {
+    const same = planImport([['ID', 'Producto', 'SKU', 'Categoría', 'Precio', 'Costo', 'Controla inventario', 'Existencia', 'Mínimo', 'IVA', 'Clave SAT', 'Activo'], [gel.id, 'Gel', 'G1', 'Cabello', 90, 40, 'Sí', 5, 2, '16', null, 'Sí']], existing, { health: false });
+    expect(same.rows).toEqual([expect.objectContaining({ action: 'unchanged', changes: [] })]);
+    const onlyStock = planImport([['ID', 'Existencia'], [gel.id, 0]], existing, { health: false });
+    expect(onlyStock.rows[0]).toMatchObject({ action: 'update', changes: ['stock'], stock: 0 });
+    expect(planImport([['Precio', 'Cantidad'], [1, 2]], existing, { health: false }).headerError).toBe('import_headers');
   });
 });
