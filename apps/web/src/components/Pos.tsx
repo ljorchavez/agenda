@@ -950,7 +950,7 @@ export function ProductsTab() {
       td: (p) => <EditableCell value={p.satKey ?? ''} display={p.satKey ?? NONE} parse={(s) => (/^\d{8}$/.test(s.trim()) ? s.trim() : null)} allowEmpty onSave={(satKey) => saveField(p, { satKey })} canEdit={businessManager} inputMode="numeric" className="!w-28" testId="product-sat" />,
     },
     ...(health ? [{ key: 'rx', label: t('pos.rx'), td: (p: ProductDto) => yesNo(p, 'requiresPrescription', t('pos.rx')) }] : []),
-    { key: 'active', label: t('pos.active'), td: (p) => yesNo(p, 'active', t('pos.active')) },
+    { key: 'active', label: t('pos.active'), hidden: true, td: (p) => yesNo(p, 'active', t('pos.active')) },
     {
       key: 'actions', label: t('columns.actions'), required: true, className: 'text-right',
       td: (p) => (
