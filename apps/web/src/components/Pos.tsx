@@ -954,12 +954,12 @@ export function ProductsTab() {
     {
       key: 'actions', label: t('columns.actions'), required: true, className: 'text-right',
       td: (p) => (
-        <span className="inline-flex flex-wrap justify-end gap-2 text-xs">
-          {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'in' })} data-testid="stock-in">{t('pos.receive')}</button>}
-          {p.trackStock && <button type="button" className="text-brand-700 hover:underline" onClick={() => setStock({ p, mode: 'set' })}>{t('pos.count')}</button>}
-          <button type="button" className="text-brand-700 hover:underline" onClick={() => setMoves(p)}>{t('pos.history')}</button>
-          {businessManager && <button type="button" className="text-brand-700 hover:underline" onClick={() => setEdit({ id: p.id, v: { ...p } })}>{t('common.edit')}</button>}
-          {businessManager && p.active && <button type="button" className="text-rose-700 hover:underline" onClick={() => window.confirm(t('pos.deleteConfirm')) && remove.mutate(p.id)}>{t('common.delete')}</button>}
+        <span className="inline-flex justify-end gap-0.5 whitespace-nowrap">
+          {p.trackStock && <IconBtn icon="📥" label={t('pos.receive')} onClick={() => setStock({ p, mode: 'in' })} testId="stock-in" />}
+          {p.trackStock && <IconBtn icon="🔢" label={t('pos.count')} onClick={() => setStock({ p, mode: 'set' })} />}
+          <IconBtn icon="🕘" label={t('pos.history')} onClick={() => setMoves(p)} />
+          {businessManager && <IconBtn icon="✏️" label={t('common.edit')} onClick={() => setEdit({ id: p.id, v: { ...p } })} />}
+          {businessManager && p.active && <IconBtn icon="🗑️" label={t('common.delete')} onClick={() => window.confirm(t('pos.deleteConfirm')) && remove.mutate(p.id)} />}
         </span>
       ),
     },
@@ -1223,5 +1223,14 @@ function MovesModal({ product, locationId, onClose }: { product: ProductDto; loc
         </ul>
       )}
     </Modal>
+  );
+}
+
+/** Small square action button for table rows: the icon shows, the name is the tooltip and the accessible label. */
+function IconBtn({ icon, label, onClick, testId }: { icon: string; label: string; onClick: () => void; testId?: string }) {
+  return (
+    <button type="button" title={label} aria-label={label} onClick={onClick} data-testid={testId} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-base hover:bg-slate-100">
+      <span aria-hidden>{icon}</span>
+    </button>
   );
 }

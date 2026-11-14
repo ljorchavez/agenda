@@ -308,11 +308,11 @@ export function PaymentsPage() {
 const UPCOMING: CollectionState[] = ['upcoming_unpaid', 'upcoming_deposit', 'upcoming_paid'];
 const PAST: CollectionState[] = ['past_unpaid', 'past_partial', 'past_paid'];
 
-function StateBadge({ state }: { state: CollectionState }) {
+function StateBadge({ state, wrap }: { state: CollectionState; wrap?: boolean }) {
   const { t } = useTranslation();
   const pill = COLLECTION_PILL[state].pill;
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${PAYMENT_PILL[pill]}`}>
+    <span className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${wrap ? '' : 'whitespace-nowrap'} ${PAYMENT_PILL[pill]}`}>
       <span aria-hidden>{PAYMENT_PILL_TEXT[pill]}</span>
       {t(`collections.states.${state}`)}
     </span>
@@ -454,9 +454,9 @@ function CollectionsTab() {
         type="button"
         aria-pressed={on}
         onClick={() => set({ state: on ? '' : s })}
-        className={`flex min-w-0 flex-1 flex-col items-start rounded-lg border px-3 py-2 text-left ${on ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-slate-200 bg-white hover:border-slate-400'}`}
+        className={`flex min-w-[9.5rem] flex-1 flex-col items-start rounded-lg border px-3 py-2 text-left ${on ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-slate-200 bg-white hover:border-slate-400'}`}
       >
-        <StateBadge state={s} />
+        <StateBadge state={s} wrap />
         <span className="mt-1 text-lg font-semibold">{money(x.amount)}</span>
         <span className="text-xs text-slate-500">{t('collections.bookingsN', { count: x.count })}</span>
       </button>
