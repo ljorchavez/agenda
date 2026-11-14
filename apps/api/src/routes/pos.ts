@@ -277,7 +277,7 @@ posRoutes.post('/products/ai-suggest', requireBusinessManager, async (c) => {
   const db = getDb();
   const tenantId = c.get('tenantId');
   await assertFeature(db, tenantId, 'cash');
-  if (!aiEnabled()) throw new AppError(503, 'ai_off', 'AI is not configured');
+  if (!aiEnabled()) throw new AppError(422, 'ai_off', 'AI is not configured');
   const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { businessType: true, settings: true } });
   const fromProducts = await db.selectDistinct({ c: products.category }).from(products).where(eq(products.tenantId, tenantId));
   const categories = [...new Set([...posSettingsOf(t?.settings as TenantSettings | null).categories, ...fromProducts.map((r) => r.c).filter((x): x is string => Boolean(x))])].slice(0, 80);

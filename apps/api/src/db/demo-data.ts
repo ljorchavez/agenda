@@ -637,8 +637,10 @@ async function seedBarbershop() {
   // A customer who often doesn't show up, booked again soon: the agenda flags it (no-show risk)
   const flaky = custs[1]!.id;
   const nowMs = now.toMillis();
-  const theirs = rows.filter((r) => r.customerId === flaky && (r.startsAt as Date).getTime() < nowMs).slice(-4);
-  theirs.slice(0, 3).forEach((r) => (r.status = 'no_show'));
+  const past = rows.filter((r) => r.customerId === flaky && (r.startsAt as Date).getTime() < nowMs);
+  // A short history (their older visits go to someone else): 3 of the last 4 missed
+  past.slice(0, -4).forEach((r) => (r.customerId = custs[2]!.id));
+  past.slice(-4, -1).forEach((r) => (r.status = 'no_show'));
   const soon = rows.find((r) => (r.startsAt as Date).getTime() > nowMs + 3_600_000 && r.status === 'scheduled');
   if (soon) soon.customerId = flaky;
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];

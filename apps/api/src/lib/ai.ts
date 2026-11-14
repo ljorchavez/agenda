@@ -57,7 +57,7 @@ export function firstJson(text: string): unknown {
 /** One question to Claude that must come back as a JSON object. */
 export async function askJson(db: Db, tenantId: string, feature: AiFeature, o: { system: string; content: Block[]; maxTokens?: number }): Promise<unknown> {
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new AppError(503, 'ai_off', 'AI is not configured');
+  if (!key) throw new AppError(422, 'ai_off', 'AI is not configured');
   await takeQuota(db, tenantId, feature);
   let r: Response;
   try {
