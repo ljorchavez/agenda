@@ -2,8 +2,9 @@ name: CI
 
 on:
   pull_request:
+  # Every branch: work is checked before it reaches main
   push:
-    branches: [main]
+    branches: ['**']
 
 jobs:
   test:
@@ -32,3 +33,55 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://agenda:agenda@localhost:5432/agenda_test
       - run: pnpm --filter @agenda/web build
+
+  # The app in a real browser (Playwright): the same end-to-end checks run before publishing
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agenda
+          POSTGRES_PASSWORD: agenda
+          POSTGRES_DB: agenda
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U agenda"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://agenda:agenda@localhost:5432/agenda
+      JWT_SECRET: e2e-secret-0123456789abcdef0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @agenda/api db:migrate && pnpm --filter @agenda/api db:seed
+      - name: Start the API and the web app
+        run: |
+          (cd apps/api && nohup npx tsx src/server.ts > /tmp/api.log 2>&1 &)
+          (cd apps/web && nohup npx vite --port 5173 --host > /tmp/web.log 2>&1 &)
+          for i in $(seq 1 60); do curl -fsS http://localhost:3000/api/health >/dev/null 2>&1 && curl -fsS http://localhost:5173 >/dev/null 2>&1 && break; sleep 2; done
+      - name: Playwright
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          cp "$GITHUB_WORKSPACE"/e2e/*.mjs /tmp/pw/
+      - name: End-to-end checks
+        run: |
+          cd /tmp/pw
+          status=0
+          for s in ui pos-inventory pos-offline fiscal; do
+            echo "::group::$s"
+            node $s.mjs | tee /tmp/$s.log || status=1
+            echo "::endgroup::"
+            # Failed checks show as annotations on the run
+            grep -E '^FAIL' /tmp/$s.log | head -20 | while read -r line; do echo "::error title=$s::$line"; done
+            grep -E 'Error|Timeout' /tmp/$s.log | head -3 | while read -r line; do echo "::error title=$s crash::$line"; done
+          done
+          exit $status
+      - if: failure()
+        run: tail -40 /tmp/api.log; tail -20 /tmp/web.log
