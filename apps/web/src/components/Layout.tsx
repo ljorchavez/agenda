@@ -2,7 +2,7 @@ import { InstallAppBanner } from './InstallApp';
 import { Link } from 'react-router-dom';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { isManager, kindConfig, PLAN_LIMITS, type BusinessKind } from '@agenda/shared';
+import { bookingsEnabled, isManager, kindConfig, PLAN_LIMITS, type BusinessKind } from '@agenda/shared';
 import { useAuth } from '../lib/auth';
 import { useOfflineSync } from '../lib/usePosOffline';
 
@@ -24,9 +24,11 @@ const NAV: NavItem[] = [
  * Same sections for every kind of business; only the wording changes (i18n `kinds.<kind>.*`).
  * Kinds that book without choosing a service (party size, duration) don't need the catalogue.
  */
-function navFor(kind: BusinessKind, manager: boolean, pos: boolean): (NavItem & { label: string; short: string })[] {
+function navFor(kind: BusinessKind, manager: boolean, pos: boolean, bookings = true): (NavItem & { label: string; short: string })[] {
   const cfg = kindConfig(kind);
   return NAV.filter((n) => {
+    // A shop that only sells at the counter has no agenda, services or people to book
+    if (!bookings && ['calendar', 'services', 'resources'].includes(n.key)) return false;
     // Team members (colaboradores) work their own book; catalogue and resources stay with managers.
     if (!manager && (n.key === 'services' || n.key === 'resources')) return false;
     if (n.key === 'services' && (cfg.partySize || cfg.durations)) return false;
@@ -88,7 +90,7 @@ export function Layout() {
   const { tenant, user, logout } = useAuth();
   // A register uploads the sales it charged without internet, from any page
   useOfflineSync();
-  const nav = navFor(tenant?.kind ?? 'appointments', isManager(user?.role), PLAN_LIMITS[tenant?.plan ?? 'free'].cash);
+  const nav = navFor(tenant?.kind ?? 'appointments', isManager(user?.role), PLAN_LIMITS[tenant?.plan ?? 'free'].cash, bookingsEnabled(tenant?.settings));
   const mobileNav = nav.filter((n) => !n.desktopOnly);
   const navigate = useNavigate();
 

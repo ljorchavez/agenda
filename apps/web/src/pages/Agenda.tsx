@@ -1,12 +1,13 @@
 import { AppointmentForms } from '../components/Forms';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
 import {
   isHealthType,
   bookingPriceCents,
+  bookingsEnabled,
   computeDepositCents,
   couponsEnabled,
   rewardSettingsOf,
@@ -107,6 +108,13 @@ const shortName = (name: string) => {
  * only changes labels and which form opens (KIND_CONFIG).
  */
 export function AgendaPage() {
+  const { tenant } = useAuth();
+  // A shop that only sells at the counter lands on the point of sale instead
+  if (tenant && !bookingsEnabled(tenant.settings)) return <Navigate to="/pos" replace />;
+  return <AgendaCalendar />;
+}
+
+function AgendaCalendar() {
   const { t, i18n } = useTranslation();
   const { tenant } = useAuth();
   const kind = tenant?.kind ?? 'appointments';

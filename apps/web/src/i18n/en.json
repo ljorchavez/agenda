@@ -352,6 +352,7 @@
     "remindersEnabled": "Send a reminder before the appointment (email and WhatsApp)",
     "reminderHoursBefore": "Hours before the appointment",
     "onlineBooking": "Online booking",
+    "bookingsEnabled": "Use the agenda and bookings (turn off if you only sell at the counter)",
     "onlineBookingEnabled": "Let customers book by themselves",
     "publicLink": "Your booking page",
     "language": "Language",

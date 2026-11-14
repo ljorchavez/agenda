@@ -352,6 +352,7 @@
     "remindersEnabled": "Enviar recordatorio antes de la cita (correo y WhatsApp)",
     "reminderHoursBefore": "Horas antes de la cita",
     "onlineBooking": "Reservas en línea",
+    "bookingsEnabled": "Usar agenda y reservas (apágalo si solo vendes en mostrador)",
     "onlineBookingEnabled": "Permitir que tus clientes agenden solos",
     "publicLink": "Tu página de reservas",
     "language": "Idioma",

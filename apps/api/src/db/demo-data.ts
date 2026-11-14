@@ -2,7 +2,8 @@
  * Demo data. Run with `pnpm db:seed`, and reset every night by the `/api/cron/reset-demo` job.
  * One owner login (demo@lugali.com / demo1234) for every demo business, switchable in the app:
  * nutrition clinic, restaurant, barbershop with two locations, yoga studio, padel club, medical practice,
- * dental clinic, psychologist and physiotherapy (health giros with clinical records).
+ * dental clinic, psychologist and physiotherapy (health giros with clinical records), and a Sayer paint
+ * store that only uses the point of sale (demo-store.ts, also miv@lugali.com).
  * Role demos (same password): recepcion@ (admin), gerente@ (Guadalajara manager), memo@ and diego@
  * (team members), pedro@ (nutrition staff). Plus clearly-labelled `demo-*` directory listings.
  */
@@ -12,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { CLINICAL_TEMPLATES, DEFAULT_PAYMENT_SETTINGS, DEFAULT_TENANT_SETTINGS, type FormAnswerValue, type FormField } from '@agenda/shared';
 import { hashPassword } from '../lib/auth.js';
 import { getDb } from './client.js';
+import { seedStore } from './demo-store.js';
 import {
   appointments,
   cashClosings,
@@ -240,6 +242,7 @@ export async function seedDemo() {
   await seedExtras();
   await seedClinical();
   await seedProducts();
+  await seedStore();
   console.log(`All demo businesses are owned by ${DEMO_OWNER.email} / demo1234 (switch between them in the app)`);
 }
 

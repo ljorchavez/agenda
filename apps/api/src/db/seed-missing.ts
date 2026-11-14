@@ -5,6 +5,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { closeDb, getDb } from './client.js';
 import { DEMO_OWNER, seedDemo, seedProducts } from './demo-data.js';
+import { seedStore, STORE_SLUG } from './demo-store.js';
 import { products, tenants, users } from './schema.js';
 
 const REQUIRED = ['dental-demo', 'psicologia-demo', 'fisioterapia-demo'];
@@ -14,6 +15,11 @@ async function main() {
   const found = await db.select({ slug: tenants.slug }).from(tenants).where(inArray(tenants.slug, REQUIRED));
   const owner = await db.select({ id: users.id }).from(users).where(eq(users.email, DEMO_OWNER.email));
   if (found.length === REQUIRED.length && owner.length) {
+    // The shop demo (point of sale only) is added on its own, without resetting the others
+    if (!(await db.query.tenants.findFirst({ where: eq(tenants.slug, STORE_SLUG) }))) {
+      await seedStore();
+      return console.log('Store demo added');
+    }
     // Demos created before the point of sale get its products without a full reset
     const demo = await db.query.tenants.findFirst({ where: eq(tenants.slug, 'barberia-demo') });
     if (demo && !(await db.query.products.findFirst({ where: eq(products.tenantId, demo.id) }))) {

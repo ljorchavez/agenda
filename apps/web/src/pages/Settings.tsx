@@ -371,6 +371,10 @@ function BusinessSettings() {
             </button>
           </div>
           <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!canEdit} checked={settings.bookings?.enabled !== false} onChange={(e) => setSettings({ ...settings, bookings: { enabled: e.target.checked } })} data-testid="bookings-enabled" />
+            {t('settings.bookingsEnabled')}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" disabled={!canEdit} checked={settings.onlineBookingEnabled} onChange={(e) => setSettings({ ...settings, onlineBookingEnabled: e.target.checked })} />
             {t('settings.onlineBookingEnabled')}
           </label>

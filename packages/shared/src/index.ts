@@ -483,6 +483,8 @@ export const tenantSettingsSchema = z.object({
   reviews: z.object({ public: z.boolean() }).optional(),
   /** Point of sale: what happens without stock, and the product categories to choose from */
   pos: posSettingsSchema.optional(),
+  /** Businesses that only sell at the counter turn the agenda off (default: on) */
+  bookings: z.object({ enabled: z.boolean() }).optional(),
   /** Who gets a booking made with "Cualquiera disponible" */
   assignment: z
     .object({
@@ -492,6 +494,8 @@ export const tenantSettingsSchema = z.object({
     })
     .optional(),
 });
+/** False when the business doesn't take bookings (a shop that only uses the point of sale). */
+export const bookingsEnabled = (settings: { bookings?: { enabled?: boolean } } | null | undefined) => settings?.bookings?.enabled !== false;
 /** Reviews are shown publicly only from this many on (one bad first review doesn't define a business). */
 export const MIN_PUBLIC_REVIEWS = 3;
 export const reviewsArePublic = (settings: { reviews?: { public?: boolean } } | null | undefined) => settings?.reviews?.public !== false;

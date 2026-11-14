@@ -75,7 +75,7 @@ jobs:
           set +e
           cd /tmp/pw
           status=0
-          for s in ui pos-inventory pos-offline fiscal; do
+          for s in ui pos-inventory pos-offline fiscal store-demo; do
             node $s.mjs > /tmp/$s.log 2>&1
             rc=$?
             echo "::group::$s (exit $rc, $(grep -c '^PASS' /tmp/$s.log) passed)"
