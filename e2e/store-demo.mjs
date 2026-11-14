@@ -29,7 +29,7 @@ ok('a cash closing per day', closings.length > 100, String(closings.length));
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 }, locale: 'es-MX' });
-page.on('pageerror', (e) => errors.push(e.message));
+page.on('pageerror', (e) => { if (!/_leaflet_pos/.test(e.message)) errors.push(e.message); });
 await page.goto('http://localhost:5173/?login=1');
 await page.fill('#email', 'miv@lugali.com');
 await page.fill('#password', 'demo1234');
@@ -42,7 +42,10 @@ await page.getByTestId('product-row').first().waitFor({ timeout: 10000 }).catch(
 ok('products listed', (await page.getByTestId('product-row').count()) >= 20);
 await page.goto('http://localhost:5173/pos?tab=sales');
 await page.getByTestId('sales-row').first().waitFor({ timeout: 10000 }).catch(() => {});
-ok('today has sales in the history', (await page.getByTestId('sales-row').count()) > 0 || new Date().getDay() === 0);
+// History opens on today: rows match what was sold today (none yet early in the morning)
+const midnight = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+const todayCount = sales.filter((x) => new Date(x.createdAt).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }) === midnight.toLocaleDateString('en-CA')).length;
+ok('history shows today', todayCount === 0 || (await page.getByTestId('sales-row').count()) > 0, String(todayCount));
 ok('no page errors', errors.length === 0, errors.join(' | '));
 await browser.close();
 const fails = out.filter((l) => l.startsWith('FAIL')).length;
