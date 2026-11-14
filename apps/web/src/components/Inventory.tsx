@@ -68,7 +68,7 @@ async function readTable(file: File): Promise<Cell[][]> {
 }
 
 /** Upload an Excel (or CSV): shows what would change, then applies it. */
-export function ImportModal({ locationId, locationName, onClose, onDone }: { locationId: string; locationName: string | null; onClose: () => void; onDone: () => void }) {
+export function ImportModal({ locationId, locationName, onTemplate, onClose, onDone }: { locationId: string; locationName: string | null; onTemplate?: () => void; onClose: () => void; onDone: () => void }) {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
   const [table, setTable] = useState<Cell[][] | null>(null);
@@ -102,6 +102,9 @@ export function ImportModal({ locationId, locationName, onClose, onDone }: { loc
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn-secondary" onClick={() => input.current?.click()} data-testid="import-pick">{fileName ? t('pos.inventory.otherFile') : t('pos.inventory.pickFile')}</button>
           {fileName && <span className="text-slate-600">{fileName}</span>}
+          {!fileName && onTemplate && (
+            <button type="button" className="text-xs text-brand-700 hover:underline" onClick={onTemplate}>{t('pos.inventory.template')}</button>
+          )}
           <input
             ref={input}
             type="file"

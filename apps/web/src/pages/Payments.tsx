@@ -15,7 +15,7 @@ import {
   type CollectionState,
   type PaymentDto,
 } from '@agenda/shared';
-import { Empty, ErrorText, Loading, Modal, PageHeader, usePaged } from '../components/ui';
+import { Empty, ErrorText, Loading, Modal, PageHeader, PageTabs, usePaged } from '../components/ui';
 import { CashTab, CommissionsTab } from '../components/Cash';
 import { useAccess } from '../lib/auth';
 import { COLLECTION_PILL, PAYMENT_PILL, PAYMENT_PILL_TEXT } from '../lib/status';
@@ -23,7 +23,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { dateTime, money, toCents } from '../lib/format';
 import { SortTh, sortRows, useSort } from '../components/SortableTable';
-import { headCells, rowCells, useColumns } from '../components/Columns';
+import { DataTable, useColumns } from '../components/Columns';
 import { ReportsView } from './Reports';
 import { FILTER_CTRL, FilterBar } from '../components/FilterBar';
 
@@ -259,18 +259,7 @@ function MovementsTab() {
       ) : !rows.length ? (
         <Empty>{data?.length ? t('payments.noMatch') : t('payments.empty')}</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>{headCells(cols)}</tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {pageRows.map((p) => (
-                <tr key={p.id}>{rowCells(cols, p)}</tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable cols={cols} rows={pageRows} rowKey={(p) => p.id} />
       )}
       {pager}
     </>
@@ -297,22 +286,10 @@ export function PaymentsPage() {
     if (moved === 'pos' || moved === 'products') navigate(moved === 'pos' ? '/pos' : '/pos?tab=products', { replace: true });
   }, [moved, navigate]);
   const tab: Tab = asked && tabs.includes(asked) ? asked : 'bookings';
-  const tabBtn = (k: Tab) =>
-    `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
   return (
     <>
-      <PageHeader
-        title={t('payments.title')}
-        actions={
-          <div className="inline-flex flex-wrap rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
-            {tabs.map((k) => (
-              <button key={k} type="button" role="tab" aria-selected={tab === k} className={tabBtn(k)} onClick={() => setParams(k === 'bookings' ? {} : { tab: k })}>
-                {t(`payments.tabs.${k}`)}
-              </button>
-            ))}
-          </div>
-        }
-      />
+      <PageHeader title={t('payments.title')} tight />
+      <PageTabs tabs={tabs.map((k) => ({ id: k, label: t(`payments.tabs.${k}`) }))} value={tab} onChange={(k) => setParams(k === 'bookings' ? {} : { tab: k })} label={t('payments.title')} />
       {tab === 'bookings' ? (
         <CollectionsTab />
       ) : tab === 'movements' ? (
@@ -549,18 +526,7 @@ function CollectionsTab() {
       ) : !rows.length ? (
         <Empty>{data?.length ? t('payments.noMatch') : t('collections.empty')}</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>{headCells(cols)}</tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {pageRows.map((r) => (
-                <tr key={r.appointmentId}>{rowCells(cols, r)}</tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable cols={cols} rows={pageRows} rowKey={(r) => r.appointmentId} />
       )}
       {pager}
       {paying && <RecordPaymentModal row={paying} onClose={() => setPaying(null)} />}

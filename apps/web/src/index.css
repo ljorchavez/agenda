@@ -13,14 +13,15 @@
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
 }
+/* Every button has a 1px border (transparent on filled ones) so all buttons and fields are the same height */
 @utility btn-primary {
-  @apply btn bg-brand-700 text-white hover:bg-brand-800;
+  @apply btn border border-transparent bg-brand-700 text-white hover:bg-brand-800;
 }
 @utility btn-secondary {
   @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
 }
 @utility btn-danger {
-  @apply btn bg-red-600 text-white hover:bg-red-700;
+  @apply btn border border-transparent bg-red-600 text-white hover:bg-red-700;
 }
 @utility input {
   @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100;
@@ -35,7 +36,8 @@
 /* Same height for every one-line field (text, select, date, time), so rows line up. */
 input.input:not([type='checkbox']):not([type='radio']):not([class*='!py-']),
 select.input:not([class*='!py-']) {
-  height: 2.5rem;
+  /* = a button's height (py-2 + one line + border), so fields and buttons line up */
+  height: 2.375rem;
 }
 
 /* Tab bars that scroll sideways on phones: no scrollbar showing on computers */

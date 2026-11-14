@@ -141,6 +141,15 @@ for (const size of SIZES) {
   await ctx.close();
 }
 await browser.close();
-console.log(report.join('\n'));
+// Same problem on several pages: one line, with the pages
+const grouped = new Map();
+for (const line of report) {
+  const [size, page, ...rest] = line.split(' ');
+  const what = rest.join(' ').replace(/ "[^"]*"/g, '');
+  if (what.startsWith('CONTROL-HEIGHTS')) continue;
+  const key = `${size} ${what}`;
+  grouped.set(key, [...(grouped.get(key) ?? []), page]);
+}
+for (const [what, pages] of grouped) console.log(`${what}  @ ${pages.join(' ')}`);
 console.log('--- STYLES (same kind of element should look the same) ---');
 for (const [s, where] of styles) console.log(`${s}  <- ${where.slice(0, 6).join(' ')}${where.length > 6 ? ` +${where.length - 6}` : ''}`);

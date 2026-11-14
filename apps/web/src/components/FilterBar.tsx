@@ -2,7 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 /** Small control style shared by every filter bar. */
-export const FILTER_CTRL = 'input !w-auto !py-1 !px-2 !text-sm';
+/** Filters and toolbars: one control height (36px) everywhere, so rows line up. */
+export const FILTER_CTRL = 'input !h-9 !w-auto !py-0 !px-2.5 !text-sm';
+/** Buttons that sit in a filter row or toolbar, same height as the controls. */
+export const TOOLBAR_BTN = 'inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40';
 
 /**
  * Compact filters: one row with the main controls (period, search) and a "Filtros" button that
@@ -30,7 +33,7 @@ export function FilterBar({
             type="button"
             aria-expanded={open}
             onClick={() => setOpen(!open)}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-medium ${active ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium ${active ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
           >
             <span aria-hidden>⚲</span>
             {t('filters.more')}

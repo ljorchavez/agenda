@@ -8,7 +8,7 @@ import { useAccess } from '../lib/auth';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
 import { useMyLocations, useResources, useServices } from '../lib/queries';
 import { ErrorText, Loading } from './ui';
-import { rowCells, useColumns } from './Columns';
+import { DataTable, useColumns } from './Columns';
 import { UpgradeNote, useFeature } from './Sales';
 
 const ymd = (d: Date) => format(d, 'yyyy-MM-dd');
@@ -76,22 +76,11 @@ export function CommissionsTab() {
       </div>
       {editing && <CommissionRates />}
       {rep.isLoading ? <Loading /> : (
-        <div className="card overflow-x-auto !p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs text-slate-500">
-              <tr>{cols.map((c) => <th key={c.key} className={`px-3 py-2 ${c.className?.includes('text-right') ? 'text-right' : ''}`}>{c.label}</th>)}</tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(d?.rows ?? []).map((r) => <tr key={r.resourceId}>{rowCells(cols, r, 'px-3 py-2')}</tr>)}
-              {d?.rows.length === 0 && <tr><td colSpan={cols.length} className="px-3 py-4 text-center text-slate-500">{t('cash.noCompleted')}</td></tr>}
-            </tbody>
-            {(d?.rows.length ?? 0) > 1 && (
-              <tfoot className="bg-slate-50 font-semibold">
-                <tr>{cols.map((c) => <td key={c.key} className={`px-3 py-2 ${c.className?.includes('text-right') ? 'text-right' : ''}`}>{foot[c.key] ?? ''}</td>)}</tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
+        d?.rows.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">{t('cash.noCompleted')}</p>
+        ) : (
+          <DataTable cols={cols} rows={d?.rows ?? []} rowKey={(r) => r.resourceId} foot={(d?.rows.length ?? 0) > 1 ? foot : undefined} />
+        )
       )}
       <p className="text-xs text-slate-500">{t('cash.commissionHelp')}</p>
     </div>

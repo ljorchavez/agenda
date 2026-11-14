@@ -47,8 +47,8 @@ export function ResourcesPage() {
       <PageHeader
         title={t(`kinds.${kind}.resources`)}
         actions={manager && <button className="btn-primary" onClick={() => setEditing('new')}>{t(`kinds.${kind}.addResource`)}</button>}
+        subtitle={t(`kinds.${kind}.resourcesHelp`)}
       />
-      <p className="-mt-4 mb-4 max-w-2xl text-sm text-slate-500">{t(`kinds.${kind}.resourcesHelp`)}</p>
       {resources.isLoading ? (
         <Loading />
       ) : list.length === 0 ? (
@@ -61,7 +61,7 @@ export function ResourcesPage() {
               data-testid="resource-card"
               disabled={!canEdit(r)}
               onClick={() => setEditing(r)}
-              className={`card !p-4 text-left ${r.active ? '' : 'opacity-60'} ${canEdit(r) ? 'hover:border-brand-500' : ''}`}
+              className={`card text-left ${r.active ? '' : 'opacity-60'} ${canEdit(r) ? 'hover:border-brand-500' : ''}`}
             >
               <div className="flex items-center gap-3">
                 <Avatar name={r.name} color={r.color} photoUrl={r.photoUrl} size={44} />

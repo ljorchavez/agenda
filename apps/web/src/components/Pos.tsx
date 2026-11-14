@@ -50,9 +50,10 @@ import { CustomerPicker } from './CustomerPicker';
 import { InvoiceModal, useInvoicing } from './Invoicing';
 import { UpgradeNote, useFeature } from './Sales';
 import { openTicket } from '../pages/Ticket';
-import { ErrorText, Loading, Modal, Switch } from './ui';
+import { Empty, ErrorText, Loading, Modal, Switch } from './ui';
 import { EditableCell, ImportModal, downloadInventory } from './Inventory';
-import { headCells, rowCells, useColumns } from './Columns';
+import { FILTER_CTRL, TOOLBAR_BTN } from './FilterBar';
+import { DataTable, useColumns } from './Columns';
 import { CameraScanModal, CategoryField, SatKeyField, cameraScanAvailable, suggestSku, useScannerInput } from './ProductFields';
 import { PosSettingsModal, useCategoryList, usePosSettings } from './PosSettings';
 
@@ -483,7 +484,7 @@ export function PosTab() {
         ) : products.isError && !products.data ? (
           <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">{reg.on ? t('pos.offline.noCatalog') : t('pos.offline.needRegister')}</p>
         ) : filtered.length === 0 ? (
-          <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">{(products.data ?? []).length ? t('pos.noMatch') : t('pos.noProducts')}</p>
+          <Empty compact>{(products.data ?? []).length ? t('pos.noMatch') : t('pos.noProducts')}</Empty>
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="pos-products">
             {filtered.map((p) => {
@@ -976,68 +977,50 @@ export function ProductsTab() {
   const low = all.filter((p) => p.active && p.low);
   const filtered = Boolean(q || f.category || f.stock || f.status !== 'active');
   return (
-    <section className="card space-y-3" data-testid="products-tab">
+    <section className="space-y-3" data-testid="products-tab">
       <div className="flex flex-wrap items-center gap-2">
-        <input className="input min-w-0 flex-1" placeholder={t('pos.search')} value={f.q} onChange={(e) => set({ q: e.target.value })} data-testid="products-search" />
-        {businessManager && (
-          <>
-            <button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)} data-testid="pos-settings-open">⚙ {t('pos.settings.button')}</button>
-            <button type="button" className="btn-primary" onClick={() => setEdit({ id: null, v: emptyProduct() })} data-testid="new-product">{t('pos.newProduct')}</button>
-          </>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <select className="input !w-auto !py-1 !text-sm" aria-label={t('pos.category')} value={f.category} onChange={(e) => set({ category: e.target.value })} data-testid="products-category">
+        <input className={`${FILTER_CTRL} min-w-[12rem] flex-1`} placeholder={t('pos.search')} value={f.q} onChange={(e) => set({ q: e.target.value })} data-testid="products-search" />
+        <select className={FILTER_CTRL} aria-label={t('pos.category')} value={f.category} onChange={(e) => set({ category: e.target.value })} data-testid="products-category">
           <option value="">{t('pos.category')}: {t('payments.any')}</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           <option value="-">{t('pos.inventory.noCategory')}</option>
         </select>
-        <select className="input !w-auto !py-1 !text-sm" aria-label={t('pos.stock')} value={f.stock} onChange={(e) => set({ stock: e.target.value })} data-testid="products-stock">
+        <select className={FILTER_CTRL} aria-label={t('pos.stock')} value={f.stock} onChange={(e) => set({ stock: e.target.value })} data-testid="products-stock">
           <option value="">{t('pos.stock')}: {t('payments.any')}</option>
           <option value="in">{t('pos.inventory.inStock')}</option>
           <option value="low">{t('pos.inventory.lowOnly')}</option>
           <option value="out">{t('pos.inventory.outOfStock')}</option>
           <option value="untracked">{t('pos.inventory.untracked')}</option>
         </select>
-        <select className="input !w-auto !py-1 !text-sm" aria-label={t('pos.active')} value={f.status} onChange={(e) => set({ status: e.target.value })} data-testid="products-status">
+        <select className={FILTER_CTRL} aria-label={t('pos.active')} value={f.status} onChange={(e) => set({ status: e.target.value })} data-testid="products-status">
           <option value="active">{t('pos.inventory.activeOnly')}</option>
           <option value="inactive">{t('pos.inventory.inactiveOnly')}</option>
           <option value="">{t('pos.inventory.allStatus')}</option>
         </select>
-        <span className="ml-auto flex flex-wrap items-center gap-2">
-          {menu}
-          <button type="button" className="btn-secondary !py-1 text-sm" disabled={!list.length} onClick={() => void downloadInventory(list, { health, locationName, categories })} data-testid="products-export">
-            ⬇ {filtered ? t('pos.inventory.exportFiltered', { count: list.length }) : t('pos.inventory.export')}
-          </button>
-          {businessManager && (
-            <>
-              <button type="button" className="btn-secondary !py-1 text-sm" onClick={() => setImporting(true)} data-testid="products-import">⬆ {t('pos.inventory.import')}</button>
-              <button type="button" className="text-xs text-brand-700 hover:underline" onClick={() => void downloadInventory(null, { health, categories })}>{t('pos.inventory.template')}</button>
-            </>
-          )}
-        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {menu}
+        <button type="button" className={TOOLBAR_BTN} disabled={!list.length} onClick={() => void downloadInventory(list, { health, locationName, categories })} data-testid="products-export">
+          ⬇ {filtered ? t('pos.inventory.exportFiltered', { count: list.length }) : t('pos.inventory.export')}
+        </button>
+        {businessManager && (
+          <>
+            <button type="button" className={TOOLBAR_BTN} onClick={() => setImporting(true)} data-testid="products-import">⬆ {t('pos.inventory.import')}</button>
+            <span className="ml-auto flex flex-wrap items-center gap-2">
+              <button type="button" className={TOOLBAR_BTN} onClick={() => setSettingsOpen(true)} data-testid="pos-settings-open">⚙ {t('pos.settings.button')}</button>
+              <button type="button" className="btn-primary !h-9 !py-0" onClick={() => setEdit({ id: null, v: emptyProduct() })} data-testid="new-product">{t('pos.newProduct')}</button>
+            </span>
+          </>
+        )}
       </div>
       {low.length > 0 && <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900" data-testid="low-stock">⚠️ {t('pos.lowStock', { names: low.map((p) => p.name).join(', ') })}</p>}
       {(businessManager || manager) && list.length > 0 && <p className="text-xs text-slate-500">{t('pos.inventory.dblClickHint')}</p>}
       {products.isLoading ? (
         <Loading />
       ) : list.length === 0 ? (
-        <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">{all.length ? t('payments.noMatch') : t('pos.noProducts')}</p>
+        <Empty>{all.length ? t('payments.noMatch') : t('pos.noProducts')}</Empty>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">{headCells(cols)}</tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {list.map((p) => (
-                <tr key={p.id} className={p.active ? '' : 'opacity-50'} data-testid="product-row">
-                  {rowCells(cols, p, 'py-2 pr-3 align-top')}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable cols={cols} rows={list} rowKey={(p) => p.id} rowClassName={(p) => (p.active ? '' : 'opacity-50')} rowTestId="product-row" />
       )}
       <ErrorText error={remove.error} />
       {edit && (
@@ -1054,7 +1037,7 @@ export function ProductsTab() {
       {settingsOpen && <PosSettingsModal products={all} onClose={() => setSettingsOpen(false)} />}
       {stock && <StockModal product={stock.p} mode={stock.mode} locationId={locationId} onClose={() => setStock(null)} onDone={refresh} />}
       {moves && <MovesModal product={moves} locationId={locationId} onClose={() => setMoves(null)} />}
-      {importing && <ImportModal locationId={locationId} locationName={locationName} onClose={() => setImporting(false)} onDone={refresh} />}
+      {importing && <ImportModal locationId={locationId} locationName={locationName} onTemplate={() => void downloadInventory(null, { health, categories })} onClose={() => setImporting(false)} onDone={refresh} />}
     </section>
   );
 }

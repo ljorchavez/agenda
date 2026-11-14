@@ -94,12 +94,8 @@ export function CustomerDetailPage() {
             <button className="btn-primary" onClick={() => setEditing(true)}>{t('common.edit')}</button>
           </>
         }
+        subtitle={`${[data.phone, data.email, t('customers.since', { date: dateOnly(data.createdAt) })].filter(Boolean).join(' · ')}`}
       />
-      <p className="-mt-4 mb-6 text-sm text-slate-500">
-        {[data.phone, data.email].filter(Boolean).join(' · ')}
-        {' · '}
-        {t('customers.since', { date: dateOnly(data.createdAt) })}
-      </p>
 
       {/* Health: the clinical record is what the doctor opens the patient for */}
       {health && (

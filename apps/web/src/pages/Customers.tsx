@@ -10,7 +10,7 @@ import { useCustomers } from '../lib/queries';
 import { SortTh, useSort, type SortDir } from '../components/SortableTable';
 import { StarRating } from '../components/Rating';
 import { FILTER_CTRL } from '../components/FilterBar';
-import { headCells, rowCells, useColumns } from '../components/Columns';
+import { DataTable, useColumns } from '../components/Columns';
 import { FiscalFields, fiscalPayload, useFiscalForm } from '../components/FiscalFields';
 
 /** Columns sorted on the server (the list is paginated); first click direction per column. */
@@ -96,20 +96,7 @@ export function CustomersPage() {
       ) : !data?.items.length ? (
         <Empty>{t('customers.empty')}</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>{headCells(cols)}</tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {data.items.map((c) => (
-                <tr key={c.id} className="cursor-pointer hover:bg-slate-50 focus-within:bg-slate-50" onClick={() => navigate(`/customers/${c.id}`)}>
-                  {rowCells(cols, c)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable cols={cols} rows={data.items} rowKey={(c) => c.id} onRowClick={(c) => navigate(`/customers/${c.id}`)} />
       )}
       {data && <Pager page={page} pageSize={PAGE_SIZE} total={data.total} onPage={(p) => { setPage(p); window.scrollTo({ top: 0 }); }} />}
       {creating && <CustomerFormModal onClose={() => setCreating(false)} />}

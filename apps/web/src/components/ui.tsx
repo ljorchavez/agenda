@@ -75,17 +75,81 @@ export function ErrorText({ error, ns }: { error: unknown; ns?: string }) {
   return <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{msg}</p>;
 }
 
-export function PageHeader({ title, actions }: { title: string; actions?: ReactNode }) {
+/** Every page's title row: title (plus something small next to it) and the page's buttons. */
+export function PageHeader({ title, actions, extra, tight, subtitle }: { title: string; actions?: ReactNode; extra?: ReactNode; tight?: boolean; subtitle?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+    <div className={tight ? 'mb-3' : 'mb-6'}>
+      <div className="flex min-h-[2.5rem] flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
+          {extra}
+        </div>
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      </div>
+      {subtitle && <p className="mt-1 max-w-2xl text-sm text-slate-500">{subtitle}</p>}
     </div>
   );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center text-slate-500">{children}</div>;
+/**
+ * The one way to switch sections of a page (Cobros, Punto de venta, Configuración): underlined
+ * tabs under the title; on phones they slide sideways, on computers they wrap.
+ */
+export function PageTabs<K extends string>({
+  tabs,
+  value,
+  onChange,
+  label,
+  testIdPrefix,
+}: {
+  tabs: { id: K; label: string }[];
+  value: K;
+  onChange: (k: K) => void;
+  label: string;
+  testIdPrefix?: string;
+}) {
+  return (
+    <div role="tablist" aria-label={label} className="-mx-1 mb-6 flex gap-1 overflow-x-auto overflow-y-hidden px-1 no-scrollbar shadow-[inset_0_-1px_0_0_#e2e8f0] md:flex-wrap md:overflow-visible">
+      {tabs.map((x) => (
+        <button
+          key={x.id}
+          role="tab"
+          type="button"
+          aria-selected={value === x.id}
+          onClick={() => onChange(x.id)}
+          className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${value === x.id ? 'border-brand-600 text-brand-800' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          data-testid={testIdPrefix ? `${testIdPrefix}${x.id}` : undefined}
+        >
+          {x.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Small on/off group of options (view, zoom…): one look everywhere. */
+export function Segmented<K extends string>({ options, value, onChange, label }: { options: { id: K; label: ReactNode; title?: string }[]; value: K; onChange: (k: K) => void; label: string }) {
+  return (
+    <div className="inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          aria-pressed={value === o.id}
+          title={o.title}
+          onClick={() => onChange(o.id)}
+          className={`h-full rounded-md px-3 text-sm font-medium ${value === o.id ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** "Nothing here yet" / "nothing matches": the same box on every list. */
+export function Empty({ children, compact }: { children: ReactNode; compact?: boolean }) {
+  return <div className={`rounded-xl border border-dashed border-slate-300 text-center text-slate-500 ${compact ? 'p-6 text-sm' : 'p-10'}`}>{children}</div>;
 }
 
 export function Loading() {

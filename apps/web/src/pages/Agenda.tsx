@@ -32,12 +32,13 @@ import {
   type InPersonMethod,
 } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
-import { ErrorText, Loading, MenuButton, MethodTags, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
+import { Empty, ErrorText, Loading, MenuButton, MethodTags, Modal, PageHeader, PaymentBadge, StatusBadge } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLocale, dateTime, money, timeOnly, toCents, toLocalInput } from '../lib/format';
 import { useMyLocations, useResources, useServices } from '../lib/queries';
 import { LocationSelect } from '../components/Locations';
 import { CalendarGrid, type CalBlock, type CalColumn, type CalEvent } from '../components/CalendarGrid';
+import { FILTER_CTRL, TOOLBAR_BTN } from '../components/FilterBar';
 import type { HoursValue } from '../components/Schedule';
 import { StarRating } from '../components/Rating';
 import { BOOKING_ICON, PAYMENT_PILL, PAYMENT_PILL_TEXT, paymentState } from '../lib/status';
@@ -439,7 +440,7 @@ export function AgendaPage() {
     }
   };
   const segBtn = (active: boolean) =>
-    `rounded-md px-3 py-1 text-sm font-medium ${active ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'} disabled:opacity-40`;
+    `h-full rounded-md px-3 text-sm font-medium ${active ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'} disabled:opacity-40`;
 
   return (
     <>
@@ -468,16 +469,16 @@ export function AgendaPage() {
 
       {/* Toolbar (Teams style): today, prev/next, date picker | filters, view, zoom */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button className="btn-secondary !px-3 !py-1.5" onClick={() => setAnchor(startOfDay(new Date()))}>{t('agenda.today')}</button>
+        <button className={TOOLBAR_BTN} onClick={() => setAnchor(startOfDay(new Date()))}>{t('agenda.today')}</button>
         <div className="flex">
-          <button className="btn-secondary !rounded-r-none !px-3 !py-1.5 text-lg leading-none" onClick={() => setAnchor(addDays(anchor, -step))} aria-label={t('agenda.prev')}>‹</button>
-          <button className="btn-secondary !-ml-px !rounded-l-none !px-3 !py-1.5 text-lg leading-none" onClick={() => setAnchor(addDays(anchor, step))} aria-label={t('agenda.next')}>›</button>
+          <button className={`${TOOLBAR_BTN} !rounded-r-none text-lg leading-none`} onClick={() => setAnchor(addDays(anchor, -step))} aria-label={t('agenda.prev')}>‹</button>
+          <button className={`${TOOLBAR_BTN} -ml-px !rounded-l-none text-lg leading-none`} onClick={() => setAnchor(addDays(anchor, step))} aria-label={t('agenda.next')}>›</button>
         </div>
         <div className="relative min-w-0">
           <button
             type="button"
             onClick={pickDate}
-            className="flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-base font-semibold text-slate-800 hover:bg-slate-100 sm:text-lg"
+            className="flex h-9 min-w-0 items-center gap-1 rounded-md px-2 text-base font-semibold text-slate-800 hover:bg-slate-100 sm:text-lg"
             aria-label={t('agenda.pickDate')}
           >
             <span className="truncate first-letter:uppercase">{rangeLabel}</span>
@@ -500,13 +501,13 @@ export function AgendaPage() {
 
         <div className="flex w-full flex-wrap items-center gap-2 md:ml-auto md:w-auto">
           {!scoped && locs.multi && (
-            <select className="input !w-auto !py-1.5 text-sm" aria-label={t('locations.location')} value={loc} onChange={(e) => { setLoc(e.target.value); setFilter(''); }}>
+            <select className={FILTER_CTRL} aria-label={t('locations.location')} value={loc} onChange={(e) => { setLoc(e.target.value); setFilter(''); }}>
               <option value="">{t('locations.all')}</option>
               {locs.list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           )}
           {!scoped && resources.length > 1 && (
-            <select className="input !w-auto !py-1.5 text-sm" aria-label={t('agenda.filter')} value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <select className={FILTER_CTRL} aria-label={t('agenda.filter')} value={filter} onChange={(e) => setFilter(e.target.value)}>
               <option value="">{t(`kinds.${kind}.allResources`)}</option>
               {resources.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
@@ -516,14 +517,14 @@ export function AgendaPage() {
             {t('agenda.showCancelled')}
           </label>
           <div className="ml-auto flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.view')}>
+            <div className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.view')}>
               {views.map(([v, label]) => (
                 <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={segBtn(view === v)}>
                   {label}
                 </button>
               ))}
             </div>
-            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.zoom')}>
+            <div className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white p-0.5" role="group" aria-label={t('agenda.zoom')}>
               <button type="button" className={segBtn(false)} onClick={() => setZoom(zoom - 1)} disabled={zoom === 0} aria-label={t('agenda.zoomOut')}>−</button>
               <button type="button" className={segBtn(false)} onClick={() => setZoom(zoom + 1)} disabled={zoom === ZOOMS.length - 1} aria-label={t('agenda.zoomIn')}>+</button>
             </div>
@@ -557,7 +558,7 @@ export function AgendaPage() {
       {isLoading ? (
         <Loading />
       ) : columns.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">{t('agenda.empty')}</p>
+        <Empty compact>{t('agenda.empty')}</Empty>
       ) : (
         <CalendarGrid
           columns={columns}

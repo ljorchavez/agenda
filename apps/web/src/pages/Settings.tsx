@@ -44,7 +44,7 @@ import { PublicProfileSection } from '../components/PublicProfile';
 import { LocationSelect, LocationsSection } from '../components/Locations';
 import { PlanSection } from '../components/Plans';
 import { BusinessDataSection, TwoFactorSection } from '../components/Security';
-import { ErrorText, Modal, PageHeader } from '../components/ui';
+import { ErrorText, Modal, PageHeader, PageTabs } from '../components/ui';
 import { api } from '../lib/api';
 import { useAccess, useAuth } from '../lib/auth';
 import { useMyLocations, useResources } from '../lib/queries';
@@ -62,7 +62,7 @@ function MemberSettings() {
   const publicUrl = `${window.location.origin}/b/${tenant?.slug}`;
   return (
     <>
-      <PageHeader title={t('settings.title')} />
+      <PageHeader title={t('settings.title')} tight />
       <div className="grid items-stretch gap-6 lg:grid-cols-2">
         <AccountSection />
         <CalendarLinksSection />
@@ -280,20 +280,7 @@ function BusinessSettings() {
     <>
       <PageHeader title={t('settings.title')} />
       <SaveStatus state={saveState} floating />
-      <div role="tablist" aria-label={t('settings.title')} className="-mx-1 mb-6 flex gap-1 no-scrollbar overflow-x-auto overflow-y-hidden px-1 shadow-[inset_0_-1px_0_0_#e2e8f0] md:flex-wrap md:overflow-visible">
-        {tabs.map((x) => (
-          <button
-            key={x.id}
-            role="tab"
-            type="button"
-            aria-selected={tab === x.id}
-            onClick={() => setParams(x.id === 'business' ? {} : { tab: x.id }, { replace: true })}
-            className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === x.id ? 'border-brand-600 text-brand-800' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
-          >
-            {x.label}
-          </button>
-        ))}
-      </div>
+      <PageTabs tabs={tabs} value={tab} onChange={(id) => setParams(id === 'business' ? {} : { tab: id }, { replace: true })} label={t('settings.title')} />
 
       {tab === 'business' && (
         <div className="space-y-6">

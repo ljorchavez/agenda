@@ -4,6 +4,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, TouchSensor, 
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Switch } from './ui';
+import { TOOLBAR_BTN } from './FilterBar';
 
 /**
  * Columns any table can show, hide and reorder; each table's choice is kept in this browser.
@@ -82,8 +83,10 @@ export function useColumns<T>(id: string, defs: Col<T>[]) {
 }
 
 /** Header row and cells of a table from its columns. */
+/** Headers take only the column's alignment (cell colors and weights stay in the cells). */
+const thAlign = (cls = '') => (/\btext-right\b/.test(cls) ? 'text-right' : /\btext-center\b/.test(cls) ? 'text-center' : '');
 export function headCells<T>(cols: Col<T>[]) {
-  return cols.map((c) => (c.th ? <ThKey key={c.key}>{c.th(c.key)}</ThKey> : <th key={c.key} className={`px-4 py-3 font-medium ${c.className ?? ''}`}>{c.label}</th>));
+  return cols.map((c) => (c.th ? <ThKey key={c.key}>{c.th(c.key)}</ThKey> : <th key={c.key} className={`whitespace-nowrap px-4 py-3 font-medium ${thAlign(c.className)}`}>{c.label}</th>));
 }
 export function rowCells<T>(cols: Col<T>[], row: T, td = 'px-4 py-3') {
   return cols.map((c) => <td key={c.key} className={`${td} ${c.className ?? ''}`}>{c.td(row)}</td>);
@@ -129,7 +132,7 @@ function ColumnsMenu({
   };
   return (
     <div className="relative" ref={box}>
-      <button type="button" className="input !w-auto !py-1 !px-2 !text-sm" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid={testId}>
+      <button type="button" className={TOOLBAR_BTN} aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid={testId}>
         ☰ {t('columns.button')}
       </button>
       {open && (
@@ -176,5 +179,57 @@ function ColumnRow({ item, onToggle }: { item: { key: string; label: string; on:
       <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
       <Switch checked={item.on} disabled={item.required} onChange={() => onToggle(item.key)} label={item.label} hideLabel testId={`col-toggle-${item.key}`} />
     </li>
+  );
+}
+
+/**
+ * The one table of the app: white box with a border, gray header row, one line per row.
+ * Every list with columns uses it, so they all look and behave the same.
+ */
+export function DataTable<T>({
+  cols,
+  rows,
+  rowKey,
+  rowClassName,
+  onRowClick,
+  rowTestId,
+  foot,
+  testId,
+}: {
+  cols: Col<T>[];
+  rows: T[];
+  rowKey: (row: T) => string;
+  rowClassName?: (row: T) => string;
+  onRowClick?: (row: T) => void;
+  rowTestId?: string;
+  /** Totals row: content per column key */
+  foot?: Record<string, ReactNode>;
+  testId?: string;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white" data-testid={testId}>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-slate-500">
+          <tr>{headCells(cols)}</tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((r) => (
+            <tr
+              key={rowKey(r)}
+              className={`${onRowClick ? 'cursor-pointer hover:bg-slate-50 focus-within:bg-slate-50' : ''} ${rowClassName?.(r) ?? ''}`}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+              data-testid={rowTestId}
+            >
+              {rowCells(cols, r, 'px-4 py-3 align-middle')}
+            </tr>
+          ))}
+        </tbody>
+        {foot && (
+          <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
+            <tr>{cols.map((c) => <td key={c.key} className={`px-4 py-3 ${thAlign(c.className)}`}>{foot[c.key] ?? ''}</td>)}</tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
   );
 }

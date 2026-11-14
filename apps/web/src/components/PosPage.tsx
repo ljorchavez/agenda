@@ -10,12 +10,12 @@ import { dateTime, money } from '../lib/format';
 import { openTicket } from '../pages/Ticket';
 import { CashTab } from './Cash';
 import { FILTER_CTRL, FilterBar, MultiPick } from './FilterBar';
-import { headCells, rowCells, useColumns } from './Columns';
+import { DataTable, useColumns } from './Columns';
 import { ReportsView } from '../pages/Reports';
 import { useMyLocations } from '../lib/queries';
 import { PosLocation, PosTab, ProductsTab, SaleActions } from './Pos';
 import { UpgradeNote, useFeature } from './Sales';
-import { Loading } from './ui';
+import { Empty, Loading, PageHeader, PageTabs } from './ui';
 
 type Tab = 'sell' | 'sales' | 'products' | 'cash' | 'reports';
 
@@ -27,22 +27,10 @@ export function PosPage() {
   const tabs: Tab[] = ['sell', 'sales', ...(manager ? (['products', 'cash', 'reports'] as Tab[]) : [])];
   const asked = params.get('tab') as Tab | null;
   const tab: Tab = asked && tabs.includes(asked) ? asked : 'sell';
-  const btn = (k: Tab) => `rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-brand-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`;
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold text-slate-900">{t('nav.pos')}</h1>
-          {(tab === 'sell' || tab === 'products') && <PosLocation />}
-        </div>
-        <div className="inline-flex flex-wrap rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
-          {tabs.map((k) => (
-            <button key={k} type="button" role="tab" aria-selected={tab === k} className={btn(k)} onClick={() => setParams(k === 'sell' ? {} : { tab: k })} data-testid={`pos-tab-${k}`}>
-              {t(`pos.tabs.${k}`)}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader title={t('nav.pos')} tight extra={(tab === 'sell' || tab === 'products') && <PosLocation />} />
+      <PageTabs tabs={tabs.map((k) => ({ id: k, label: t(`pos.tabs.${k}`) }))} value={tab} onChange={(k) => setParams(k === 'sell' ? {} : { tab: k })} label={t('nav.pos')} testIdPrefix="pos-tab-" />
       {tab === 'sales' ? <SalesTab /> : tab === 'products' ? <ProductsTab /> : tab === 'cash' ? <CashTab /> : tab === 'reports' ? <ReportsView scope="pos" /> : <PosTab />}
     </>
   );
@@ -185,22 +173,9 @@ function SalesTab() {
       {sales.isLoading ? (
         <Loading />
       ) : list.length === 0 ? (
-        <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">{sales.data?.length ? t('payments.noMatch') : t('pos.noSales')}</p>
+        <Empty>{sales.data?.length ? t('payments.noMatch') : t('pos.noSales')}</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>{headCells(cols)}</tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {list.map((s) => (
-                <tr key={s.id} className={s.status === 'canceled' ? 'opacity-50' : ''} data-testid="sales-row">
-                  {rowCells(cols, s)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable cols={cols} rows={list} rowKey={(s) => s.id} rowClassName={(s) => (s.status === 'canceled' ? 'opacity-50' : '')} rowTestId="sales-row" />
       )}
     </section>
   );

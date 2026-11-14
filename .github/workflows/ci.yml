@@ -101,9 +101,9 @@ jobs:
           # Readable from the run's annotations (in chunks)
           python3 - <<'PY'
           t = open('/tmp/audit.txt').read()
-          for i in range(0, min(len(t), 9 * 30000), 30000):
-              chunk = t[i:i + 30000].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
-              print(f'::notice title=audit {i // 30000 + 1}::{chunk}')
+          for i in range(0, min(len(t), 9 * 3900), 3900):
+              chunk = t[i:i + 3900].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+              print(f'::notice title=audit {i // 3900 + 1}::{chunk}')
           PY
       - if: failure()
         run: tail -40 /tmp/api.log; tail -20 /tmp/web.log
