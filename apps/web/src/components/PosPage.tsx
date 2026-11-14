@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { addDays, format, startOfDay, startOfMonth, subDays } from 'date-fns';
-import { IN_PERSON_ACCEPTED, type SaleDto } from '@agenda/shared';
+import { IN_PERSON_ACCEPTED, type PosAlertDto, type SaleDto } from '@agenda/shared';
 import { api } from '../lib/api';
 import { useAccess } from '../lib/auth';
 import { dateTime, money } from '../lib/format';
@@ -31,7 +31,7 @@ export function PosPage() {
     <>
       <PageHeader title={t('nav.pos')} tight extra={(tab === 'sell' || tab === 'products') && <PosLocation />} />
       <PageTabs tabs={tabs.map((k) => ({ id: k, label: t(`pos.tabs.${k}`) }))} value={tab} onChange={(k) => setParams(k === 'sell' ? {} : { tab: k })} label={t('nav.pos')} testIdPrefix="pos-tab-" />
-      {tab === 'sales' ? <SalesTab /> : tab === 'products' ? <ProductsTab /> : tab === 'cash' ? <CashTab /> : tab === 'reports' ? <ReportsView scope="pos" /> : <PosTab />}
+      {tab === 'sales' ? <SalesTab /> : tab === 'products' ? <ProductsTab /> : tab === 'cash' ? <CashTab /> : tab === 'reports' ? <><PosAlerts /><ReportsView scope="pos" /></> : <PosTab />}
     </>
   );
 }
@@ -176,6 +176,49 @@ function SalesTab() {
         <Empty>{sales.data?.length ? t('payments.noMatch') : t('pos.noSales')}</Empty>
       ) : (
         <DataTable cols={cols} rows={list} rowKey={(s) => s.id} rowClassName={(s) => (s.status === 'canceled' ? 'opacity-50' : '')} rowTestId="sales-row" />
+      )}
+    </section>
+  );
+}
+
+const SEVERITY_STYLE = { high: 'bg-rose-50 text-rose-800', medium: 'bg-amber-50 text-amber-800', low: 'bg-slate-100 text-slate-600' } as const;
+
+/** Alerts of the last 30 days (rules over sales, closings and stock), above the POS reports. */
+function PosAlerts() {
+  const { t } = useTranslation();
+  const q = useQuery({ queryKey: ['pos-alerts'], queryFn: () => api<PosAlertDto[]>('/pos/alerts') });
+  if (!q.data) return null;
+  return (
+    <section className="card mb-6 space-y-3" data-testid="pos-alerts">
+      <div>
+        <h2 className="font-semibold">{t('pos.alerts.title')}</h2>
+        <p className="text-xs text-slate-500">{t('pos.alerts.help')}</p>
+      </div>
+      {q.data.length === 0 ? (
+        <p className="text-sm text-emerald-700">{t('pos.alerts.none')}</p>
+      ) : (
+        <ul className="grid gap-3 md:grid-cols-2">
+          {q.data.map((a) => (
+            <li key={a.kind} className="rounded-lg border border-slate-200 p-3 text-sm" data-testid={`pos-alert-${a.kind}`}>
+              <div className="flex items-start justify-between gap-2">
+                <b>{t(`pos.alerts.kinds.${a.kind}.title`)}</b>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_STYLE[a.severity]}`}>{t(`pos.alerts.severity.${a.severity}`)}</span>
+              </div>
+              <p className="mt-1 text-slate-600">{t(`pos.alerts.kinds.${a.kind}.summary`, { count: a.count, amount: money(a.amountCents) })}</p>
+              <ul className="mt-2 divide-y divide-slate-100 text-xs">
+                {a.items.map((i, k) => (
+                  <li key={k} className="flex justify-between gap-2 py-1">
+                    <span className="min-w-0 truncate">
+                      {i.label}
+                      {i.note && <span className="text-slate-400"> · {a.kind === 'cash_diff' ? i.note : t(`pos.alerts.kinds.${a.kind}.note`, { note: i.note })}</span>}
+                    </span>
+                    <span className={`shrink-0 tabular-nums ${i.amountCents < 0 ? 'text-rose-700' : ''}`}>{money(i.amountCents)}</span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

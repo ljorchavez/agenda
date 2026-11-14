@@ -54,7 +54,7 @@ import { Empty, ErrorText, Loading, Modal, Switch } from './ui';
 import { EditableCell, ImportModal, downloadInventory } from './Inventory';
 import { FILTER_CTRL, TOOLBAR_BTN } from './FilterBar';
 import { DataTable, useColumns } from './Columns';
-import { CameraScanModal, CategoryField, SatKeyField, cameraScanAvailable, suggestSku, useScannerInput } from './ProductFields';
+import { AiFill, CameraScanModal, CategoryField, SatKeyField, cameraScanAvailable, suggestSku, useAiEnabled, useScannerInput } from './ProductFields';
 import { PosSettingsModal, useCategoryList, usePosSettings } from './PosSettings';
 
 /** Prescriptions only matter in health businesses (doctors, dentists…). */
@@ -1083,6 +1083,7 @@ function ProductModal({
     if (lookup && /^\d{8,14}$/.test(lookup)) findOnline.mutate(lookup);
   }, [lookup]); // eslint-disable-line react-hooks/exhaustive-deps
   const health = useHealth();
+  const aiOn = useAiEnabled();
   const [v, setV] = useState<ProductInput>(value);
   const [price, setPrice] = useState(value.priceCents ? String(value.priceCents / 100) : '');
   const [cost, setCost] = useState(value.costCents != null ? String(value.costCents / 100) : '');
@@ -1114,6 +1115,16 @@ function ProductModal({
   return (
     <Modal open title={id ? t('pos.editProduct') : t('pos.newProduct')} onClose={onClose}>
       <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); save.mutate(); }} data-testid="product-form">
+        {!id && aiOn && (
+          <div className="sm:col-span-2">
+            <AiFill
+              onFill={(s) => {
+                setV((x) => ({ ...x, name: s.name, category: s.category ?? x.category, iva: s.iva, satKey: s.satKey ?? x.satKey, sku: x.sku || s.sku || x.sku }));
+                if (s.priceCents != null && !price) setPrice(String(s.priceCents / 100));
+              }}
+            />
+          </div>
+        )}
         <label className="block text-sm sm:col-span-2"><span className="label">{t('pos.product')}</span><input required className="input" value={v.name} onChange={(e) => set({ name: e.target.value })} /></label>
         <label className="block text-sm"><span className="label">{t('pos.price')}</span><input required type="number" min={0} step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
         <label className="block text-sm"><span className="label">{t('pos.cost')}</span><input type="number" min={0} step="0.01" className="input" value={cost} onChange={(e) => setCost(e.target.value)} /></label>

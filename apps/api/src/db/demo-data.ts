@@ -634,6 +634,13 @@ async function seedBarbershop() {
       }
     }
   }
+  // A customer who often doesn't show up, booked again soon: the agenda flags it (no-show risk)
+  const flaky = custs[1]!.id;
+  const nowMs = now.toMillis();
+  const theirs = rows.filter((r) => r.customerId === flaky && (r.startsAt as Date).getTime() < nowMs).slice(-4);
+  theirs.slice(0, 3).forEach((r) => (r.status = 'no_show'));
+  const soon = rows.find((r) => (r.startsAt as Date).getTime() > nowMs + 3_600_000 && r.status === 'scheduled');
+  if (soon) soon.customerId = flaky;
   const inserted = (await insertChunked(appointments, rows)) as unknown as (typeof appointments.$inferSelect)[];
   const paid = await seedPayments(tenantId, inserted, { manual: ['cash', 'credit_card', 'debit_card', 'transfer'] });
   console.log(`Seeded barbershop with ${pros.length} barbers, ${inserted.length} appointments, ${paid} payments`);

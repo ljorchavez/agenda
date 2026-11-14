@@ -169,6 +169,13 @@
       "when": 1796000000000,
       "tag": "0023_tenant_numbers",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1796100000000,
+      "tag": "0024_ai_usage",
+      "breakpoints": true
     }
   ]
 }

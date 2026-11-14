@@ -28,6 +28,7 @@ import {
   PLAN_LIMITS,
   type PaymentDto,
   type ResourceDto,
+  type NoShowRiskDto,
   type TimeBlockDto,
   inPersonMethods,
   type InPersonMethod,
@@ -255,8 +256,8 @@ function AgendaCalendar() {
             start,
             end,
             color: a.resourceColor ?? BRAND,
-            title: a.customerName,
-            shortTitle: shortName(a.customerName),
+            title: `${a.noShowRisk?.level === 'high' ? '⚠ ' : ''}${a.customerName}`,
+            shortTitle: `${a.noShowRisk?.level === 'high' ? '⚠ ' : ''}${shortName(a.customerName)}`,
             subtitle: sub,
             detail: showResource ? a.resourceName : null,
             icon: BOOKING_ICON[a.status],
@@ -271,6 +272,7 @@ function AgendaCalendar() {
               sub,
               a.resourceName,
               t(`status.${a.status}`),
+              a.noShowRisk && t(`noShow.level.${a.noShowRisk.level}`),
               paymentState(a, { noShowOwes: owesNoShow }) !== 'free' && t(`payState.${paymentState(a, { noShowOwes: owesNoShow })}`),
             ].filter(Boolean).join(' · '),
             onClick: () => setSelected(a),
@@ -1166,6 +1168,7 @@ function AppointmentModal({ appt, onClose }: { appt: AppointmentDto; onClose: ()
             <MethodTags methods={cur.paidMethods ?? []} />
           </div>
         </div>
+        {cur.noShowRisk && (status === 'scheduled' || status === 'confirmed') && <NoShowNote risk={cur.noShowRisk} />}
         <div className="pt-1 text-slate-600">{cur.serviceName}</div>
 
         {editing === 'time' ? (
@@ -1580,3 +1583,16 @@ function StatusLegend() {
   );
 }
 
+
+/** Why this booking may not show up, and what to do about it. */
+function NoShowNote({ risk }: { risk: NoShowRiskDto }) {
+  const { t } = useTranslation();
+  const why = risk.reasons.map((r) => t(`noShow.reasons.${r}`, { count: risk.noShows, past: risk.past }));
+  return (
+    <div className={`mt-2 rounded-lg p-2 text-sm ${risk.level === 'high' ? 'bg-rose-50 text-rose-900' : 'bg-amber-50 text-amber-900'}`} data-testid="no-show-risk">
+      <b>⚠ {t(`noShow.level.${risk.level}`)}</b>
+      {why.length > 0 && <span>: {why.join(' · ')}</span>}
+      <div className="mt-0.5 text-xs opacity-80">{t('noShow.tip')}</div>
+    </div>
+  );
+}

@@ -1904,7 +1904,8 @@
         "bad_name": "Invalid name (max 120 chars)",
         "bad_sku": "SKU too long",
         "bad_category": "Category too long"
-      }
+      },
+      "aiMapped": "✨ The AI read your columns: {{list}}. Check the preview before applying."
     },
     "import_headers": "The first row must have the column names (Producto, Precio…). Use the template.",
     "location": {
@@ -1974,7 +1975,60 @@
       "transfer": "Transfer"
     },
     "pickMethod": "Choose how they pay",
-    "addCustomer": "Add customer"
+    "addCustomer": "Add customer",
+    "ai_limit": "You reached today's AI limit. Try again tomorrow.",
+    "ai_off": "AI is not available.",
+    "ai_unavailable": "The AI didn't answer. Try again.",
+    "ai_bad_answer": "We couldn't read the AI's answer. Try another photo or description.",
+    "ai": {
+      "button": "✨ Fill with AI",
+      "help": "Take a photo of the label or describe the product in a few words.",
+      "photo": "📷 Photo",
+      "placeholder": "e.g. Sayer thinner 4 liters",
+      "go": "Fill",
+      "thinking": "Reading…",
+      "filled": "Done: check the data and set the price before saving."
+    },
+    "alerts": {
+      "title": "Alerts · last 30 days",
+      "none": "No alerts in the last 30 days ✓",
+      "help": "Computed from your sales, cash closings and stock. Go over each one with your team.",
+      "kinds": {
+        "cash_diff": {
+          "title": "Cash closings that didn't match",
+          "summary": "{{count}} closings with a difference · {{amount}} short in total"
+        },
+        "no_closing": {
+          "title": "Days without a cash closing",
+          "summary": "{{count}} days with {{amount}} in sales and no closing"
+        },
+        "discounts": {
+          "title": "Charged below the list price",
+          "summary": "{{count}} lines over 10% off · {{amount}} less than usual",
+          "note": "{{note}} lines"
+        },
+        "below_cost": {
+          "title": "Sold below cost",
+          "summary": "{{count}} lines below cost · {{amount}} lost",
+          "note": "{{note}} lines"
+        },
+        "shrinkage": {
+          "title": "Stock that left without a sale",
+          "summary": "{{count}} units adjusted down · {{amount}} at cost",
+          "note": "{{note}} units"
+        },
+        "cancellations": {
+          "title": "Unusual cancellations",
+          "summary": "{{count}} sales canceled · {{amount}}",
+          "note": "{{note}} sales canceled"
+        }
+      },
+      "severity": {
+        "high": "Check now",
+        "medium": "Check",
+        "low": "FYI"
+      }
+    }
   },
   "ticket": {
     "ticket": "Ticket",
@@ -2082,5 +2136,17 @@
     "reset": "Reset",
     "actions": "Actions",
     "drag": "Drag to move “{{name}}”"
+  },
+  "noShow": {
+    "level": {
+      "high": "High risk of not showing up",
+      "medium": "May not show up"
+    },
+    "reasons": {
+      "past_no_shows": "missed {{count}} of {{past}} visits",
+      "first_visit": "first visit, booked online without paying",
+      "booked_far": "booked many weeks ahead"
+    },
+    "tip": "Tip: reconfirm by WhatsApp the day before or ask for a deposit."
   }
 }

@@ -7,6 +7,7 @@ import {
   posSettingsSchema,
   productImportSchema,
   productInputSchema,
+  productSuggestSchema,
   saleCreateSchema,
   saleTotal,
   stockAdjustSchema,
@@ -27,6 +28,9 @@ import { AppError, notFound } from '../lib/errors.js';
 import { guardRow, locationForWrite } from '../lib/locations.js';
 import { assertFeature } from '../lib/plan.js';
 import { planImport, type Existing } from '../lib/product-import.js';
+import { aiEnabled } from '../lib/ai.js';
+import { mapImportTable, suggestProduct } from '../lib/ai-products.js';
+import { posAlerts } from '../lib/pos-alerts.js';
 import { requireBusinessManager, requireManager, type AppEnv } from '../middleware/auth.js';
 
 /**
@@ -200,7 +204,25 @@ posRoutes.post('/products/import', requireBusinessManager, async (c) => {
     existing.set(p.id, e);
     if (p.number != null) existing.set(String(p.number), e);
   }
-  const plan = planImport(input.table, existing, { health: isHealthType(tenant?.businessType ?? 'other') });
+  const health = isHealthType(tenant?.businessType ?? 'other');
+  let table = input.table;
+  let plan = planImport(table, existing, { health });
+  // Columns we don't recognize (another system's export, a title above the headers): the AI reads them
+  let aiMapped: { from: string; to: string }[] | undefined;
+  if (input.dryRun && aiEnabled() && (plan.headerError || plan.ignored.length)) {
+    try {
+      const m = await mapImportTable(db, tenantId, table);
+      const again = planImport(m.table, existing, { health });
+      if (!again.headerError && m.mapped.length) {
+        table = m.table;
+        plan = again;
+        aiMapped = m.mapped;
+      }
+    } catch (e) {
+      // Over the daily limit or no answer: the import still works with the known column names
+      if (plan.headerError) throw e;
+    }
+  }
   if (plan.headerError) throw new AppError(422, plan.headerError, 'The first row must have the column names (Producto, Precio…)');
   const result: ProductImportResult = {
     rows: plan.rows.map(({ row, action, name, changes, error }) => ({ row, action, name, changes, ...(error ? { error } : {}) })),
@@ -210,6 +232,7 @@ posRoutes.post('/products/import', requireBusinessManager, async (c) => {
     errors: plan.rows.filter((r) => r.action === 'error').length,
     applied: false,
     ignored: plan.ignored,
+    ...(aiMapped ? { table, aiMapped } : {}),
   };
   if (input.dryRun || !(result.created + result.updated)) return c.json(result);
 
@@ -233,6 +256,32 @@ posRoutes.post('/products/import', requireBusinessManager, async (c) => {
     }
   });
   return c.json({ ...result, applied: true });
+});
+
+/** Anomalies of the last 30 days (cash closings, discounts, shrinkage, cancellations). Managers only. */
+posRoutes.get('/pos/alerts', requireManager, async (c) => {
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  await assertFeature(db, tenantId, 'cash');
+  const requested = z.string().uuid().optional().parse(c.req.query('locationId') || undefined);
+  const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { timezone: true } });
+  return c.json(await posAlerts(db, tenantId, t?.timezone ?? 'America/Mexico_City', viewLocation(c as never, requested)));
+});
+
+/** Whether the AI helpers are on (the key is set in the server's environment). */
+posRoutes.get('/products/ai', (c) => c.json({ enabled: aiEnabled() }));
+
+/** A product proposed from a photo or a few words, to review in the form. */
+posRoutes.post('/products/ai-suggest', requireBusinessManager, async (c) => {
+  const input = productSuggestSchema.parse(await c.req.json());
+  const db = getDb();
+  const tenantId = c.get('tenantId');
+  await assertFeature(db, tenantId, 'cash');
+  if (!aiEnabled()) throw new AppError(503, 'ai_off', 'AI is not configured');
+  const t = await db.query.tenants.findFirst({ where: eq(tenants.id, tenantId), columns: { businessType: true, settings: true } });
+  const fromProducts = await db.selectDistinct({ c: products.category }).from(products).where(eq(products.tenantId, tenantId));
+  const categories = [...new Set([...posSettingsOf(t?.settings as TenantSettings | null).categories, ...fromProducts.map((r) => r.c).filter((x): x is string => Boolean(x))])].slice(0, 80);
+  return c.json(await suggestProduct(db, tenantId, { text: input.text, image: input.image, businessType: t?.businessType ?? 'other', categories }));
 });
 
 /**

@@ -1398,6 +1398,15 @@ export interface AppointmentDto {
   resourceName: string | null;
   resourceColor: string | null;
   classSessionId: string | null;
+  /** Upcoming bookings that may not show up (customer history, how it was booked); null = no sign */
+  noShowRisk?: NoShowRiskDto | null;
+}
+
+export interface NoShowRiskDto {
+  level: 'high' | 'medium';
+  reasons: ('past_no_shows' | 'first_visit' | 'booked_far')[];
+  noShows: number;
+  past: number;
 }
 
 export interface PaymentDto {

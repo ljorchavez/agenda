@@ -1904,7 +1904,8 @@
         "bad_name": "Nombre inválido (máx. 120 letras)",
         "bad_sku": "SKU muy largo",
         "bad_category": "Categoría muy larga"
-      }
+      },
+      "aiMapped": "✨ La IA leyó tus columnas: {{list}}. Revisa la vista previa antes de aplicar."
     },
     "import_headers": "La primera fila debe tener los nombres de columna (Producto, Precio…). Usa la plantilla.",
     "location": {
@@ -1974,7 +1975,60 @@
       "transfer": "Transferencia"
     },
     "pickMethod": "Elige cómo paga",
-    "addCustomer": "Agregar cliente"
+    "addCustomer": "Agregar cliente",
+    "ai_limit": "Llegaste al límite de usos de IA de hoy. Intenta mañana.",
+    "ai_off": "La IA no está disponible.",
+    "ai_unavailable": "La IA no respondió. Intenta de nuevo.",
+    "ai_bad_answer": "No entendimos la respuesta de la IA. Intenta con otra foto o descripción.",
+    "ai": {
+      "button": "✨ Llenar con IA",
+      "help": "Toma una foto de la etiqueta o describe el producto en pocas palabras.",
+      "photo": "📷 Foto",
+      "placeholder": "p. ej. thinner Sayer de 4 litros",
+      "go": "Llenar",
+      "thinking": "Leyendo…",
+      "filled": "Listo: revisa los datos y pon el precio antes de guardar."
+    },
+    "alerts": {
+      "title": "Alertas · últimos 30 días",
+      "none": "Sin alertas en los últimos 30 días ✓",
+      "help": "Calculadas con tus ventas, cortes e inventario. Revisa cada una con tu equipo.",
+      "kinds": {
+        "cash_diff": {
+          "title": "Cortes de caja que no cuadraron",
+          "summary": "{{count}} cortes con diferencia · faltante total {{amount}}"
+        },
+        "no_closing": {
+          "title": "Días sin corte de caja",
+          "summary": "{{count}} días con ventas por {{amount}} sin cerrar caja"
+        },
+        "discounts": {
+          "title": "Cobros por debajo del precio de lista",
+          "summary": "{{count}} renglones con más de 10 % menos · {{amount}} menos de lo normal",
+          "note": "{{note}} renglones"
+        },
+        "below_cost": {
+          "title": "Ventas por debajo del costo",
+          "summary": "{{count}} renglones bajo costo · {{amount}} de pérdida",
+          "note": "{{note}} renglones"
+        },
+        "shrinkage": {
+          "title": "Inventario que salió sin venta",
+          "summary": "{{count}} piezas ajustadas a la baja · {{amount}} a costo",
+          "note": "{{note}} pzas"
+        },
+        "cancellations": {
+          "title": "Cancelaciones fuera de lo normal",
+          "summary": "{{count}} ventas canceladas · {{amount}}",
+          "note": "{{note}} ventas canceladas"
+        }
+      },
+      "severity": {
+        "high": "Revisar ya",
+        "medium": "Revisar",
+        "low": "Para saber"
+      }
+    }
   },
   "ticket": {
     "ticket": "Ticket",
@@ -2082,5 +2136,17 @@
     "reset": "Restablecer",
     "actions": "Acciones",
     "drag": "Arrastra para mover «{{name}}»"
+  },
+  "noShow": {
+    "level": {
+      "high": "Riesgo alto de que no llegue",
+      "medium": "Puede que no llegue"
+    },
+    "reasons": {
+      "past_no_shows": "faltó {{count}} de {{past}} veces",
+      "first_visit": "primera vez, reservó en línea sin pagar",
+      "booked_far": "reservó con muchas semanas de anticipación"
+    },
+    "tip": "Sugerencia: reconfírmale por WhatsApp un día antes o pídele anticipo."
   }
 }

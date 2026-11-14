@@ -20,6 +20,7 @@ import { hasOverlap, queryAppointments } from '../lib/appointments.js';
 import { notifyAppointment } from '../lib/notify.js';
 import { assertRoom, lockSession } from '../lib/classes.js';
 import { activeResources, assertNotBlocked, assignResource, defaultService, findResource } from '../lib/resources.js';
+import { withNoShowRisk } from '../lib/no-show.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { resolveDiscount } from '../lib/discounts.js';
 import { setPlanUse } from '../lib/plans.js';
@@ -101,7 +102,7 @@ appointmentRoutes.get('/appointments', async (c) => {
     c.get('tenantId'),
     sql`a.starts_at >= ${from} and a.starts_at < ${to} ${scopeSql(scope)}`,
   );
-  return c.json(rows);
+  return c.json(await withNoShowRisk(db, c.get('tenantId'), rows));
 });
 
 appointmentRoutes.get('/appointments/:id', async (c) => {
@@ -113,7 +114,8 @@ appointmentRoutes.get('/appointments/:id', async (c) => {
     sql`a.id = ${c.req.param('id')} ${scopeSql(scope)}`,
   );
   if (!row) throw notFound('appointment');
-  return c.json(row);
+  const [withRisk] = await withNoShowRisk(db, c.get('tenantId'), [row]);
+  return c.json(withRisk);
 });
 
 /**

@@ -108,7 +108,26 @@ export interface ProductImportResult {
   applied: boolean;
   /** Headers not recognized (ignored) */
   ignored: string[];
+  /** The AI read the columns: the table rewritten with our headers (send this one to apply) */
+  table?: (string | number | boolean | null)[][];
+  aiMapped?: { from: string; to: string }[];
 }
+
+/** A product proposed by the AI from a photo or a description (reviewed in the form before saving). */
+export interface ProductSuggestionDto {
+  name: string;
+  category: string | null;
+  iva: '16' | '0' | 'exento';
+  satKey: string | null;
+  sku: string | null;
+  priceCents: number | null;
+}
+export const productSuggestSchema = z
+  .object({
+    text: z.string().trim().max(300).optional(),
+    image: z.object({ data: z.string().max(7_000_000), mediaType: z.enum(['image/jpeg', 'image/png', 'image/webp']) }).optional(),
+  })
+  .refine((v) => Boolean(v.text) || Boolean(v.image), { message: 'text_or_image' });
 
 /** Spreadsheet columns, in download order; the import accepts these and a few aliases. */
 export const PRODUCT_SHEET_COLUMNS = ['id', 'name', 'sku', 'category', 'price', 'cost', 'trackStock', 'stock', 'minStock', 'iva', 'satKey', 'rx', 'active'] as const;
@@ -218,3 +237,13 @@ export interface SaleTicketDto {
 
 /** The ticket's header for a location, kept on the device to print without internet. */
 export type PosHeaderDto = Omit<SaleTicketDto, 'sale'>;
+
+/** Something worth a look in the point of sale (last 30 days); computed by rules, not AI. */
+export interface PosAlertDto {
+  kind: 'cash_diff' | 'no_closing' | 'discounts' | 'below_cost' | 'shrinkage' | 'cancellations';
+  severity: 'high' | 'medium' | 'low';
+  count: number;
+  amountCents: number;
+  /** Up to 6 lines: a day, a person or a product, with its amount and a short note */
+  items: { label: string; amountCents: number; note: string | null }[];
+}

@@ -238,7 +238,7 @@ export async function seedStore() {
   const payRows: (typeof payments.$inferInsert)[] = [];
   const moveRows: (typeof stockMoves.$inferInsert)[] = [];
   const closingRows: (typeof cashClosings.$inferInsert)[] = [];
-  const move = (productId: string, change: number, reason: 'in' | 'sale' | 'return', at: Date, extra: { saleId?: string; note?: string; by?: { id: string; name: string } } = {}) => {
+  const move = (productId: string, change: number, reason: 'in' | 'sale' | 'return' | 'adjust', at: Date, extra: { saleId?: string; note?: string; by?: { id: string; name: string } } = {}) => {
     const after = (qty.get(productId) ?? 0) + change;
     qty.set(productId, after);
     moveRows.push({
@@ -273,6 +273,12 @@ export async function seedStore() {
       }
     }
 
+    // A count that came out short (shrinkage) every so often in the last month
+    if (d > DAYS - 30 && d % 7 === 3) {
+      const p = pick(prods);
+      if (qty.get(p.id)! > 3) move(p.id, -between(1, 2), 'adjust', opens.plus({ minutes: 5 }).toJSDate(), { note: 'Conteo físico: faltante' });
+    }
+
     // Tickets: busier on Saturdays and in the first days of the month, growing a little over time
     const base = saturday ? 24 : day.weekday === 1 ? 14 : 17;
     const count = Math.round((base + (day.day <= 5 ? 4 : 0) + d / 30) * (0.8 + rand() * 0.4));
@@ -299,7 +305,9 @@ export async function seedStore() {
         const q = Math.min(want, have);
         if (q <= 0) continue;
         const it = info.get(pid)!;
-        items.push({ productId: pid, name: it.name, qty: q, unitCents: it.price, totalCents: it.price * q, iva: '16', satKey: it.sat });
+        // Now and then the counter gives a discount (the alerts show who and how much)
+        const unit = lateRun && rand() < 0.04 ? Math.round((it.price * 0.8) / 100) * 100 : it.price;
+        items.push({ productId: pid, name: it.name, qty: q, unitCents: unit, totalCents: unit * q, iva: '16', satKey: it.sat });
       }
       if (!items.length) continue;
       const total = items.reduce((a, i) => a + i.totalCents, 0);

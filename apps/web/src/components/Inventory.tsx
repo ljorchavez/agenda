@@ -78,6 +78,8 @@ export function ImportModal({ locationId, locationName, onTemplate, onClose, onD
     mutationFn: (v: { dryRun: boolean; table: Cell[][] }) => api<ProductImportResult>('/products/import', { method: 'POST', body: { locationId, ...v } }),
     onSuccess: (r) => {
       if (r.applied) onDone();
+      // The AI read the columns: apply what it understood (the same table the preview shows)
+      if (r.table) setTable(r.table);
     },
   });
   const r = run.data;
@@ -127,6 +129,9 @@ export function ImportModal({ locationId, locationName, onTemplate, onClose, onD
               {t(r.applied ? 'pos.inventory.applied' : 'pos.inventory.preview', { created: r.created, updated: r.updated, unchanged: r.unchanged })}
               {r.errors > 0 && <b className="ml-1 text-rose-700">{t('pos.inventory.withErrors', { count: r.errors })}</b>}
             </p>
+            {r.aiMapped && r.aiMapped.length > 0 && (
+              <p className="rounded-lg bg-brand-50 p-2 text-xs text-brand-800" data-testid="import-ai">{t('pos.inventory.aiMapped', { list: r.aiMapped.map((m) => `${m.from} → ${m.to}`).join(', ') })}</p>
+            )}
             {r.ignored.length > 0 && <p className="text-xs text-slate-500">{t('pos.inventory.ignored', { list: r.ignored.join(', ') })}</p>}
             <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
               {r.rows.filter((x) => x.action !== 'unchanged').slice(0, 300).map((x) => (

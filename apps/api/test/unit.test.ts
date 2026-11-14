@@ -13,6 +13,9 @@ import { parseCsfText } from '../src/lib/csf.js';
 import { readCsv, readXlsx, writeXlsx } from '@agenda/shared/xlsx';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { planImport, toCentsCell, type Existing } from '../src/lib/product-import.js';
+import { applyColumnMap, parseSuggestion } from '../src/lib/ai-products.js';
+import { firstJson } from '../src/lib/ai.js';
+import { noShowRisk } from '../src/lib/no-show.js';
 
 describe('slugify', () => {
   it('removes accents and spaces', () => {
@@ -324,5 +327,41 @@ describe('inventory import plan', () => {
     const onlyStock = planImport([['ID', 'Existencia'], [gel.id, 0]], existing, { health: false });
     expect(onlyStock.rows[0]).toMatchObject({ action: 'update', changes: ['stock'], stock: 0 });
     expect(planImport([['Precio', 'Cantidad'], [1, 2]], existing, { health: false }).headerError).toBe('import_headers');
+  });
+});
+
+describe('AI helpers', () => {
+  it('reads the JSON inside the answer', () => {
+    expect(firstJson('Claro:\n{"a": 1, "b": {"c": 2}}\nListo')).toEqual({ a: 1, b: { c: 2 } });
+    expect(() => firstJson('sin json')).toThrow();
+  });
+  it('keeps an existing category and drops codes that are not codes', () => {
+    const s = parseSuggestion({ name: 'Thinner Sayer 4 L', category: 'diluyentes', iva: '16', satKey: '3121-1800', sku: '7501234', priceCents: null }, ['Diluyentes']);
+    expect(s).toEqual({ name: 'Thinner Sayer 4 L', category: 'Diluyentes', iva: '16', satKey: '31211800', sku: null, priceCents: null });
+    expect(parseSuggestion({ name: 'X', iva: 'raro' }, []).iva).toBe('16');
+  });
+  it('rewrites another system\'s columns as ours, below a title row', () => {
+    const table = [['Inventario MIV', null, null], ['Descripción', 'P. Venta', 'Notas'], ['Thinner 4 L', 365, 'x']];
+    const r = applyColumnMap(table, 1, { '0': 'name', '1': 'price', '2': 'nonsense' });
+    expect(r.table).toEqual([['Producto', 'Precio', 'Notas'], ['Thinner 4 L', 365, 'x']]);
+    expect(r.mapped).toEqual([{ from: 'Descripción', to: 'Producto' }, { from: 'P. Venta', to: 'Precio' }]);
+    const existing = new Map<string, Existing>();
+    expect(planImport(r.table, existing, { health: false }).rows[0]).toMatchObject({ action: 'create', name: 'Thinner 4 L' });
+  });
+});
+
+describe('no-show risk', () => {
+  const base = { past: 10, noShows: 0, firstOnlineUnpaid: false, leadDays: 2, confirmed: false };
+  it('ignores the occasional miss over many visits', () => {
+    expect(noShowRisk({ ...base, noShows: 1 })).toBeNull();
+  });
+  it('flags a habit, more when it is most of the visits', () => {
+    expect(noShowRisk({ ...base, past: 4, noShows: 1 })?.level).toBe('medium');
+    expect(noShowRisk({ ...base, past: 4, noShows: 2 })?.level).toBe('high');
+  });
+  it('adds up weaker signs, and a confirmation lowers it', () => {
+    expect(noShowRisk({ ...base, past: 0, firstOnlineUnpaid: true })).toBeNull();
+    expect(noShowRisk({ ...base, past: 0, firstOnlineUnpaid: true, leadDays: 30 })?.reasons).toEqual(['first_visit', 'booked_far']);
+    expect(noShowRisk({ ...base, past: 2, noShows: 1, confirmed: true })).toBeNull();
   });
 });

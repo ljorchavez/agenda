@@ -796,6 +796,20 @@ export const stockMoves = pgTable(
   (t) => [index('stock_moves_product_idx').on(t.productId, t.createdAt)],
 );
 
+/** AI calls per business, day and feature: a daily cap and what each business consumes. */
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    day: date('day', { mode: 'string' }).notNull(),
+    feature: text('feature').notNull(),
+    calls: integer('calls').notNull().default(0),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.day, t.feature] })],
+);
+
 export const invoices = pgTable(
   'invoices',
   {
