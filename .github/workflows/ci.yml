@@ -72,15 +72,23 @@ jobs:
           cp "$GITHUB_WORKSPACE"/e2e/*.mjs /tmp/pw/
       - name: End-to-end checks
         run: |
+          set +e
           cd /tmp/pw
           status=0
           for s in ui pos-inventory pos-offline fiscal; do
-            echo "::group::$s"
-            node $s.mjs | tee /tmp/$s.log || status=1
+            node $s.mjs > /tmp/$s.log 2>&1
+            rc=$?
+            echo "::group::$s (exit $rc, $(grep -c '^PASS' /tmp/$s.log) passed)"
+            cat /tmp/$s.log
             echo "::endgroup::"
-            # Failed checks show as annotations on the run
-            grep -E '^FAIL' /tmp/$s.log | head -20 | while read -r line; do echo "::error title=$s::$line"; done
-            grep -E 'Error|Timeout' /tmp/$s.log | head -3 | while read -r line; do echo "::error title=$s crash::$line"; done
+            if [ $rc -ne 0 ]; then
+              status=1
+              # Failed checks show as annotations on the run
+              grep -E '^FAIL' /tmp/$s.log | head -20 | while read -r line; do echo "::error title=$s::$line"; done
+              grep -E 'Error|Timeout' /tmp/$s.log | head -3 | while read -r line; do echo "::error title=$s crash::$line"; done
+            else
+              echo "::notice title=$s::$(grep -c '^PASS' /tmp/$s.log) checks passed"
+            fi
           done
           exit $status
       - if: failure()
