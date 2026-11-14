@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { inPersonMethods, isHealthType, paymentSettingsOf, type AppointmentStatus, type CustomerWithStats, type PaymentMethod, type PaymentStatus } from '@agenda/shared';
 import { useAccess, useAuth } from '../lib/auth';
-import { ErrorText, Loading, Modal, PageHeader, StatusBadge } from '../components/ui';
+import { ErrorText, Loading, Modal, PageHeader, StatusBadge, useShowMore } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { dateOnly, dateTime, money, toCents } from '../lib/format';
 import { CustomerFormModal } from './Customers';
@@ -79,6 +79,8 @@ export function CustomerDetailPage() {
     },
   });
 
+  const history = useShowMore(data?.appointments ?? [], 8, 'customer-history-more');
+  const paid = useShowMore(data?.payments ?? [], 8, 'customer-payments-more');
   if (isLoading || !data) return <Loading />;
 
   return (
@@ -131,8 +133,8 @@ export function CustomerDetailPage() {
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <section className="card lg:col-span-2">
           <h2 className="mb-3 font-semibold">{t('customers.history')} <span className="font-normal text-slate-400">({data.appointments.length})</span></h2>
-          <ul className="-mr-2 max-h-96 divide-y divide-slate-100 overflow-y-auto pr-2" data-testid="customer-history">
-            {data.appointments.map((a) => (
+          <ul className="divide-y divide-slate-100" data-testid="customer-history">
+            {history.shown.map((a) => (
               <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                 <div className="min-w-0">
                   <div className="font-medium">{a.serviceName}</div>
@@ -148,11 +150,12 @@ export function CustomerDetailPage() {
             ))}
             {data.appointments.length === 0 && <li className="py-2 text-sm text-slate-500">{t('common.none')}</li>}
           </ul>
+          {history.toggle}
         </section>
         <section className="card">
           <h2 className="mb-3 font-semibold">{t('customers.payments')} <span className="font-normal text-slate-400">({data.payments.length})</span></h2>
-          <ul className="-mr-2 max-h-96 divide-y divide-slate-100 overflow-y-auto pr-2 text-sm" data-testid="customer-payments">
-            {data.payments.map((p) => (
+          <ul className="divide-y divide-slate-100 text-sm" data-testid="customer-payments">
+            {paid.shown.map((p) => (
               <li key={p.id} className="flex justify-between py-2">
                 <div>
                   <div>{t(`methods.${p.method}`)}</div>
@@ -163,6 +166,7 @@ export function CustomerDetailPage() {
             ))}
             {data.payments.length === 0 && <li className="py-2 text-slate-500">{t('common.none')}</li>}
           </ul>
+          {paid.toggle}
         </section>
       </div>
 

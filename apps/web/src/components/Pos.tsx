@@ -927,10 +927,10 @@ export function ProductsTab() {
         ) : NONE,
     },
     {
-      key: 'minStock', label: t('pos.minStock'), className: R,
+      key: 'minStock', label: t('pos.minStock'), className: R, hidden: true,
       td: (p) => <EditableCell value={p.minStock == null ? '' : String(p.minStock)} display={p.minStock ?? NONE} parse={whole} allowEmpty onSave={(minStock) => saveField(p, { minStock })} canEdit={businessManager} inputMode="numeric" className="!w-20 text-right" testId="product-min" />,
     },
-    { key: 'trackStock', label: t('pos.trackStock'), td: (p) => yesNo(p, 'trackStock', t('pos.trackStock')) },
+    { key: 'trackStock', label: t('pos.trackStock'), hidden: true, td: (p) => yesNo(p, 'trackStock', t('pos.trackStock')) },
     {
       key: 'iva', label: 'IVA',
       td: (p) => (
@@ -946,7 +946,7 @@ export function ProductsTab() {
       ),
     },
     {
-      key: 'satKey', label: t('pos.satKey'), className: 'font-mono text-xs',
+      key: 'satKey', label: t('pos.satKey'), className: 'font-mono text-xs', hidden: true,
       td: (p) => <EditableCell value={p.satKey ?? ''} display={p.satKey ?? NONE} parse={(s) => (/^\d{8}$/.test(s.trim()) ? s.trim() : null)} allowEmpty onSave={(satKey) => saveField(p, { satKey })} canEdit={businessManager} inputMode="numeric" className="!w-28" testId="product-sat" />,
     },
     ...(health ? [{ key: 'rx', label: t('pos.rx'), td: (p: ProductDto) => yesNo(p, 'requiresPrescription', t('pos.rx')) }] : []),

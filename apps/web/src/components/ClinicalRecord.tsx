@@ -24,7 +24,7 @@ import { useAuth } from '../lib/auth';
 import { dateOnly, dateTime } from '../lib/format';
 import { SaveStatus, useAutoSave } from '../lib/autosave';
 import { ClinicalFieldInput, ClinicalFieldValue, ClinicalPatientContext, OdontogramInput } from './ClinicalFields';
-import { ErrorText, Modal } from './ui';
+import { ErrorText, Modal, useShowMore } from './ui';
 import { UpgradeNote, useFeature } from './Sales';
 
 export const useClinical = (customerId: string, enabled = true) =>
@@ -309,6 +309,7 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rec.data]);
 
+  const notesShown = useShowMore(rec.data?.notes.filter((n) => n.kind !== 'addendum') ?? [], 6, 'clinical-notes-more');
   if (!enabled) {
     return (
       <section className="card space-y-2">
@@ -369,8 +370,8 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
               <OdontogramInput value={d.odontogram} readOnly />
             </div>
           )}
-          <ul className="-mr-2 max-h-[32rem] space-y-2 overflow-y-auto pr-2" data-testid="clinical-notes">
-            {main.map((n) => (
+          <ul className="space-y-2" data-testid="clinical-notes">
+            {notesShown.shown.map((n) => (
               <li key={n.id} className="rounded-lg border border-slate-200 text-sm">
                 <button type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left" onClick={() => setViewing(viewing === n.id ? null : n.id)} aria-expanded={viewing === n.id}>
                   <span>
@@ -423,6 +424,7 @@ export function ClinicalRecordSection({ customerId }: { customerId: string }) {
             ))}
             {main.length === 0 && <li className="text-sm text-slate-500">{t('clinical.empty')}</li>}
           </ul>
+          {notesShown.toggle}
           <GrowthChart notes={main} />
           <StudiesSection customerId={customerId} studies={d.studies} enabled={d.studiesEnabled} />
           {(user?.role === 'owner' || user?.role === 'admin') && <AccessLog customerId={customerId} />}

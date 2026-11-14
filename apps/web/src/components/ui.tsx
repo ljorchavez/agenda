@@ -152,6 +152,20 @@ export function Empty({ children, compact }: { children: ReactNode; compact?: bo
   return <div className={`rounded-xl border border-dashed border-slate-300 text-center text-slate-500 ${compact ? 'p-6 text-sm' : 'p-10'}`}>{children}</div>;
 }
 
+/** Long lists show the first few with a "See all" toggle instead of a box that scrolls inside the page. */
+export function useShowMore<T>(rows: T[], first = 8, testId?: string) {
+  const { t } = useTranslation();
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, first);
+  const toggle =
+    rows.length > first ? (
+      <button type="button" className="mt-2 text-sm font-medium text-brand-700 hover:underline" onClick={() => setAll(!all)} data-testid={testId}>
+        {all ? t('common.showLess') : t('common.showAll', { count: rows.length })}
+      </button>
+    ) : null;
+  return { shown, toggle };
+}
+
 export function Loading() {
   const { t } = useTranslation();
   return <div className="p-6 text-slate-500">{t('common.loading')}</div>;

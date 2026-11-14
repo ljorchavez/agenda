@@ -76,7 +76,7 @@ export function LanguageSwitch({ className = '' }: { className?: string }) {
           /* ignore */
         }
       }}
-      className={`rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 ${className}`}
+      className={`inline-flex h-7 items-center rounded-md border border-slate-300 px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 ${className}`}
     >
       {next.toUpperCase()}
     </button>
@@ -118,9 +118,9 @@ export function Layout() {
             <div className="truncate font-medium text-slate-700">{user?.name}</div>
             <div className="truncate">{user?.email} · {t(`settings.role.${user?.role ?? 'staff'}`)}</div>
           </div>
-          <div className="flex items-center justify-between px-2">
+          <div className="flex items-center justify-between">
             <button
-              className="text-sm text-slate-600 hover:text-slate-900"
+              className="inline-flex h-7 items-center rounded-md px-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               onClick={() => {
                 logout();
                 navigate('/');

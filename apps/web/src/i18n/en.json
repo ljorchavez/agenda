@@ -1,5 +1,7 @@
 {
   "common": {
+    "showAll": "See all ({{count}})",
+    "showLess": "Show less",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
