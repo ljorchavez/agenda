@@ -49,6 +49,7 @@ await page.getByTestId('pos-new-ticket').click();
 ok('next customer opens a second, empty ticket', (await tabs.count()) === 2 && /^\$0(\.00)?$/.test(await total()), `${await tabs.count()} ${await total()}`);
 ok('the first ticket waits with its amount', /Cliente 1 · \$180/.test((await tabs.nth(0).textContent()) ?? ''), (await tabs.nth(0).textContent()) ?? '');
 await products.getByRole('button', { name: /Agua natural/ }).click();
+await page.getByTestId('pos-method-cash').click();
 await page.getByTestId('pos-received').fill('20');
 await page.getByTestId('pos-charge').click();
 await page.getByTestId('pos-done').waitFor({ timeout: 10000 });
@@ -59,6 +60,7 @@ await page.reload();
 await products.waitFor({ timeout: 15000 });
 ok('waiting tickets survive a reload', /180/.test(await total()), await total());
 // Picking a customer names the tab; switching away and back keeps them picked
+await page.getByTestId('pos-add-customer').click();
 await page.getByRole('searchbox', { name: /Cliente/ }).fill('Rosa');
 await page.getByRole('button', { name: /Rosa Martínez/ }).first().click();
 ok('the tab shows the customer name', /Rosa Martínez · \$180/.test((await tabs.nth(0).textContent()) ?? ''), (await tabs.nth(0).textContent()) ?? '');
@@ -138,6 +140,7 @@ if (SW) {
   await products.waitFor({ timeout: 15000 }).catch(() => {});
   ok('offline reload: the counter opens with the saved catalog', await products.getByRole('button', { name: /Agua natural/ }).isVisible().catch(() => false));
   await products.getByRole('button', { name: /Agua natural/ }).click().catch(() => {});
+  await page.getByTestId('pos-method-cash').click().catch(() => {});
   await page.getByTestId('pos-charge').click().catch(() => {});
   await page.getByTestId('pos-done-offline').waitFor({ timeout: 10000 }).catch(() => {});
   ok('and keeps charging', await page.getByTestId('pos-done-offline').isVisible().catch(() => false));
@@ -168,6 +171,7 @@ if (SW) {
   ok('"just charge" sells without opening the invoice', (await inv.getByTestId('invoice-modal').count()) === 0);
   await inv.getByRole('button', { name: /Nueva venta/ }).click();
   await prods.getByRole('button', { name: /Agua natural/ }).click();
+  await inv.getByTestId('pos-method-cash').click();
   await inv.getByTestId('pos-charge').click();
   await inv.getByTestId('pos-invoice-yes').click();
   await inv.getByTestId('invoice-modal').waitFor({ timeout: 10000 }).catch(() => {});

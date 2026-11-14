@@ -553,6 +553,7 @@ await page.getByTestId('pos-products').getByRole('button', { name: /Amoxicilina/
 ok('POS: prescription notice for a prescription medicine', await page.getByTestId('pos-rx').isVisible().catch(() => false));
 const posTotal = (await page.getByTestId('pos-total').textContent().catch(() => '')) ?? '';
 ok('POS: ticket total', /120/.test(posTotal), posTotal);
+await page.getByTestId('pos-method-cash').click().catch(() => {});
 await page.getByTestId('pos-received').fill('200').catch(() => {});
 ok('POS: change for cash', /80/.test((await page.getByTestId('pos-change').textContent().catch(() => '')) ?? ''));
 await page.getByTestId('pos-charge').click().catch(() => {});

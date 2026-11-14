@@ -1963,7 +1963,15 @@
       "notOnline": "Not found online: type the name."
     },
     "multHelp": "Quantity to add with the next click or scan (or type 10*code)",
-    "cartHint": "Double click the quantity or the amount to change them."
+    "cartHint": "Double click the quantity or the amount to change them.",
+    "methodShort": {
+      "cash": "Cash",
+      "credit_card": "Credit",
+      "debit_card": "Debit",
+      "transfer": "Transfer"
+    },
+    "pickMethod": "Choose how they pay",
+    "addCustomer": "Add customer"
   },
   "ticket": {
     "ticket": "Ticket",

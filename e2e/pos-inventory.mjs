@@ -257,6 +257,10 @@ await page.getByTestId('pos-remove-line').first().click();
 // Aceite has no stock (0): with "warn" it sells with a notice
 await page.getByTestId('pos-products').getByRole('button', { name: /Aceite para barba/ }).click();
 ok('out of stock can be sold with a notice', await page.getByTestId('pos-stock-warn').isVisible().catch(() => false));
+ok('no payment method chosen by default', (await page.getByTestId('pos-charge').isDisabled()) && /Elige cómo paga/.test((await page.getByTestId('pos-charge').textContent()) ?? ''));
+await page.getByTestId('pos-method-cash').click();
+const pb = await page.getByTestId('pos-charge').boundingBox();
+ok('Cobrar visible without scrolling', pb && pb.y + pb.height <= 900, JSON.stringify(pb));
 await page.getByTestId('pos-charge').click();
 await page.getByTestId('pos-done').waitFor({ timeout: 10000 }).catch(() => {});
 ok('sale without stock went through', await page.getByTestId('pos-done').isVisible().catch(() => false));

@@ -1963,7 +1963,15 @@
       "notOnline": "No lo encontramos en internet: escribe el nombre."
     },
     "multHelp": "Cantidad a agregar con el siguiente clic o escaneo (o escribe 10*código)",
-    "cartHint": "Doble clic en la cantidad o en el importe para cambiarlos."
+    "cartHint": "Doble clic en la cantidad o en el importe para cambiarlos.",
+    "methodShort": {
+      "cash": "Efectivo",
+      "credit_card": "Crédito",
+      "debit_card": "Débito",
+      "transfer": "Transferencia"
+    },
+    "pickMethod": "Elige cómo paga",
+    "addCustomer": "Agregar cliente"
   },
   "ticket": {
     "ticket": "Ticket",

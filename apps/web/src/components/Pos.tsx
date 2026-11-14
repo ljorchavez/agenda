@@ -221,7 +221,9 @@ export function PosTab() {
   const setLines = (fn: (ls: Line[]) => Line[]) => open.update((tk) => ({ ...tk, lines: fn(tk.lines) }));
   const setCustomerId = (id: string, c?: { name: string }) => open.update((tk) => ({ ...tk, customerId: id, customerName: id ? (c?.name ?? tk.customerName) : null }));
   const [q, setQ] = useState('');
-  const [method, setMethod] = useState<PosMethod>('cash');
+  // No method chosen until the seller picks one (avoids charging cash by mistake)
+  const [method, setMethod] = useState<PosMethod | null>(null);
+  const [showCustomer, setShowCustomer] = useState(false);
   const [split, setSplit] = useState<{ method: PosMethod; amount: string } | null>(null);
   const [received, setReceived] = useState('');
   const [free, setFree] = useState<{ name: string; price: string } | null>(null);
@@ -272,7 +274,7 @@ export function PosTab() {
 
   const total = saleTotal(lines);
   const splitCents = split ? Math.min(toCents(split.amount || '0'), total) : 0;
-  const pays = split ? [{ method, amountCents: total - splitCents }, { method: split.method, amountCents: splitCents }] : [{ method, amountCents: total }];
+  const pays = !method ? [] : split ? [{ method, amountCents: total - splitCents }, { method: split.method, amountCents: splitCents }] : [{ method, amountCents: total }];
   const cashDue = pays.filter((p) => p.method === 'cash').reduce((a, p) => a + p.amountCents, 0);
   const changeCents = received !== '' && cashDue > 0 ? toCents(received) - cashDue : 0;
 
@@ -333,7 +335,8 @@ export function PosTab() {
   const resetPayment = () => {
     setSplit(null);
     setReceived('');
-    setMethod('cash');
+    setMethod(null);
+    setShowCustomer(false);
   };
   const switchTo = (id: string) => {
     open.select(id);
@@ -508,13 +511,13 @@ export function PosTab() {
         )}
       </section>
 
-      <section className="card space-y-3 lg:col-span-2" data-testid="pos-ticket">
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="pos-tickets">
+      <section className="card flex flex-col gap-3 lg:sticky lg:top-4 lg:col-span-2 lg:max-h-[calc(100vh-2rem)]" data-testid="pos-ticket">
+        <div className="no-scrollbar -mx-1 flex shrink-0 items-center gap-1.5 overflow-x-auto px-1 pb-0.5" data-testid="pos-tickets">
           {open.tickets.map((tk, i) => {
             const isActive = tk.id === open.active.id;
             const sum = saleTotal(tk.lines);
             return (
-              <span key={tk.id} className={`inline-flex items-center rounded-lg border text-sm ${isActive ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-700'}`}>
+              <span key={tk.id} className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border text-sm ${isActive ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-700'}`}>
                 <button type="button" className="px-2.5 py-1 font-medium" onClick={() => switchTo(tk.id)} aria-pressed={isActive} data-testid="pos-ticket-tab">
                   {tk.customerId && tk.customerName ? (
                     <span className="inline-block max-w-[9rem] truncate align-bottom" title={tk.customerName} data-testid="pos-ticket-customer">{tk.customerName}</span>
@@ -536,7 +539,7 @@ export function PosTab() {
               </span>
             );
           })}
-          <button type="button" className="rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-sm text-brand-700 hover:border-brand-400" onClick={() => { open.add(); resetPayment(); }} data-testid="pos-new-ticket">
+          <button type="button" className="shrink-0 whitespace-nowrap rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-sm text-brand-700 hover:border-brand-400" onClick={() => { open.add(); resetPayment(); }} data-testid="pos-new-ticket">
             + {t('pos.tickets.new')}
           </button>
         </div>
@@ -544,7 +547,7 @@ export function PosTab() {
           <p className="text-sm text-slate-500">{open.tickets.length > 1 ? t('pos.tickets.empty') : t('pos.emptyTicket')}</p>
         ) : (
           <>
-          <ul ref={cartList} className="-mr-2 max-h-[40vh] divide-y divide-slate-100 overflow-y-auto pr-2 text-sm" data-testid="pos-cart">
+          <ul ref={cartList} className="-mr-2 max-h-[40vh] min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto pr-2 text-sm lg:max-h-none" data-testid="pos-cart">
             {lines.map((l) => (
               <li key={l.key} className="flex items-center gap-2 py-1.5">
                 <div className="min-w-0 flex-1">
@@ -593,82 +596,100 @@ export function PosTab() {
           {manager && <p className="-mt-1 text-[11px] text-slate-400">{t('pos.cartHint')}</p>}
           </>
         )}
-        {lines.some((l) => l.rx) && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-rx">⚕️ {t('pos.rxNotice')}</p>}
-        {shortStock && <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{t('pos.notEnough', { name: shortStock.name, n: shortStock.max })}</p>}
-        {lowWarn && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-stock-warn">{t('pos.stockWarn', { name: lowWarn.name, n: lowWarn.max })}</p>}
-        <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-lg font-semibold">
-          <span>{t('pos.total')}</span>
-          <span data-testid="pos-total">{money(total)}</span>
-        </div>
-        <div>
-          <span className="label">{t('pos.customer')}</span>
-          {offlineNow ? (
-            <p className="text-xs text-slate-500">{t('pos.offline.noCustomer')}</p>
-          ) : (
-            <CustomerPicker key={open.active.id} value={customerId} valueName={open.active.customerName} onChange={setCustomerId} forBooking={false} optional />
-          )}
-        </div>
-        <div>
-          <span className="label">{t('payments.method')}</span>
-          <div className="flex flex-wrap gap-2">
-            {POS_METHODS.map((m) => (
-              <button key={m} type="button" className={method === m ? 'btn-primary !py-1.5' : 'btn-secondary !py-1.5'} onClick={() => setMethod(m)} data-testid={`pos-method-${m}`}>
-                {t(`methods.${m}`)}
-              </button>
-            ))}
+        {lines.some((l) => l.rx) && <p className="shrink-0 rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-rx">⚕️ {t('pos.rxNotice')}</p>}
+        {shortStock && <p className="shrink-0 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{t('pos.notEnough', { name: shortStock.name, n: shortStock.max })}</p>}
+        {lowWarn && <p className="shrink-0 rounded-lg bg-amber-50 p-2 text-xs text-amber-900" data-testid="pos-stock-warn">{t('pos.stockWarn', { name: lowWarn.name, n: lowWarn.max })}</p>}
+        <div className="shrink-0 space-y-2.5 border-t border-slate-100 pt-2">
+          <div className="flex items-center justify-between text-lg font-semibold">
+            <span>{t('pos.total')}</span>
+            <span data-testid="pos-total">{money(total)}</span>
           </div>
-        </div>
-        {split ? (
-          <div className="flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-2">
-            <label className="text-sm">
-              <span className="label">{t('pos.splitAmount')}</span>
-              <input type="number" min={0} step="0.01" className="input !w-28" value={split.amount} onChange={(e) => setSplit({ ...split, amount: e.target.value })} />
-            </label>
-            <select aria-label={t('payments.method')} className="input !w-auto" value={split.method} onChange={(e) => setSplit({ ...split, method: e.target.value as PosMethod })}>
-              {POS_METHODS.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
-            </select>
-            <button type="button" className="text-sm text-slate-500 hover:underline" onClick={() => setSplit(null)}>{t('common.cancel')}</button>
-            <p className="w-full text-xs text-slate-600">{t('pos.splitRest', { amount: money(total - splitCents), method: t(`methods.${method}`) })}</p>
-          </div>
-        ) : (
-          <button type="button" className="text-sm text-brand-700 hover:underline" onClick={() => setSplit({ method: method === 'cash' ? 'debit_card' : 'cash', amount: '' })}>{t('pos.split')}</button>
-        )}
-        {cashDue > 0 && (
-          <div className="flex items-end gap-3">
-            <label className="text-sm">
-              <span className="label">{t('pos.received')}</span>
-              <input type="number" min={0} step="0.01" className="input !w-28" value={received} onChange={(e) => setReceived(e.target.value)} data-testid="pos-received" />
-            </label>
-            {received !== '' && (
-              <div className={`pb-2 text-sm font-semibold ${changeCents < 0 ? 'text-rose-700' : 'text-emerald-700'}`} data-testid="pos-change">
-                {changeCents < 0 ? t('pos.missing', { amount: money(-changeCents) }) : t('pos.change', { amount: money(changeCents) })}
-              </div>
-            )}
-          </div>
-        )}
-        <ErrorText error={charge.error} ns="pos" />
-        <button
-          type="button"
-          className="btn-primary w-full !py-3 text-base"
-          disabled={!lines.length || charge.isPending || Boolean(shortStock) || (cashDue > 0 && received !== '' && changeCents < 0)}
-          onClick={() => (invoicingOn ? setAskInvoice(true) : doCharge(false))}
-          data-testid="pos-charge"
-        >
-          {charge.isPending ? t('common.loading') : t('pos.charge', { amount: money(total) })}
-        </button>
-        {askInvoice && !charge.isPending && (
-          <div className="space-y-2 rounded-lg border border-brand-200 bg-brand-50 p-3" data-testid="pos-ask-invoice">
-            <p className="text-sm font-medium text-slate-800">{t('pos.askInvoice')}</p>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-primary" onClick={() => doCharge(true)} data-testid="pos-invoice-yes">{t('pos.invoiceYes')}</button>
-              <button type="button" className="btn-secondary" onClick={() => doCharge(false)} data-testid="pos-invoice-no">{t('pos.invoiceNo')}</button>
-              <button type="button" className="text-sm text-slate-500 hover:underline" onClick={() => setAskInvoice(false)}>{t('common.cancel')}</button>
+          <div>
+            <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label={t('payments.method')}>
+              {POS_METHODS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={method === m}
+                  title={t(`methods.${m}`)}
+                  className={`rounded-lg border px-1 py-2 text-xs font-medium leading-tight sm:text-sm ${method === m ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-brand-400'}`}
+                  onClick={() => {
+                    setMethod(m);
+                    if (m !== 'cash' && !split) setReceived('');
+                  }}
+                  data-testid={`pos-method-${m}`}
+                >
+                  {t(`pos.methodShort.${m}`)}
+                </button>
+              ))}
             </div>
+            {split ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm">
+                <input type="number" min={0} step="0.01" aria-label={t('pos.splitAmount')} placeholder={t('pos.splitAmount')} className="input !h-9 !w-28 !py-1" value={split.amount} onChange={(e) => setSplit({ ...split, amount: e.target.value })} />
+                <select aria-label={t('payments.method')} className="input !h-9 !w-auto !py-1" value={split.method} onChange={(e) => setSplit({ ...split, method: e.target.value as PosMethod })}>
+                  {POS_METHODS.map((m) => <option key={m} value={m}>{t(`methods.${m}`)}</option>)}
+                </select>
+                <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => setSplit(null)}>{t('common.cancel')}</button>
+                {method && <p className="w-full text-xs text-slate-600">{t('pos.splitRest', { amount: money(total - splitCents), method: t(`methods.${method}`) })}</p>}
+              </div>
+            ) : null}
           </div>
-        )}
-        <label className="flex items-center gap-2 text-xs text-slate-600">
-          <input type="checkbox" checked={autoPrint} onChange={(e) => toggleAutoPrint(e.target.checked)} data-testid="pos-autoprint" /> {t('ticket.autoPrint')}
-        </label>
+          {cashDue > 0 && (
+            <div className="flex items-center gap-3 text-sm">
+              <label className="flex items-center gap-2">
+                <span className="text-slate-600">{t('pos.received')}</span>
+                <input type="number" min={0} step="0.01" className="input !h-9 !w-28 !py-1" value={received} onChange={(e) => setReceived(e.target.value)} data-testid="pos-received" />
+              </label>
+              {received !== '' && (
+                <span className={`font-semibold ${changeCents < 0 ? 'text-rose-700' : 'text-emerald-700'}`} data-testid="pos-change">
+                  {changeCents < 0 ? t('pos.missing', { amount: money(-changeCents) }) : t('pos.change', { amount: money(changeCents) })}
+                </span>
+              )}
+            </div>
+          )}
+          <ErrorText error={charge.error} ns="pos" />
+          <button
+            type="button"
+            className="btn-primary w-full !py-3 text-base"
+            disabled={!lines.length || !method || charge.isPending || Boolean(shortStock) || (cashDue > 0 && received !== '' && changeCents < 0)}
+            onClick={() => (invoicingOn ? setAskInvoice(true) : doCharge(false))}
+            data-testid="pos-charge"
+          >
+            {charge.isPending ? t('common.loading') : lines.length && !method ? t('pos.pickMethod') : t('pos.charge', { amount: money(total) })}
+          </button>
+          {askInvoice && !charge.isPending && (
+            <div className="space-y-2 rounded-lg border border-brand-200 bg-brand-50 p-3" data-testid="pos-ask-invoice">
+              <p className="text-sm font-medium text-slate-800">{t('pos.askInvoice')}</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primary" onClick={() => doCharge(true)} data-testid="pos-invoice-yes">{t('pos.invoiceYes')}</button>
+                <button type="button" className="btn-secondary" onClick={() => doCharge(false)} data-testid="pos-invoice-no">{t('pos.invoiceNo')}</button>
+                <button type="button" className="text-sm text-slate-500 hover:underline" onClick={() => setAskInvoice(false)}>{t('common.cancel')}</button>
+              </div>
+            </div>
+          )}
+          {/* Optional extras, out of the way: customer, split, auto print */}
+          {(showCustomer || customerId) && !offlineNow && (
+            <div data-testid="pos-customer">
+              <CustomerPicker key={open.active.id} value={customerId} valueName={open.active.customerName} onChange={setCustomerId} forBooking={false} optional />
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            {!showCustomer && !customerId && (
+              offlineNow ? (
+                <span className="text-slate-500">{t('pos.offline.noCustomer')}</span>
+              ) : (
+                <button type="button" className="text-brand-700 hover:underline" onClick={() => setShowCustomer(true)} data-testid="pos-add-customer">+ {t('pos.addCustomer')}</button>
+              )
+            )}
+            {!split && (
+              <button type="button" className="text-brand-700 hover:underline" onClick={() => setSplit({ method: method === 'cash' ? 'debit_card' : 'cash', amount: '' })}>{t('pos.split')}</button>
+            )}
+            <label className="ml-auto flex items-center gap-1.5 text-slate-600">
+              <input type="checkbox" checked={autoPrint} onChange={(e) => toggleAutoPrint(e.target.checked)} data-testid="pos-autoprint" /> {t('ticket.autoPrint')}
+            </label>
+          </div>
+        </div>
       </section>
 
       {reg.pending.some((p) => p.locationId === locationId) && (
